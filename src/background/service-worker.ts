@@ -369,7 +369,7 @@ async function decideTool(callId: string, approved: boolean): Promise<unknown> {
   }
   try {
     if (call.namespace === "page" && pending.target) {
-      const currentTarget = await describePageTarget(call);
+      const currentTarget = await describePageTarget(call, true);
       const expected = JSON.stringify({
         label: pending.target.label,
         href: pending.target.href,

@@ -82,4 +82,62 @@ describe("packaged page executor", () => {
 
     expect(() => command({ action: "DESCRIBE", snapshotId: "old", refId: field?.refId })).toThrow(/stale/i);
   });
+
+  it("keeps references valid when an unrelated part of a dynamic page changes", async () => {
+    document.body.innerHTML = `<button id="save">Save</button><div id="live-region">Idle</div>`;
+    const inspection = command<{ snapshotId: string; elements: Array<{ refId: string; label: string }> }>({ action: "INSPECT" });
+    const save = inspection.elements.find((item) => item.label === "Save");
+
+    const liveRegion = document.getElementById("live-region") as HTMLDivElement;
+    liveRegion.className = "updated";
+    liveRegion.setAttribute("aria-live", "polite");
+    liveRegion.textContent = "Calendar refreshed";
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(command({ action: "DESCRIBE", snapshotId: inspection.snapshotId, refId: save?.refId })).toEqual(
+      expect.objectContaining({ label: "Save", tag: "button" }),
+    );
+  });
+
+  it("rebinds a uniquely identifiable control replaced by a reactive render", () => {
+    document.body.innerHTML = `<button id="save" aria-label="Save event">Save</button>`;
+    const inspection = command<{ snapshotId: string; elements: Array<{ refId: string; label: string }> }>({ action: "INSPECT" });
+    const save = inspection.elements.find((item) => item.label === "Save event");
+    const original = document.getElementById("save") as HTMLButtonElement;
+    const replacement = original.cloneNode(true) as HTMLButtonElement;
+    original.replaceWith(replacement);
+
+    const result = command<{ clicked: boolean }>({ action: "CLICK", snapshotId: inspection.snapshotId, refId: save?.refId });
+    expect(result.clicked).toBe(true);
+  });
+
+  it("fails closed when a changed target cannot be rebound unambiguously", () => {
+    document.body.innerHTML = `<button id="save" aria-label="Save event">Save</button>`;
+    const inspection = command<{ snapshotId: string; elements: Array<{ refId: string; label: string }> }>({ action: "INSPECT" });
+    const save = inspection.elements.find((item) => item.label === "Save event");
+    document.getElementById("save")?.remove();
+    document.body.insertAdjacentHTML("beforeend", `
+      <button id="save" aria-label="Save event">Save</button>
+      <button id="save" aria-label="Save event">Save</button>
+    `);
+
+    expect(() => command({ action: "CLICK", snapshotId: inspection.snapshotId, refId: save?.refId })).toThrow(/changed|no longer exists/i);
+  });
+
+  it("refreshes an expired reference only through confirmation revalidation", () => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(1_000);
+    document.body.innerHTML = `<button id="save" aria-label="Save event">Save</button>`;
+    const inspection = command<{ snapshotId: string; elements: Array<{ refId: string; label: string }> }>({ action: "INSPECT" });
+    const save = inspection.elements.find((item) => item.label === "Save event");
+    now.mockReturnValue(32_000);
+
+    expect(() => command({ action: "DESCRIBE", snapshotId: inspection.snapshotId, refId: save?.refId })).toThrow(/expired/i);
+    expect(command({ action: "REVALIDATE", snapshotId: inspection.snapshotId, refId: save?.refId })).toEqual(
+      expect.objectContaining({ label: "Save event", tag: "button" }),
+    );
+    expect(command({ action: "CLICK", snapshotId: inspection.snapshotId, refId: save?.refId })).toEqual(
+      expect.objectContaining({ clicked: true }),
+    );
+    now.mockRestore();
+  });
 });

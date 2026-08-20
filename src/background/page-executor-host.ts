@@ -123,13 +123,13 @@ export async function inspectActivePage(call: PageToolCall): Promise<unknown> {
   };
 }
 
-export async function describePageTarget(call: PageToolCall): Promise<PageTargetDescription> {
+export async function describePageTarget(call: PageToolCall, refreshExpired = false): Promise<PageTargetDescription> {
   const args = call.tool === "click"
     ? clickArgumentsSchema.parse(call.arguments)
     : call.tool === "keypress"
       ? keypressArgumentsSchema.parse(call.arguments)
       : submitArgumentsSchema.parse(call.arguments);
-  return withRef<PageTargetDescription>(args.ref, "DESCRIBE");
+  return withRef<PageTargetDescription>(args.ref, refreshExpired ? "REVALIDATE" : "DESCRIBE");
 }
 
 export async function executePageTool(call: PageToolCall): Promise<unknown> {

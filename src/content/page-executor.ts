@@ -4,6 +4,7 @@ type ExecutorCommand =
   | { type: "CODEX_PAGE_EXECUTOR"; action: "PING" }
   | { type: "CODEX_PAGE_EXECUTOR"; action: "INSPECT" }
   | { type: "CODEX_PAGE_EXECUTOR"; action: "DESCRIBE"; snapshotId: string; refId: string }
+  | { type: "CODEX_PAGE_EXECUTOR"; action: "REVALIDATE"; snapshotId: string; refId: string }
   | { type: "CODEX_PAGE_EXECUTOR"; action: "CLICK"; snapshotId: string; refId: string }
   | { type: "CODEX_PAGE_EXECUTOR"; action: "FILL"; snapshotId: string; refId: string; value: string; mode: "replace" | "append" | "clear" }
   | { type: "CODEX_PAGE_EXECUTOR"; action: "SELECT"; snapshotId: string; refId: string; value: string }
@@ -24,20 +25,22 @@ if (!executorGlobal.__codexPageExecutorInstalled) {
 
   const MAX_ELEMENTS = 80;
   const REF_TTL_MS = 30_000;
-  const refs = new Map<string, Element>();
+  const INTERACTIVE_SELECTOR = [
+    "a[href]",
+    "button",
+    "input:not([type='hidden'])",
+    "textarea",
+    "select",
+    "[role='button']",
+    "[role='link']",
+    "[role='menuitem']",
+    "[role='tab']",
+    "[role='checkbox']",
+    "[role='radio']",
+  ].join(",");
+  const refs = new Map<string, { element: Element; fingerprint: string }>();
   let snapshotId = "";
   let snapshotCreatedAt = 0;
-  let mutationGeneration = 0;
-  let snapshotGeneration = -1;
-
-  new MutationObserver(() => {
-    mutationGeneration += 1;
-  }).observe(document.documentElement, {
-    childList: true,
-    subtree: true,
-    attributes: true,
-    attributeFilter: ["disabled", "hidden", "aria-hidden", "aria-expanded", "style", "class"],
-  });
 
   function text(value: string | null | undefined, max = 500): string {
     return (value ?? "").replace(/\s+/g, " ").trim().slice(0, max);
@@ -173,15 +176,48 @@ if (!executorGlobal.__codexPageExecutorInstalled) {
     };
   }
 
-  function assertFresh(refId: string, expectedSnapshotId: string): Element {
+  function fingerprint(element: Element): string {
+    const input = element instanceof HTMLInputElement ? element : null;
+    const form = elementForm(element);
+    return JSON.stringify({
+      tag: element.tagName.toLowerCase(),
+      role: roleFor(element),
+      label: labelFor(element),
+      id: element.id,
+      name: element.getAttribute("name") ?? "",
+      ariaLabel: element.getAttribute("aria-label") ?? "",
+      inputType: input?.type ?? null,
+      href: safeHref(element) ?? null,
+      formAction: form?.action ?? null,
+      formMethod: form ? (form.method || "get").toUpperCase() : null,
+    });
+  }
+
+  function resolveRef(refId: string): Element {
+    const ref = refs.get(refId);
+    if (!ref) throw new Error("This page element no longer exists. Inspect the page again.");
+    if (ref.element.isConnected && fingerprint(ref.element) === ref.fingerprint) return ref.element;
+
+    // Reactive applications can replace a control without changing what it is.
+    // Rebind only when there is exactly one visible semantic match, so an
+    // unrelated rerender does not break the action or make the target ambiguous.
+    const matches = Array.from(document.querySelectorAll(INTERACTIVE_SELECTOR))
+      .filter(isVisible)
+      .filter((element) => fingerprint(element) === ref.fingerprint);
+    if (matches.length !== 1) throw new Error("This page element changed or no longer exists. Inspect the page again.");
+    ref.element = matches[0];
+    return ref.element;
+  }
+
+  function assertFresh(refId: string, expectedSnapshotId: string, refreshExpired = false): Element {
     if (!snapshotId || expectedSnapshotId !== snapshotId) throw new Error("This page element reference is stale. Inspect the page again.");
-    if (Date.now() - snapshotCreatedAt > REF_TTL_MS || snapshotGeneration !== mutationGeneration) {
-      refs.clear();
-      throw new Error("The page changed and this element reference expired. Inspect the page again.");
+    if (Date.now() - snapshotCreatedAt > REF_TTL_MS) {
+      if (!refreshExpired) throw new Error("This page element reference expired. Inspect the page again.");
+      const element = resolveRef(refId);
+      snapshotCreatedAt = Date.now();
+      return element;
     }
-    const element = refs.get(refId);
-    if (!element || !element.isConnected) throw new Error("This page element no longer exists. Inspect the page again.");
-    return element;
+    return resolveRef(refId);
   }
 
   function assertInteractable(element: Element): void {
@@ -207,24 +243,10 @@ if (!executorGlobal.__codexPageExecutorInstalled) {
     refs.clear();
     snapshotId = crypto.randomUUID();
     snapshotCreatedAt = Date.now();
-    snapshotGeneration = mutationGeneration;
-    const selector = [
-      "a[href]",
-      "button",
-      "input:not([type='hidden'])",
-      "textarea",
-      "select",
-      "[role='button']",
-      "[role='link']",
-      "[role='menuitem']",
-      "[role='tab']",
-      "[role='checkbox']",
-      "[role='radio']",
-    ].join(",");
-    const candidates = Array.from(document.querySelectorAll(selector)).filter(isVisible);
+    const candidates = Array.from(document.querySelectorAll(INTERACTIVE_SELECTOR)).filter(isVisible);
     const elements = candidates.slice(0, MAX_ELEMENTS).map((element, index) => {
       const refId = `e${index + 1}`;
-      refs.set(refId, element);
+      refs.set(refId, { element, fingerprint: fingerprint(element) });
       const { form: _form, ...details } = describe(element, refId);
       void _form;
       const value =
@@ -264,6 +286,10 @@ if (!executorGlobal.__codexPageExecutorInstalled) {
         return inspect();
       case "DESCRIBE": {
         const element = assertFresh(command.refId, command.snapshotId);
+        return describe(element, command.refId);
+      }
+      case "REVALIDATE": {
+        const element = assertFresh(command.refId, command.snapshotId, true);
         return describe(element, command.refId);
       }
       case "CLICK": {
