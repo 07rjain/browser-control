@@ -9,6 +9,7 @@ type ExecutorCommand =
   | { type: "CODEX_PAGE_EXECUTOR"; action: "FILL"; snapshotId: string; refId: string; value: string; mode: "replace" | "append" | "clear" }
   | { type: "CODEX_PAGE_EXECUTOR"; action: "SELECT"; snapshotId: string; refId: string; value: string }
   | { type: "CODEX_PAGE_EXECUTOR"; action: "CHECK"; snapshotId: string; refId: string; checked: boolean }
+  | { type: "CODEX_PAGE_EXECUTOR"; action: "DRAG"; snapshotId: string; sourceRefId: string; targetRefId: string }
   | { type: "CODEX_PAGE_EXECUTOR"; action: "KEYPRESS"; snapshotId: string; refId: string; key: string }
   | { type: "CODEX_PAGE_EXECUTOR"; action: "SCROLL"; direction: "up" | "down" | "top" | "bottom"; amount?: number }
   | { type: "CODEX_PAGE_EXECUTOR"; action: "SCROLL_ELEMENT"; snapshotId: string; refId: string }
@@ -38,6 +39,15 @@ if (!executorGlobal.__codexPageExecutorInstalled) {
     "[role='checkbox']",
     "[role='radio']",
   ].join(",");
+  const DRAG_SELECTOR = [
+    "[draggable='true']",
+    "[aria-dropeffect]",
+    "[role='gridcell']",
+    "[role='listitem']",
+    "[role='option']",
+    "[role='treeitem']",
+  ].join(",");
+  const REFERENCED_SELECTOR = `${INTERACTIVE_SELECTOR},${DRAG_SELECTOR}`;
   const refs = new Map<string, { element: Element; fingerprint: string }>();
   let snapshotId = "";
   let snapshotCreatedAt = 0;
@@ -201,7 +211,7 @@ if (!executorGlobal.__codexPageExecutorInstalled) {
     // Reactive applications can replace a control without changing what it is.
     // Rebind only when there is exactly one visible semantic match, so an
     // unrelated rerender does not break the action or make the target ambiguous.
-    const matches = Array.from(document.querySelectorAll(INTERACTIVE_SELECTOR))
+    const matches = Array.from(document.querySelectorAll(REFERENCED_SELECTOR))
       .filter(isVisible)
       .filter((element) => fingerprint(element) === ref.fingerprint);
     if (matches.length !== 1) throw new Error("This page element changed or no longer exists. Inspect the page again.");
@@ -243,7 +253,12 @@ if (!executorGlobal.__codexPageExecutorInstalled) {
     refs.clear();
     snapshotId = crypto.randomUUID();
     snapshotCreatedAt = Date.now();
-    const candidates = Array.from(document.querySelectorAll(INTERACTIVE_SELECTOR)).filter(isVisible);
+    const primary = Array.from(document.querySelectorAll(INTERACTIVE_SELECTOR)).filter(isVisible);
+    const primarySet = new Set(primary);
+    const dragCandidates = Array.from(document.querySelectorAll(DRAG_SELECTOR))
+      .filter(isVisible)
+      .filter((element) => !primarySet.has(element));
+    const candidates = [...primary, ...dragCandidates];
     const elements = candidates.slice(0, MAX_ELEMENTS).map((element, index) => {
       const refId = `e${index + 1}`;
       refs.set(refId, { element, fingerprint: fingerprint(element) });
@@ -336,6 +351,21 @@ if (!executorGlobal.__codexPageExecutorInstalled) {
         if (element.checked !== command.checked) element.click();
         if (element.checked !== command.checked) throw new Error("The page rejected the requested checked state.");
         return { checked: element.checked, label: labelFor(element) };
+      }
+      case "DRAG": {
+        const source = assertFresh(command.sourceRefId, command.snapshotId);
+        const target = assertFresh(command.targetRefId, command.snapshotId);
+        assertInteractable(source);
+        assertInteractable(target);
+        if (source === target) throw new Error("Drag source and target must be different controls.");
+        const dataTransfer = new DataTransfer();
+        const eventInit: DragEventInit = { bubbles: true, cancelable: true, dataTransfer };
+        source.dispatchEvent(new DragEvent("dragstart", eventInit));
+        target.dispatchEvent(new DragEvent("dragenter", eventInit));
+        target.dispatchEvent(new DragEvent("dragover", eventInit));
+        target.dispatchEvent(new DragEvent("drop", eventInit));
+        source.dispatchEvent(new DragEvent("dragend", eventInit));
+        return { dragged: true, source: labelFor(source), target: labelFor(target) };
       }
       case "KEYPRESS": {
         const element = assertFresh(command.refId, command.snapshotId) as HTMLElement;

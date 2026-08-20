@@ -51,7 +51,9 @@ function request(method) {
 try {
   const status = await request("bridge.status");
   await request("account.read");
+  const catalog = await request("models.list");
   if (status.connected !== true) throw new Error("Installed host did not connect.");
+  if (!Array.isArray(catalog.models)) throw new Error("Installed host returned an invalid model catalog.");
   process.stdout.write("Installed native host passed a Chrome-like environment smoke test.\n");
 } finally {
   host.kill("SIGTERM");

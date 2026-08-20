@@ -132,6 +132,17 @@ const dynamicTools = [
       },
       {
         type: "function",
+        name: "drag",
+        description: "Drag one visible page control onto another using two fresh references from the same inspection. File dragging and arbitrary coordinates are not supported.",
+        inputSchema: {
+          type: "object",
+          properties: { ...idempotencyProperty, sourceRef: pageRefSchema, targetRef: pageRefSchema },
+          required: ["idempotencyKey", "sourceRef", "targetRef"],
+          additionalProperties: false,
+        },
+      },
+      {
+        type: "function",
         name: "keypress",
         description: "Send one allowlisted navigation key to a fresh element reference. Enter requires confirmation because it may submit.",
         inputSchema: { type: "object", properties: { ...idempotencyProperty, ref: pageRefSchema, key: { type: "string", enum: ["Enter", "Escape", "Tab", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"] } }, required: ["idempotencyKey", "ref", "key"], additionalProperties: false },
@@ -318,9 +329,21 @@ async function handleRequest(message) {
       return appRequest("account/login/cancel", { loginId: message.params?.loginId });
     case "auth.logout":
       return appRequest("account/logout", undefined);
+    case "models.list": {
+      const result = await appRequest("model/list", { limit: 100, includeHidden: false });
+      return {
+        models: (result.data ?? []).map((model) => ({
+          id: model.model,
+          name: model.displayName,
+          description: model.description,
+          isDefault: Boolean(model.isDefault),
+        })),
+      };
+    }
     case "chat.start": {
       const result = await appRequest("thread/start", {
         ...safeThreadParams(),
+        model: message.params?.model,
         ephemeral: false,
         historyMode: "legacy",
         dynamicTools,
@@ -331,6 +354,7 @@ async function handleRequest(message) {
       const result = await appRequest("thread/resume", {
         threadId: message.params?.threadId,
         ...safeThreadParams(),
+        model: message.params?.model,
         excludeTurns: true,
         dynamicTools,
       });
@@ -342,6 +366,7 @@ async function handleRequest(message) {
         clientUserMessageId: message.params?.clientMessageId,
         input: [{ type: "text", text: message.params?.text, text_elements: [] }],
         approvalPolicy: "never",
+        model: message.params?.model,
       });
       return { turnId: result.turn.id };
     }

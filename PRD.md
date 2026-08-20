@@ -195,38 +195,41 @@ Chrome documents that `chrome.tabs` can create, modify, and rearrange tabs, whil
 - Store only the minimum transcript data needed for MVP continuity; provide “Clear local data.”
 - Do not store raw authentication credentials in extension storage.
 - Include settings for theme (`system`, `light`, `dark`) and whether page attachments include readable body text by default; the safe default is off.
+- Load the models available to the signed-in Codex account and let the user choose a model. The selection is stored locally and applies to the next message without requiring a new conversation.
 - Do not add analytics or telemetry in the MVP.
 
 ### Epic G — Supervised page control (post-MVP, approved P0)
 
 #### User stories
 
-- As a user, I can explicitly allow browser actions on the current site for one active task.
+- As a user, I can explicitly allow browser actions on the current site once and keep that exact-origin grant until I clear local data or revoke it in Chrome.
 - As a user, I can ask Codex to inspect visible controls, follow an ordinary same-origin link, scroll, navigate backward or forward, and wait for a page to load.
 - As a user, I can ask Codex to fill non-sensitive fields, choose options, check controls, and submit a reviewed form.
 - As a user, I can see every requested and executed action, stop the task, and approve or reject consequential actions.
 
 #### Allowed page tools
 
-- `page.inspect`, `page.click`, `page.fill`, `page.select`, `page.check`, `page.keypress`, `page.scroll`, `page.history`, `page.wait`, and `page.submit`.
+- `page.inspect`, `page.click`, `page.fill`, `page.select`, `page.check`, `page.drag`, `page.keypress`, `page.scroll`, `page.history`, `page.wait`, and `page.submit`.
 - Tools use strict runtime schemas, opaque short-lived element references, bounded inputs, exact-origin matching, idempotency keys, and a maximum of 20 page actions per turn.
 - The packaged isolated-world page executor is the only component that touches the DOM. Model output cannot provide JavaScript, selectors, XPath, coordinates, or unsafe URLs.
 
 #### Permission and confirmation policy
 
 - A page tool cannot execute until the user grants optional host access for the exact active `http` or `https` origin.
-- A browser-control grant is revoked when the active browser task ends. Existing independently retained attachment permission is not silently broadened.
-- Ordinary same-origin links may be followed automatically. Buttons, external links, downloads, new-tab targets, Enter keypresses, tab closing, and form submission require a fresh one-action confirmation.
+- An approved browser-control grant is remembered only for the exact origin. Attachment-only permission does not silently become browser-control consent. The user can revoke remembered grants through Clear local data or Chrome site-access controls.
+- Ordinary same-origin navigation, menu buttons, field edits, scrolling, and drag-and-drop may run automatically under the remembered origin grant. External/new-tab links and actions recognized as consequential require confirmation. Downloads remain unsupported.
+- Form submission, Enter that may submit, tab closing, and recognized Save/Send/Publish/Delete/Book/Schedule actions require a fresh one-action confirmation.
 - Purchases, financial transactions, passwords, authentication codes, payment data, private keys, CAPTCHAs, security bypasses, arbitrary downloads, and browser-setting changes are refused.
 - Form confirmation shows the destination and non-sensitive visible values. Approval expires when the tab, origin, form, values, or element reference changes.
 
 #### Acceptance criteria
 
 - Inspection returns no more than 80 visible interactive elements and never returns sensitive field values.
-- Element references expire after 30 seconds, page mutation, navigation, origin change, tab closure, or task completion.
+- Element references expire after 30 seconds, navigation, origin change, or tab closure. Unrelated DOM mutations do not invalidate them; uniquely identifiable controls may be rebound after a reactive render.
 - Waits time out within eight seconds and unsupported frames or protected pages return honest errors.
 - The activity log records requested, awaiting permission/confirmation, running, succeeded, failed, rejected, canceled, and stale states.
-- Stop cancels the Codex turn, pending page action, pending confirmation, and task-scoped permission.
+- Tool activity is grouped with the request that caused it, expands while running, and collapses to a summary dropdown after completion.
+- Stop cancels the Codex turn, pending page action, and pending confirmation. It does not revoke an exact-origin grant the user chose to remember.
 - Service-worker suspension, reconnect, or retry cannot silently repeat a completed action.
 - Page tools are redeclared when a Codex thread resumes; authentication remains the ADR 0001 ChatGPT browser flow.
 - The Chrome validation matrix in `next_set_off_feature.md` passes before private-beta sign-off.

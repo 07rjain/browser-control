@@ -33,6 +33,18 @@ export const selectArgumentsSchema = idempotencySchema
 export const checkArgumentsSchema = idempotencySchema
   .extend({ ref: elementRefSchema, checked: z.boolean() })
   .strict();
+export const dragArgumentsSchema = idempotencySchema
+  .extend({ sourceRef: elementRefSchema, targetRef: elementRefSchema })
+  .strict()
+  .superRefine((value, context) => {
+    if (
+      value.sourceRef.tabId !== value.targetRef.tabId ||
+      value.sourceRef.origin !== value.targetRef.origin ||
+      value.sourceRef.snapshotId !== value.targetRef.snapshotId
+    ) {
+      context.addIssue({ code: "custom", message: "Drag source and target must come from the same page inspection." });
+    }
+  });
 export const keypressArgumentsSchema = idempotencySchema
   .extend({
     ref: elementRefSchema,
@@ -68,6 +80,7 @@ export const pageToolNameSchema = z.enum([
   "fill",
   "select",
   "check",
+  "drag",
   "keypress",
   "scroll",
   "history",
@@ -97,6 +110,7 @@ export type PageToolArguments =
   | z.infer<typeof fillArgumentsSchema>
   | z.infer<typeof selectArgumentsSchema>
   | z.infer<typeof checkArgumentsSchema>
+  | z.infer<typeof dragArgumentsSchema>
   | z.infer<typeof keypressArgumentsSchema>
   | z.infer<typeof scrollArgumentsSchema>
   | z.infer<typeof historyArgumentsSchema>
@@ -115,6 +129,8 @@ export function parsePageToolArguments(call: PageToolCall): PageToolArguments {
       return selectArgumentsSchema.parse(call.arguments);
     case "check":
       return checkArgumentsSchema.parse(call.arguments);
+    case "drag":
+      return dragArgumentsSchema.parse(call.arguments);
     case "keypress":
       return keypressArgumentsSchema.parse(call.arguments);
     case "scroll":

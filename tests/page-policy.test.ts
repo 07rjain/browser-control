@@ -38,10 +38,12 @@ function target(overrides: Partial<PageTargetDescription> = {}): PageTargetDescr
 }
 
 describe("page action policy", () => {
-  it("allows only ordinary same-origin links without confirmation", () => {
+  it("allows ordinary navigation and non-form controls without confirmation", () => {
     expect(decidePageAction(call("click", {}), target())).toEqual({ decision: "allow" });
     expect(decidePageAction(call("click", {}), target({ sameOrigin: false }))).toMatchObject({ decision: "confirm" });
-    expect(decidePageAction(call("click", {}), target({ tag: "button", role: "button" }))).toMatchObject({ decision: "confirm" });
+    expect(decidePageAction(call("click", {}), target({ tag: "button", role: "button", href: undefined }))).toEqual({ decision: "allow" });
+    expect(decidePageAction(call("click", {}), target({ tag: "button", role: "button", label: "Save event", href: undefined }))).toMatchObject({ decision: "confirm" });
+    expect(decidePageAction(call("click", {}), target({ tag: "button", role: "button", href: undefined, formAssociated: true, submitter: true }))).toMatchObject({ decision: "confirm" });
   });
 
   it("always confirms form submission and Enter", () => {

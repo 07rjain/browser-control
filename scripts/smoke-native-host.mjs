@@ -51,8 +51,12 @@ function request(method, params) {
 try {
   const status = await request("bridge.status");
   const account = await request("account.read");
+  const catalog = await request("models.list");
   if (status.connected !== true) throw new Error("Bridge did not report a connected state.");
   if (account.account !== null) throw new Error("Isolated smoke-test home unexpectedly contained an account.");
+  if (!Array.isArray(catalog.models) || catalog.models.some((model) => !model.id || !model.name)) {
+    throw new Error("Codex returned an invalid model catalog.");
+  }
   if (process.env.LIVE_BROWSER_LOGIN === "1") {
     const login = await request("auth.login");
     if (login.type !== "chatgpt") throw new Error("Unexpected browser-login response type.");

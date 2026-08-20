@@ -7,6 +7,17 @@ type Listener = (message: unknown, sender: chrome.runtime.MessageSender, sendRes
 let listener: Listener;
 
 beforeAll(async () => {
+  class TestDataTransfer {}
+  class TestDragEvent extends Event {
+    readonly dataTransfer: unknown;
+
+    constructor(type: string, init?: EventInit & { dataTransfer?: unknown }) {
+      super(type, init);
+      this.dataTransfer = init?.dataTransfer;
+    }
+  }
+  vi.stubGlobal("DataTransfer", TestDataTransfer);
+  vi.stubGlobal("DragEvent", TestDragEvent);
   vi.stubGlobal("chrome", {
     runtime: {
       id: "extension-id",
@@ -139,5 +150,35 @@ describe("packaged page executor", () => {
       expect.objectContaining({ clicked: true }),
     );
     now.mockRestore();
+  });
+
+  it("dispatches a semantic drag sequence between inspected controls", () => {
+    document.body.innerHTML = `
+      <div id="source" draggable="true" aria-label="Draft event">Draft</div>
+      <div id="target" role="gridcell" aria-label="Sunday column">Sunday</div>
+    `;
+    const inspection = command<{ snapshotId: string; elements: Array<{ refId: string; label: string }> }>({ action: "INSPECT" });
+    const source = inspection.elements.find((item) => item.label === "Draft event");
+    const target = inspection.elements.find((item) => item.label === "Sunday column");
+    const sourceElement = document.getElementById("source") as HTMLDivElement;
+    const targetElement = document.getElementById("target") as HTMLDivElement;
+    const events: string[] = [];
+    sourceElement.addEventListener("dragstart", (event) => events.push(event.type));
+    targetElement.addEventListener("dragenter", (event) => events.push(event.type));
+    targetElement.addEventListener("dragover", (event) => events.push(event.type));
+    targetElement.addEventListener("drop", (event) => events.push(event.type));
+    sourceElement.addEventListener("dragend", (event) => events.push(event.type));
+    const hitTest = vi.spyOn(document, "elementFromPoint")
+      .mockReturnValueOnce(sourceElement)
+      .mockReturnValueOnce(targetElement);
+
+    expect(command({
+      action: "DRAG",
+      snapshotId: inspection.snapshotId,
+      sourceRefId: source?.refId,
+      targetRefId: target?.refId,
+    })).toEqual(expect.objectContaining({ dragged: true, source: "Draft event", target: "Sunday column" }));
+    expect(events).toEqual(["dragstart", "dragenter", "dragover", "drop", "dragend"]);
+    hitTest.mockRestore();
   });
 });

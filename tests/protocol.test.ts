@@ -103,4 +103,46 @@ describe("extension boundary validation", () => {
     });
     expect(() => parsePageToolArguments(scroll)).toThrow(/requires a reference/i);
   });
+
+  it("accepts drag references only from the same inspected page", () => {
+    const ref = { id: "e1", snapshotId: "snapshot-1", tabId: 1, origin: "https://example.com" };
+    const drag = pageToolCallSchema.parse({
+      requestId: 9,
+      threadId: "thread-1",
+      turnId: "turn-1",
+      callId: "call-6",
+      namespace: "page",
+      tool: "drag",
+      arguments: { idempotencyKey: "drag-0000001", sourceRef: ref, targetRef: { ...ref, id: "e2" } },
+    });
+    expect(parsePageToolArguments(drag)).toMatchObject({ sourceRef: { id: "e1" }, targetRef: { id: "e2" } });
+
+    const invalid = pageToolCallSchema.parse({
+      requestId: 10,
+      threadId: "thread-1",
+      turnId: "turn-1",
+      callId: "call-7",
+      namespace: "page",
+      tool: "drag",
+      arguments: { idempotencyKey: "drag-0000002", sourceRef: ref, targetRef: { ...ref, id: "e2", tabId: 2 } },
+    });
+    expect(() => parsePageToolArguments(invalid)).toThrow(/same page inspection/i);
+  });
+
+  it("accepts model selection for thread and turn requests", () => {
+    expect(uiRequestSchema.safeParse({ type: "MODELS_READ", requestId: crypto.randomUUID() }).success).toBe(true);
+    expect(uiRequestSchema.safeParse({
+      type: "CHAT_START",
+      requestId: crypto.randomUUID(),
+      model: "gpt-5.6-terra",
+    }).success).toBe(true);
+    expect(uiRequestSchema.safeParse({
+      type: "CHAT_SEND",
+      requestId: crypto.randomUUID(),
+      threadId: "thread-1",
+      clientMessageId: crypto.randomUUID(),
+      text: "Hello",
+      model: "gpt-5.6-terra",
+    }).success).toBe(true);
+  });
 });

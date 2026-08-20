@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { PageAttachment, SidebarEvent, UiResponse } from "../shared/protocol";
+import { groupToolStatuses, summarizeToolStatuses, type ToolStatus } from "./activity";
 
 type AuthState = "checking" | "signed-out" | "authenticating" | "ready" | "offline" | "error";
 type Theme = "system" | "light" | "dark";
@@ -41,16 +42,6 @@ interface ToolApproval {
   danger?: boolean;
 }
 
-interface ToolStatus {
-  callId: string;
-  namespace?: string;
-  tool: string;
-  status: string;
-  timestamp?: number;
-  origin?: string;
-  error?: string;
-}
-
 interface ToolPermission {
   callId: string;
   origin: string;
@@ -61,6 +52,14 @@ interface PersistedState {
   threadId: string | null;
   messages: ChatMessage[];
   theme: Theme;
+  selectedModel: string;
+}
+
+interface ModelOption {
+  id: string;
+  name: string;
+  description: string;
+  isDefault: boolean;
 }
 
 interface RetryPayload {
@@ -68,7 +67,7 @@ interface RetryPayload {
   outboundText: string;
 }
 
-const INITIAL_STATE: PersistedState = { threadId: null, messages: [], theme: "system" };
+const INITIAL_STATE: PersistedState = { threadId: null, messages: [], theme: "system", selectedModel: "" };
 const STORAGE_KEY = "codexSidebarState";
 const PAGE_ORIGINS_KEY = "codexSidebarGrantedPageOrigins";
 const TASK_ORIGINS_KEY = "codexSidebarTaskControlOrigins";
@@ -114,6 +113,31 @@ function compactPlan(plan: string | null): string {
   return plan.charAt(0).toUpperCase() + plan.slice(1);
 }
 
+function ToolActivity({ statuses, complete }: { statuses: ToolStatus[]; complete: boolean }) {
+  const [open, setOpen] = useState(!complete);
+  const summary = summarizeToolStatuses(statuses);
+
+  return (
+    <details className={`tool-activity ${summary.failed ? "tool-activity-failed" : ""}`} open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
+      <summary>
+        <span className="activity-icon" aria-hidden="true">{complete ? (summary.failed ? "!" : "✓") : "⋯"}</span>
+        <span>{summary.actionCount} browser {summary.actionCount === 1 ? "action" : "actions"}</span>
+        <strong>{complete ? (summary.failed ? "Needs attention" : "Completed") : "Working"}</strong>
+      </summary>
+      <ol className="tool-steps">
+        {statuses.map((status, index) => (
+          <li key={`${status.callId}-${status.status}-${status.timestamp ?? index}`}>
+            <span>Browser · {status.namespace ? `${status.namespace}.` : ""}{status.tool}</span>
+            <strong>{status.status}</strong>
+            {status.origin && <small>{status.origin}</small>}
+            {status.error && <small className="tool-step-error">{status.error}</small>}
+          </li>
+        ))}
+      </ol>
+    </details>
+  );
+}
+
 export default function App() {
   const [authState, setAuthState] = useState<AuthState>("checking");
   const [account, setAccount] = useState<Account | null>(null);
@@ -126,6 +150,8 @@ export default function App() {
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [theme, setTheme] = useState<Theme>("system");
+  const [selectedModel, setSelectedModel] = useState("");
+  const [models, setModels] = useState<ModelOption[]>([]);
   const [toolApproval, setToolApproval] = useState<ToolApproval | null>(null);
   const [toolPermission, setToolPermission] = useState<ToolPermission | null>(null);
   const [toolStatuses, setToolStatuses] = useState<ToolStatus[]>([]);
@@ -161,6 +187,7 @@ export default function App() {
         setThreadId(state.threadId);
         setMessages(Array.isArray(state.messages) ? state.messages.map((message) => ({ ...message, streaming: false })) : []);
         setTheme(state.theme ?? "system");
+        setSelectedModel(state.selectedModel ?? "");
         setHydrated(true);
       })
       .finally(() => void refreshAccount());
@@ -180,15 +207,22 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (authState !== "ready") return;
+    void sendRequest<{ models: ModelOption[] }>({ type: "MODELS_READ" })
+      .then((result) => setModels(result.models))
+      .catch(() => setModels([]));
+  }, [authState]);
+
+  useEffect(() => {
     if (!hydrated) return;
     const retainedMessages = messages.slice(-100).map((message) => ({
       ...message,
       text: message.text.slice(0, 100_000),
     }));
     void chrome.storage.local.set({
-      [STORAGE_KEY]: { threadId, messages: retainedMessages, theme } satisfies PersistedState,
+      [STORAGE_KEY]: { threadId, messages: retainedMessages, theme, selectedModel } satisfies PersistedState,
     });
-  }, [hydrated, messages, theme, threadId]);
+  }, [hydrated, messages, selectedModel, theme, threadId]);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -196,7 +230,7 @@ export default function App() {
 
   useEffect(() => {
     transcriptRef.current?.scrollTo({ top: transcriptRef.current.scrollHeight, behavior: "smooth" });
-  }, [messages, toolApproval, toolPermission, toolStatuses]);
+  }, [messages, toolApproval, toolPermission]);
 
   useEffect(() => {
     const listener = (message: SidebarEvent) => {
@@ -354,14 +388,14 @@ export default function App() {
     if (threadId && threadReadyRef.current) return threadId;
     if (threadId) {
       try {
-        const resumed = await sendRequest<{ threadId: string }>({ type: "CHAT_RESUME", threadId });
+        const resumed = await sendRequest<{ threadId: string }>({ type: "CHAT_RESUME", threadId, model: selectedModel || undefined });
         threadReadyRef.current = true;
         return resumed.threadId;
       } catch {
         // The stored thread may have been cleared by Codex; start a replacement below.
       }
     }
-    const created = await sendRequest<{ threadId: string }>({ type: "CHAT_START" });
+    const created = await sendRequest<{ threadId: string }>({ type: "CHAT_START", model: selectedModel || undefined });
     setThreadId(created.threadId);
     threadReadyRef.current = true;
     return created.threadId;
@@ -393,6 +427,7 @@ export default function App() {
         threadId: activeThreadId,
         text: payload.outboundText,
         clientMessageId: messageId,
+        model: selectedModel || undefined,
       });
       if (stopRequestedRef.current) {
         await sendRequest({ type: "BROWSER_TASK_CANCEL", threadId: activeThreadId, turnId: result.turnId }).catch(() => undefined);
@@ -445,8 +480,6 @@ export default function App() {
   };
 
   const newChat = () => {
-    if (streaming && !confirm("Stop the active response and start a new chat?")) return;
-    if (!streaming && messages.length > 0 && !confirm("Start a new chat and clear this local transcript?")) return;
     if (streaming) void stop();
     setThreadId(null);
     threadReadyRef.current = false;
@@ -478,6 +511,7 @@ export default function App() {
     setThreadId(null);
     setMessages([]);
     setTheme("system");
+    setSelectedModel("");
     setMenuOpen(false);
     setPendingPageOrigin(null);
     setToolStatuses([]);
@@ -525,6 +559,7 @@ export default function App() {
     () => (account?.email ? `Ready for ${account.email}` : "Ready when you are"),
     [account],
   );
+  const activitiesByTurn = useMemo(() => groupToolStatuses(toolStatuses), [toolStatuses]);
 
   if (authState !== "ready") {
     return (
@@ -587,6 +622,16 @@ export default function App() {
                 <option value="dark">Dark</option>
               </select>
             </label>
+            <label>
+              Model
+              <select value={selectedModel} onChange={(event) => setSelectedModel(event.target.value)}>
+                <option value="">Codex default</option>
+                {models.map((model) => (
+                  <option key={model.id} value={model.id}>{model.name}{model.isDefault ? " · Default" : ""}</option>
+                ))}
+              </select>
+            </label>
+            <p className="menu-hint">Model changes apply to your next message.</p>
             <button onClick={() => void clearLocalData()}>Clear local data</button>
             <button onClick={() => void signOut()}>Sign out</button>
           </section>
@@ -605,46 +650,51 @@ export default function App() {
             </div>
           </section>
         ) : (
-          messages.map((message) => (
-            <article key={message.id} className={`message message-${message.role} ${message.failed ? "message-failed" : ""}`}>
-              <span className="message-role">{message.role === "user" ? "You" : "Codex"}</span>
-              {message.role === "assistant" ? (
-                message.text ? (
-                  <ReactMarkdown
-                    remarkPlugins={[remarkGfm]}
-                    components={{
-                      a: ({ children, ...props }) => (
-                        <a {...props} target="_blank" rel="noreferrer noopener">{children}</a>
-                      ),
-                    }}
-                  >
-                    {message.text}
-                  </ReactMarkdown>
-                ) : (
-                  <span className="thinking"><i /><i /><i /><span className="sr-only">Codex is thinking</span></span>
-                )
-              ) : (
-                <p>{message.text}</p>
-              )}
-            </article>
-          ))
+          messages.map((message) => {
+            const activity = message.role === "assistant"
+              ? activitiesByTurn.get(message.id) ?? (message.streaming && activeTurnId ? activitiesByTurn.get(activeTurnId) : undefined)
+              : undefined;
+            return (
+              <div key={message.id} className="turn-block">
+                <article className={`message message-${message.role} ${message.failed ? "message-failed" : ""}`}>
+                  <span className="message-role">{message.role === "user" ? "You" : "Codex"}</span>
+                  {message.role === "assistant" ? (
+                    message.text ? (
+                      <ReactMarkdown
+                        remarkPlugins={[remarkGfm]}
+                        components={{
+                          a: ({ children, ...props }) => (
+                            <a {...props} target="_blank" rel="noreferrer noopener">{children}</a>
+                          ),
+                        }}
+                      >
+                        {message.text}
+                      </ReactMarkdown>
+                    ) : (
+                      <span className="thinking"><i /><i /><i /><span className="sr-only">Codex is thinking</span></span>
+                    )
+                  ) : (
+                    <p>{message.text}</p>
+                  )}
+                </article>
+                {activity && (
+                  <ToolActivity
+                    key={`${message.id}-${String(!message.streaming && activeTurnId !== message.id)}`}
+                    statuses={activity}
+                    complete={!message.streaming && activeTurnId !== message.id}
+                  />
+                )}
+              </div>
+            );
+          })
         )}
-
-        {toolStatuses.map((tool) => (
-          <div key={`${tool.callId}-${tool.status}-${tool.timestamp ?? 0}`} className="tool-status">
-            <span>Browser · {tool.namespace ? `${tool.namespace}.` : ""}{tool.tool}</span>
-            <strong>{tool.status}</strong>
-            {tool.origin && <small className="tool-origin">{tool.origin}</small>}
-            {tool.error && <small>{tool.error}</small>}
-          </div>
-        ))}
 
         {toolPermission && (
           <section className="approval-card permission-card" role="alertdialog" aria-labelledby="permission-title">
             <p className="eyebrow">Site access required</p>
             <h2 id="permission-title">Allow browser actions here?</h2>
             <p>{toolPermission.origin}</p>
-            <small>Access is limited to this site and revoked when the current browser task ends.</small>
+            <small>Access is limited to this exact site and remembered until you clear it in settings or Chrome.</small>
             <div className="approval-actions">
               <button className="secondary-button" onClick={() => void decidePagePermission(false)}>Cancel</button>
               <button className="primary-button" onClick={() => void decidePagePermission(true)}>Allow this site</button>

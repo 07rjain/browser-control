@@ -1,6 +1,7 @@
 import {
   checkArgumentsSchema,
   clickArgumentsSchema,
+  dragArgumentsSchema,
   elementRefSchema,
   fillArgumentsSchema,
   historyArgumentsSchema,
@@ -154,6 +155,19 @@ export async function executePageTool(call: PageToolCall): Promise<unknown> {
     case "check": {
       const args = checkArgumentsSchema.parse(call.arguments);
       return withRef(args.ref, "CHECK", { checked: args.checked });
+    }
+    case "drag": {
+      const args = dragArgumentsSchema.parse(call.arguments);
+      const target = await authorizedTarget();
+      assertRefTarget(args.sourceRef, target);
+      assertRefTarget(args.targetRef, target);
+      await ensureExecutor(target);
+      return sendExecutor(target.tabId, {
+        action: "DRAG",
+        snapshotId: args.sourceRef.snapshotId,
+        sourceRefId: args.sourceRef.id,
+        targetRefId: args.targetRef.id,
+      });
     }
     case "keypress": {
       const args = keypressArgumentsSchema.parse(call.arguments);

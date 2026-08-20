@@ -95,6 +95,7 @@ The first implementation should expose a small typed tool namespace rather than 
 | `page.click` | Activate one visible element by a fresh reference. | Automatic for ordinary navigation; confirmation when consequential. |
 | `page.fill` | Set or clear a non-sensitive form field. | Automatic, visibly logged; sensitive categories refused. |
 | `page.select` | Choose an option, checkbox, or radio value. | Automatic, visibly logged. |
+| `page.drag` | Drag one visible referenced control onto another referenced control from the same inspection. | Automatic, visibly logged. |
 | `page.keypress` | Send one allowlisted navigation key to a referenced element. | Automatic, visibly logged. |
 | `page.scroll` | Scroll viewport, container, or referenced element. | Automatic. |
 | `page.history` | Move backward or forward in the active tab. | Automatic. |
@@ -115,6 +116,8 @@ Inspection, waiting, and reading visible non-sensitive state may run automatical
 
 Scrolling, ordinary clicks, opening menus, changing a local field, and navigating backward or forward may run automatically while remaining visible in the activity log. The user can stop the task at any time.
 
+Exact-origin access is requested once and remembered until the user clears local data or revokes it in Chrome. Activity for each request is shown inline with that request and collapses into a reviewable dropdown when the turn finishes.
+
 #### Level 3 — Consequential external action
 
 The extension must pause for a just-in-time confirmation before it submits or triggers an action that sends data, creates an appointment, publishes content, changes an account, deletes data, uploads a file, communicates with another person, or commits a transaction.
@@ -129,6 +132,7 @@ The extension must refuse:
 - Entering or handling passwords, one-time codes, payment-card data, government identifiers, private keys, or recovery secrets.
 - CAPTCHA solving or attempts to evade anti-bot, rate-limit, access-control, or security systems.
 - Download execution, browser-setting changes, extension installation, permission escalation outside the approved flow, or arbitrary code execution.
+- Dragging files, dragging across frames or tabs, coordinate-only dragging, and native operating-system drag surfaces.
 - Unattended background automation, cross-origin crawling, or actions initiated remotely by other agents or devices.
 - Deceptive actions, impersonation, spam, mass messaging, or bulk account creation.
 

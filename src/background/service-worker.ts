@@ -35,7 +35,6 @@ const COMPLETED_KEY = "codexSidebarCompletedToolCalls";
 const ACTIVITY_KEY = "codexSidebarBrowserActivities";
 const TASK_KEY = "codexSidebarBrowserTasks";
 const TASK_ORIGINS_KEY = "codexSidebarTaskControlOrigins";
-const ATTACHMENT_ORIGINS_KEY = "codexSidebarGrantedPageOrigins";
 const accountResponseSchema = z.object({ account: accountSchema, requiresOpenaiAuth: z.boolean() });
 const loginResponseSchema = z.object({
   type: z.literal("chatgpt"),
@@ -44,6 +43,14 @@ const loginResponseSchema = z.object({
 });
 const threadResponseSchema = z.object({ threadId: z.string().min(1), model: z.string().min(1) });
 const turnResponseSchema = z.object({ turnId: z.string().min(1) });
+const modelsResponseSchema = z.object({
+  models: z.array(z.object({
+    id: z.string().min(1),
+    name: z.string().min(1),
+    description: z.string(),
+    isDefault: z.boolean(),
+  })),
+});
 
 type BrowserToolCall = DynamicToolCall | PageToolCall;
 
@@ -80,9 +87,8 @@ interface PendingApproval {
 let nativePort: chrome.runtime.Port | null = null;
 const pendingNative = new Map<string, PendingNativeRequest>();
 const pendingApprovals = new Map<string, PendingApproval>();
-const pendingPermissions = new Map<string, { call: PageToolCall; permissionWasPresent: boolean }>();
+const pendingPermissions = new Map<string, { call: PageToolCall }>();
 const pendingPrompts = new Map<string, { type: "approval" | "permission"; data: Record<string, unknown> }>();
-const taskGrantedOrigins = new Set<string>();
 
 function broadcast(event: string, data?: unknown): void {
   const message: SidebarEvent = { source: "codex-sidebar-background", event, data };
@@ -286,7 +292,18 @@ async function handlePageCall(call: PageToolCall, announce: boolean): Promise<vo
     task.authorizedOrigin !== controlOrigin.origin ||
     task.authorizedOriginPattern !== controlOrigin.originPattern
   ) {
-    throw new PageControlPermissionRequiredError(controlOrigin.origin, controlOrigin.originPattern);
+    const storedOrigins = await chrome.storage.local.get(TASK_ORIGINS_KEY);
+    const rememberedOrigins = Array.isArray(storedOrigins[TASK_ORIGINS_KEY])
+      ? (storedOrigins[TASK_ORIGINS_KEY] as string[])
+      : [];
+    const remembered = rememberedOrigins.includes(controlOrigin.originPattern) &&
+      await chrome.permissions.contains({ origins: [controlOrigin.originPattern] });
+    if (!remembered) throw new PageControlPermissionRequiredError(controlOrigin.origin, controlOrigin.originPattern);
+    task.authorizedOrigin = controlOrigin.origin;
+    task.authorizedOriginPattern = controlOrigin.originPattern;
+    task.authorizedTabId = controlOrigin.tabId;
+    task.updatedAt = Date.now();
+    await saveTask(task);
   }
   let target: PageTargetDescription | undefined;
   if (["click", "keypress", "submit"].includes(call.tool)) target = await describePageTarget(call);
@@ -339,8 +356,7 @@ async function handleDynamicToolCall(input: unknown): Promise<void> {
     else await handlePageCall(call, true);
   } catch (error) {
     if (error instanceof PageControlPermissionRequiredError && call.namespace === "page") {
-      const permissionWasPresent = await chrome.permissions.contains({ origins: [error.originPattern] });
-      pendingPermissions.set(call.callId, { call, permissionWasPresent });
+      pendingPermissions.set(call.callId, { call });
       await storeActivity(call, "awaiting permission", { origin: error.origin });
       const prompt = { callId: call.callId, origin: error.origin, originPattern: error.originPattern };
       pendingPrompts.set(call.callId, { type: "permission", data: prompt });
@@ -399,7 +415,7 @@ async function decideTool(callId: string, approved: boolean): Promise<unknown> {
 async function continueAfterPermission(callId: string, originPattern: string, granted: boolean): Promise<unknown> {
   const pending = pendingPermissions.get(callId);
   if (!pending) throw new Error("This browser permission request is no longer pending.");
-  const { call, permissionWasPresent } = pending;
+  const { call } = pending;
   pendingPermissions.delete(callId);
   pendingPrompts.delete(callId);
   const expected = await currentControlOrigin();
@@ -419,34 +435,18 @@ async function continueAfterPermission(callId: string, originPattern: string, gr
   task.authorizedTabId = expected.tabId;
   task.updatedAt = Date.now();
   await saveTask(task);
-  if (!permissionWasPresent) {
-    taskGrantedOrigins.add(originPattern);
-    const storedOrigins = await chrome.storage.local.get(TASK_ORIGINS_KEY);
-    const currentOrigins = Array.isArray(storedOrigins[TASK_ORIGINS_KEY])
-      ? (storedOrigins[TASK_ORIGINS_KEY] as string[])
-      : [];
-    await chrome.storage.local.set({ [TASK_ORIGINS_KEY]: [...new Set([...currentOrigins, originPattern])] });
-  }
+  const storedOrigins = await chrome.storage.local.get(TASK_ORIGINS_KEY);
+  const currentOrigins = Array.isArray(storedOrigins[TASK_ORIGINS_KEY])
+    ? (storedOrigins[TASK_ORIGINS_KEY] as string[])
+    : [];
+  await chrome.storage.local.set({ [TASK_ORIGINS_KEY]: [...new Set([...currentOrigins, originPattern])] });
   await handlePageCall(call, false);
   return { continued: true };
-}
-
-async function revokeTaskOrigins(): Promise<void> {
-  const stored = await chrome.storage.local.get([TASK_ORIGINS_KEY, ATTACHMENT_ORIGINS_KEY]);
-  const recorded = Array.isArray(stored[TASK_ORIGINS_KEY]) ? (stored[TASK_ORIGINS_KEY] as string[]) : [];
-  const attachmentOrigins = new Set(
-    Array.isArray(stored[ATTACHMENT_ORIGINS_KEY]) ? (stored[ATTACHMENT_ORIGINS_KEY] as string[]) : [],
-  );
-  const origins = [...new Set([...taskGrantedOrigins, ...recorded])].filter((origin) => !attachmentOrigins.has(origin));
-  taskGrantedOrigins.clear();
-  if (origins.length > 0) await chrome.permissions.remove({ origins }).catch(() => false);
-  await chrome.storage.local.remove(TASK_ORIGINS_KEY);
 }
 
 async function finishBrowserTurn(turnId: string): Promise<void> {
   const tasks = await storedList<BrowserTaskState>(TASK_KEY);
   await chrome.storage.session.set({ [TASK_KEY]: tasks.filter((task) => task.turnId !== turnId) });
-  await revokeTaskOrigins();
 }
 
 async function cancelBrowserTask(threadId: string, turnId?: string): Promise<void> {
@@ -478,7 +478,6 @@ async function cancelBrowserTask(threadId: string, turnId?: string): Promise<voi
       await finishTool(item.call, false, { error: "The user stopped this browser task." }, "canceled").catch(() => undefined);
     }
   }
-  await revokeTaskOrigins();
 }
 
 async function routeRequest(input: unknown): Promise<unknown> {
@@ -491,10 +490,11 @@ async function routeRequest(input: unknown): Promise<unknown> {
     case "AUTH_LOGIN": return loginResponseSchema.parse(await requestNative("auth.login"));
     case "AUTH_CANCEL": return requestNative("auth.cancel", { loginId: request.loginId });
     case "AUTH_LOGOUT": return requestNative("auth.logout");
-    case "CHAT_START": return threadResponseSchema.parse(await requestNative("chat.start"));
-    case "CHAT_RESUME": return threadResponseSchema.parse(await requestNative("chat.resume", { threadId: request.threadId }));
+    case "MODELS_READ": return modelsResponseSchema.parse(await requestNative("models.list"));
+    case "CHAT_START": return threadResponseSchema.parse(await requestNative("chat.start", { model: request.model }));
+    case "CHAT_RESUME": return threadResponseSchema.parse(await requestNative("chat.resume", { threadId: request.threadId, model: request.model }));
     case "CHAT_SEND":
-      return turnResponseSchema.parse(await requestNative("chat.send", { threadId: request.threadId, text: request.text, clientMessageId: request.clientMessageId }));
+      return turnResponseSchema.parse(await requestNative("chat.send", { threadId: request.threadId, text: request.text, clientMessageId: request.clientMessageId, model: request.model }));
     case "CHAT_INTERRUPT": return requestNative("chat.interrupt", { threadId: request.threadId, turnId: request.turnId });
     case "BROWSER_TASK_CANCEL": return cancelBrowserTask(request.threadId, request.turnId);
     case "PAGE_ATTACH": return captureCurrentPage();
@@ -534,10 +534,8 @@ async function enableSidePanel(): Promise<void> {
 
 chrome.runtime.onInstalled.addListener(() => {
   void enableSidePanel();
-  void revokeTaskOrigins();
 });
 chrome.runtime.onStartup.addListener(() => {
   void enableSidePanel();
-  void revokeTaskOrigins();
 });
 void enableSidePanel();

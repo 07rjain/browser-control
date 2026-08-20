@@ -2,7 +2,7 @@
 
 A private-development Chrome side-panel extension powered by the user's ChatGPT Codex subscription through the official Codex App Server interface.
 
-The repository contains the private-development MVP plus the approved supervised browser-control milestone: sidebar chat, managed ChatGPT sign-in, explicit current-page attachment, five tab tools, and ten typed page tools. It does not contain remote control, unattended automation, arbitrary JavaScript/selectors, connectors, analytics, or ChatGPT cookie scraping.
+The repository contains the private-development MVP plus the approved supervised browser-control milestone: sidebar chat, managed ChatGPT sign-in, model selection, explicit current-page attachment, five tab tools, and eleven typed page tools. It does not contain remote control, unattended automation, arbitrary JavaScript/selectors, connectors, analytics, or ChatGPT cookie scraping.
 
 ## Requirements
 
@@ -56,13 +56,14 @@ After rebuilding, select **Reload** for the extension on `chrome://extensions`.
 
 ## Supervised browser actions
 
-Ask Codex to inspect or navigate the active `http` or `https` page. The first page action for a site pauses until you select **Allow this site** in the sidebar and approve Chrome's exact-origin permission prompt.
+Ask Codex to inspect or navigate the active `http` or `https` page. The first page action for a site pauses until you select **Allow this site** in the sidebar and approve Chrome's exact-origin permission prompt. That exact-origin grant is remembered until you choose **Clear local data** or revoke it in Chrome.
 
 - Inspection returns at most 80 visible interactive controls using opaque references that expire after 30 seconds or any meaningful page change.
 - Ordinary same-origin links may run automatically. Buttons, external/new-tab links, Enter, tab closing, and form submission require confirmation.
 - Fill/select/check tools refuse passwords, payment fields, authentication codes, private keys, and similar sensitive controls.
-- Stop cancels the model turn and pending browser task. Task-scoped site access is revoked when that turn ends.
-- The activity log records requested, permission/confirmation, running, success, failure, rejection, cancellation, and stale-reference states.
+- Stop cancels the model turn and pending browser task without silently revoking remembered site choices.
+- Activity is grouped beneath the request that caused it and collapses into a dropdown when the request completes.
+- Semantic `page.drag` supports visible DOM controls from one inspection. File, cross-frame, cross-tab, coordinate-only, and native drag surfaces are unsupported.
 
 Unsupported surfaces such as protected Chrome pages, cross-origin frames, canvas-only controls, browser dialogs, and closed shadow roots return capability errors. Connectors are intentionally deferred.
 

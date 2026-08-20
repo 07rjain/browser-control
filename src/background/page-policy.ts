@@ -27,8 +27,10 @@ export type PageActionDecision =
   | { decision: "confirm"; title: string; description: string }
   | { decision: "refuse"; reason: string };
 
+const consequentialClickPattern = /\b(save|send|publish|post|delete|remove|book|schedule|invite|confirm|create account|sign up)\b/i;
+
 export function decidePageAction(call: PageToolCall, target?: PageTargetDescription): PageActionDecision {
-  if (["inspect", "fill", "select", "check", "scroll", "history", "wait"].includes(call.tool)) {
+  if (["inspect", "fill", "select", "check", "drag", "scroll", "history", "wait"].includes(call.tool)) {
     return { decision: "allow" };
   }
 
@@ -70,6 +72,9 @@ export function decidePageAction(call: PageToolCall, target?: PageTargetDescript
       return { decision: "refuse", reason: "This link does not have a safe http or https destination." };
     }
     if (target.tag === "a" && target.sameOrigin && !target.newTab && !target.download && !target.formAssociated) {
+      return { decision: "allow" };
+    }
+    if (!target.formAssociated && !target.href && !target.newTab && !target.download && !consequentialClickPattern.test(target.label)) {
       return { decision: "allow" };
     }
     return {
