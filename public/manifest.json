@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "Codex Sidebar MVP",
+  "description": "Chat with Codex beside the current page using your ChatGPT subscription.",
+  "version": "0.1.0",
+  "minimum_chrome_version": "114",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAjtH4mf8P/yTUcTb3iuiW+5LqRzDF4LpnXYD2BA7u2/yGgBLP82+0ejeGz3ckyXJ1Gm9P0D20s2V1bZtQihkRQg43dCr76ll35bL9t7yJ9bOPHgB5s0pR0TNZ6LoNdmSu5lisxUIhHeKlEvT8MxloirMv4HDe2wDsViMpbok3rC2QqXRhJFhZkpmDMiVL8+6pNDaGL7ZjEwow4t9mVPxkmQRkTw1vETeGacChrkb7FlVbqmCWXe/+lalBL4bX3vjUg/T3scgI3cvRmqL+FKfjp/9eTQeruItnYXwjSu2zMqRxxcbBiYZZufMtUQuCgqgLlLSaeMsmQppdpD+Qy/eJ6wIDAQAB",
+  "permissions": [
+    "activeTab",
+    "nativeMessaging",
+    "scripting",
+    "sidePanel",
+    "storage",
+    "tabs"
+  ],
+  "optional_host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Open Codex Sidebar"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'none'; base-uri 'none'"
+  }
+}
