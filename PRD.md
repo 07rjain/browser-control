@@ -1,6 +1,6 @@
 # Product Requirements Document: Codex Sidebar MVP
 
-- Status: MVP implemented locally; user-assisted signed-in browser validation pending
+- Status: MVP implemented locally; supervised browser-control milestone approved and implemented, Chrome validation pending
 - Owner: `codex-chrome-extension-manager`
 - Last updated: 2026-08-20
 - Target platform: Chromium browsers supporting Manifest V3 and `chrome.sidePanel`
@@ -19,7 +19,7 @@ Using an AI assistant while browsing usually requires switching applications, ma
 
 Build a Manifest V3 extension whose toolbar action toggles a chat UI in Chrome's side panel. A user authenticates with their ChatGPT account for Codex subscription access, starts or resumes a local chat, optionally attaches current-page context, and can ask the assistant to perform a tightly limited set of tab actions with clear confirmation for destructive actions.
 
-The MVP is a local, user-driven experience. Remote agents, remote browser control, unattended automation, arbitrary page manipulation, and a general-purpose browser agent are explicitly deferred.
+The original MVP is a local, user-driven chat, attachment, and tab-tool experience. The approved next milestone adds a narrow set of supervised page controls while remote agents, remote control, arbitrary scripting, unattended background automation, and general-purpose computer control remain deferred.
 
 ### Target users
 
@@ -197,6 +197,40 @@ Chrome documents that `chrome.tabs` can create, modify, and rearrange tabs, whil
 - Include settings for theme (`system`, `light`, `dark`) and whether page attachments include readable body text by default; the safe default is off.
 - Do not add analytics or telemetry in the MVP.
 
+### Epic G — Supervised page control (post-MVP, approved P0)
+
+#### User stories
+
+- As a user, I can explicitly allow browser actions on the current site for one active task.
+- As a user, I can ask Codex to inspect visible controls, follow an ordinary same-origin link, scroll, navigate backward or forward, and wait for a page to load.
+- As a user, I can ask Codex to fill non-sensitive fields, choose options, check controls, and submit a reviewed form.
+- As a user, I can see every requested and executed action, stop the task, and approve or reject consequential actions.
+
+#### Allowed page tools
+
+- `page.inspect`, `page.click`, `page.fill`, `page.select`, `page.check`, `page.keypress`, `page.scroll`, `page.history`, `page.wait`, and `page.submit`.
+- Tools use strict runtime schemas, opaque short-lived element references, bounded inputs, exact-origin matching, idempotency keys, and a maximum of 20 page actions per turn.
+- The packaged isolated-world page executor is the only component that touches the DOM. Model output cannot provide JavaScript, selectors, XPath, coordinates, or unsafe URLs.
+
+#### Permission and confirmation policy
+
+- A page tool cannot execute until the user grants optional host access for the exact active `http` or `https` origin.
+- A browser-control grant is revoked when the active browser task ends. Existing independently retained attachment permission is not silently broadened.
+- Ordinary same-origin links may be followed automatically. Buttons, external links, downloads, new-tab targets, Enter keypresses, tab closing, and form submission require a fresh one-action confirmation.
+- Purchases, financial transactions, passwords, authentication codes, payment data, private keys, CAPTCHAs, security bypasses, arbitrary downloads, and browser-setting changes are refused.
+- Form confirmation shows the destination and non-sensitive visible values. Approval expires when the tab, origin, form, values, or element reference changes.
+
+#### Acceptance criteria
+
+- Inspection returns no more than 80 visible interactive elements and never returns sensitive field values.
+- Element references expire after 30 seconds, page mutation, navigation, origin change, tab closure, or task completion.
+- Waits time out within eight seconds and unsupported frames or protected pages return honest errors.
+- The activity log records requested, awaiting permission/confirmation, running, succeeded, failed, rejected, canceled, and stale states.
+- Stop cancels the Codex turn, pending page action, pending confirmation, and task-scoped permission.
+- Service-worker suspension, reconnect, or retry cannot silently repeat a completed action.
+- Page tools are redeclared when a Codex thread resumes; authentication remains the ADR 0001 ChatGPT browser flow.
+- The Chrome validation matrix in `next_set_off_feature.md` passes before private-beta sign-off.
+
 ## 5. User experience
 
 ### Primary journey
@@ -324,6 +358,14 @@ Do not request persistent required `<all_urls>`, `history`, `bookmarks`, `downlo
 - Review manifest permissions, bundle contents, logs, CSP, and local bridge exposure.
 - Run end-to-end acceptance testing in an unpacked Chrome profile.
 
+### Phase 4 — Supervised page control
+
+- Add strict `page.*` schemas, code-side action policy, task state, cancellation, idempotency, activity history, and generalized confirmations.
+- Add exact-origin permission prompts and the packaged persistent page executor.
+- Deliver inspect/click/scroll/history/wait first, then fields and confirmed submission.
+- Validate stale references, sensitive-field refusal, permission revocation, Stop, form preview expiry, and Chrome MV3 restart behavior.
+- Connectors remain blocked until this phase passes and a separate connector PRD is approved.
+
 ### MVP release criterion
 
 The MVP is ready for a private development beta when all P0 acceptance criteria pass, no critical/high security findings remain, authentication installation is documented, and the manager plus browser-validation specialist have verified the primary journey in Chrome.
@@ -348,7 +390,7 @@ Chrome Web Store submission is a separate, explicitly authorized post-MVP activi
 | Broad tab/page access erodes trust | High | Medium | Use explicit attachments, `activeTab`, visible indicators, an allowlisted tool set, and action confirmations. |
 | Prompt injection causes unsafe actions | High | High | Treat page/model content as untrusted; enforce code-side policies and confirmations independent of model instructions. |
 | Service-worker suspension interrupts streaming | Medium | Medium | Keep streaming transport in the appropriate durable component and implement reconnect/resume semantics. |
-| Scope expands into remote control/general automation | High | High | Enforce the MVP non-goals and require a PRD revision before adding those capabilities. |
+| Scope expands into remote control/general automation | High | High | Enforce the supervised allowlist and require a PRD revision before adding remote, arbitrary, or unattended capabilities. |
 
 ## 11. Open questions
 
@@ -367,8 +409,8 @@ The following require a new or revised PRD and separate security review:
 
 - Remote access from other agents or devices.
 - Agent Bus task routing.
-- General page clicking, typing, form filling, downloads, and workflows.
-- Multi-step autonomous browser plans.
+- Connectors for Calendar, Gmail, contacts, or other services.
+- Remote or unattended browser plans initiated outside the active user task.
 - Cross-device conversation sync.
 - Additional Chromium platforms and other browser engines.
 - Store publication, telemetry, billing, organization controls, and managed deployment.

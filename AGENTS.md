@@ -49,18 +49,19 @@ Agent IDs are routing metadata supplied by the user. If the active runtime canno
 
 ## Product definition
 
-The repository contains the Chromium **Codex Sidebar MVP**. The approved working requirements are in `PRD.md`; treat that file as the product scope and acceptance-criteria source of truth.
+The repository contains the Chromium **Codex Sidebar**, built on the completed MVP and now implementing the approved supervised browser-control milestone. Treat `PRD.md` as the product source of truth and `next_set_off_feature.md` as the detailed page-control specification.
 
-### MVP-only directive
+### Approved scope directive
 
-- Build only the MVP defined in `PRD.md`.
-- The MVP is a Manifest V3 side-panel chat with supported ChatGPT/Codex authentication, explicit current-page attachment, and the narrow allowlisted local tab tools defined in the PRD.
-- Do not implement remote agents, Agent Bus product integration, remote browser control, unattended automation, general DOM control, arbitrary scripting, store publication, telemetry, or other post-MVP features.
-- A new idea is not part of the current build merely because it appears in the roadmap. Adding it requires an explicit user decision and a PRD update.
+- Preserve the implemented MVP: Manifest V3 side-panel chat, supported ChatGPT/Codex authentication, explicit current-page attachment, and the five allowlisted tab tools.
+- The approved next milestone adds only the typed, user-supervised `page.*` tools in `next_set_off_feature.md`: inspect, click, fill, select, check, allowlisted keypress, scroll, history navigation, bounded wait, and confirmed form submission.
+- Page actions require an exact-origin user grant, opaque short-lived element references, code-side policy, activity visibility, cancellation, and confirmation for consequential actions.
+- Do not implement remote agents, Agent Bus product integration, remote browser control, arbitrary JavaScript/selectors/coordinates, `debugger`/CDP access, unattended background automation, purchases, secret entry, store publication, telemetry, or connectors.
+- Connectors are a later, separately approved phase after supervised browser-control validation. A new idea is not in scope without an explicit user decision and PRD update.
 
 ### PRD status
 
-- Status: MVP implemented locally; signed-in Chrome validation and final private-beta hardening remain.
+- Status: MVP implemented locally; supervised browser control implemented and undergoing Chrome validation/hardening.
 - Product requirements: `PRD.md`.
 - Phase 0 must prove an officially supported ChatGPT/Codex login and streaming path before the full chat UI is implemented.
 - Each feature must have testable acceptance criteria and a stated privacy/security impact.
@@ -69,15 +70,15 @@ The repository contains the Chromium **Codex Sidebar MVP**. The approved working
 
 ## Proposed technology baseline
 
-These are initial architecture decisions, not claims about installed dependencies:
+Verified technology baseline:
 
 - Chrome Extension Manifest V3.
 - TypeScript with strict type checking.
 - React for popup, options, side-panel, or other stateful extension UI.
-- Vite with a Manifest V3-compatible extension build integration.
+- Vite with explicit side-panel, service-worker, and `page-executor.js` build entries.
 - WebExtension APIs behind small typed adapters so browser-specific behavior is isolated.
 - Vitest and Testing Library for unit/component tests; browser-level extension tests with Playwright where practical.
-- ESLint and Prettier, or the repository's chosen equivalent, once tooling is initialized.
+- ESLint plus the TypeScript compiler; package scripts in `package.json` are canonical.
 
 Record any change to this baseline in the PRD or architecture documentation before introducing conflicting frameworks.
 
@@ -90,17 +91,17 @@ Record any change to this baseline in the PRD or architecture documentation befo
 - `tests/`: integration and browser-level coverage that does not fit beside source files.
 - Keep privileged browser operations in the background context. Validate every cross-context message at runtime and restrict allowed senders/actions.
 
-This map is prospective until scaffolding is created. Do not create empty surfaces that the approved product does not need.
+The page executor must remain packaged extension code in an isolated content-script world. Never evaluate model-provided code or selectors.
 
 ## Build sequence
 
-1. Complete the `PRD.md` Phase 0 authentication/streaming feasibility spike and record the bridge decision.
-2. Scaffold the minimum Manifest V3 TypeScript application and document runnable commands.
-3. Implement typed cross-context messaging and the sidebar chat vertical slice.
-4. Add explicit current-page attachment and only the allowlisted MVP tab tools.
-5. Add error, cancellation, permission-denied, offline, authentication, approval, and reconnect states.
-6. Add focused automated tests, then validate the unpacked extension in a real Chrome session.
-7. Review privacy, permissions, CSP, credentials, logs, and bundle contents before private-beta handoff.
+1. Preserve the supported authentication, streaming, attachment, and tab-tool baseline recorded in ADR 0001.
+2. Keep strict page-tool schemas, origin/risk policy, task cancellation, idempotency, and generic confirmations ahead of DOM execution.
+3. Inject only the packaged `page-executor.js` after an exact-origin permission grant; use fresh opaque references and fail stale actions closed.
+4. Validate inspect/click/scroll/navigation before fields and confirmed form submission.
+5. Run focused automated checks, then validate permissions, activity, Stop, stale references, and submissions in current stable Chrome.
+6. Review the manifest, CSP, bundle, storage, logs, and credential exposure before private-beta handoff.
+7. Do not begin connector work until the browser-control acceptance gates pass and a connector PRD is approved.
 
 ## Working principles
 
@@ -116,14 +117,10 @@ This map is prospective until scaffolding is created. Do not create empty surfac
 
 ## Development and validation
 
-No package manager, scripts, build configuration, or test commands are present yet. Do not claim commands work until the project is scaffolded and they have been run successfully.
-
-When tooling is added:
-
-- Document setup, development, build, test, lint, type-check, and browser-install steps in `README.md`.
-- Keep `package.json` scripts as the canonical command interface.
-- Run the checks relevant to every changed area and report which checks were run.
-- For browser-visible work, load the built extension unpacked and verify the affected flow, console, service worker, permissions, and persistence behavior.
+- Use `npm run typecheck`, `npm run lint`, `npm test`, `npm run test:bridge`, and `npm run build` as the standard local gate.
+- Use `npm run test:installed-host` after installing the native host.
+- Keep `package.json` and `README.md` synchronized when commands change.
+- For browser-visible work, load `dist/` unpacked and verify the affected side panel, service worker, page executor, permissions, storage, and native-host behavior in Chrome.
 
 ## Security and quality gates
 

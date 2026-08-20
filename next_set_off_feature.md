@@ -1,6 +1,6 @@
 # Next Set of Features: Interactive Browser Control
 
-- Status: Proposed post-MVP milestone; not yet implemented
+- Status: Approved and implemented locally; Chrome validation and hardening pending
 - Owner: `codex-chrome-extension-manager`
 - Created: 2026-08-20
 - Depends on: the Codex Sidebar MVP defined in `PRD.md` and `MVP.md`
@@ -12,7 +12,7 @@ Extend the Codex Sidebar from a chat and tab-management assistant into a user-su
 
 The user should be able to ask the assistant to inspect a page, click a visible item, enter information, select an option, scroll, navigate backward or forward, and submit a form. Every action must be visible in an activity log, limited to the page and tab the user authorized, and governed by code-side safety policy.
 
-This document describes the next feature set after the current MVP. It does not change the implemented MVP scope until the user approves implementation and the corresponding requirements are incorporated into `PRD.md`, `MVP.md`, and `AGENTS.md`.
+This document describes the approved feature set after the original MVP. The user approved implementation on 2026-08-20; its requirements are incorporated into `PRD.md`, `MVP.md`, and `AGENTS.md`.
 
 ## 2. User value
 
@@ -298,7 +298,7 @@ This milestone is complete only when all of the following are true:
 
 ## 12. Documentation updates required before implementation
 
-When implementation is explicitly approved:
+Implementation approval has been recorded. The required documentation changes are:
 
 1. Update `PRD.md` with these post-MVP user stories, requirements, permissions, and acceptance criteria.
 2. Update `MVP.md` so it records the MVP as the foundation and identifies this work as the next approved milestone.

@@ -24,6 +24,7 @@ const requestBase = z.object({ requestId: z.string().uuid() });
 
 export const uiRequestSchema = z.discriminatedUnion("type", [
   requestBase.extend({ type: z.literal("BRIDGE_STATUS") }),
+  requestBase.extend({ type: z.literal("BROWSER_STATE_READ") }),
   requestBase.extend({ type: z.literal("ACCOUNT_READ") }),
   requestBase.extend({ type: z.literal("AUTH_LOGIN") }),
   requestBase.extend({ type: z.literal("AUTH_CANCEL"), loginId: z.string().min(1) }),
@@ -42,6 +43,17 @@ export const uiRequestSchema = z.discriminatedUnion("type", [
     turnId: z.string().min(1),
   }),
   requestBase.extend({ type: z.literal("PAGE_ATTACH") }),
+  requestBase.extend({
+    type: z.literal("PAGE_CONTROL_PERMISSION_RESULT"),
+    callId: z.string().min(1),
+    originPattern: z.string().min(1),
+    granted: z.boolean(),
+  }),
+  requestBase.extend({
+    type: z.literal("BROWSER_TASK_CANCEL"),
+    threadId: z.string().min(1),
+    turnId: z.string().min(1).optional(),
+  }),
   requestBase.extend({
     type: z.literal("OPEN_EXTERNAL"),
     url: z.string().url(),

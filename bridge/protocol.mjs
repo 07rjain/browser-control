@@ -71,3 +71,12 @@ export function normalizeAppServerNotification(message) {
       return null;
   }
 }
+
+const ALLOWED_DYNAMIC_TOOLS = {
+  tabs: new Set(["list", "activate", "open", "reload", "close"]),
+  page: new Set(["inspect", "click", "fill", "select", "check", "keypress", "scroll", "history", "wait", "submit"]),
+};
+
+export function isAllowedDynamicTool(namespace, tool) {
+  return (namespace === "tabs" || namespace === "page") && ALLOWED_DYNAMIC_TOOLS[namespace].has(tool);
+}

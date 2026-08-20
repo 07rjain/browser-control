@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { isSafeHttpUrl, uiRequestSchema } from "../src/shared/protocol";
 import { dynamicToolCallSchema, parseToolArguments } from "../src/background/tab-tools";
+import { pageToolCallSchema, parsePageToolArguments } from "../src/shared/page-tools";
 
 describe("extension boundary validation", () => {
   it("accepts only http and https destinations", () => {
@@ -45,5 +46,61 @@ describe("extension boundary validation", () => {
       arguments: { url: "file:///etc/passwd" },
     });
     expect(() => parseToolArguments(call)).toThrow(/http\/https/);
+  });
+
+  it("accepts strict page inspection and rejects arbitrary selector arguments", () => {
+    const inspect = pageToolCallSchema.parse({
+      requestId: 5,
+      threadId: "thread-1",
+      turnId: "turn-1",
+      callId: "call-2",
+      namespace: "page",
+      tool: "inspect",
+      arguments: { idempotencyKey: "inspect-0001" },
+    });
+    expect(parsePageToolArguments(inspect)).toEqual({ idempotencyKey: "inspect-0001" });
+
+    const click = pageToolCallSchema.parse({
+      requestId: 6,
+      threadId: "thread-1",
+      turnId: "turn-1",
+      callId: "call-3",
+      namespace: "page",
+      tool: "click",
+      arguments: {
+        idempotencyKey: "click-000001",
+        ref: { id: "e1", snapshotId: "snapshot-1", tabId: 1, origin: "https://example.com" },
+        selector: "#buy",
+      },
+    });
+    expect(() => parsePageToolArguments(click)).toThrow();
+  });
+
+  it("rejects unsafe keys and mismatched scroll references", () => {
+    const keypress = pageToolCallSchema.parse({
+      requestId: 7,
+      threadId: "thread-1",
+      turnId: "turn-1",
+      callId: "call-4",
+      namespace: "page",
+      tool: "keypress",
+      arguments: {
+        idempotencyKey: "keypress-001",
+        ref: { id: "e1", snapshotId: "snapshot-1", tabId: 1, origin: "https://example.com" },
+        key: "Meta+L",
+      },
+    });
+    expect(() => parsePageToolArguments(keypress)).toThrow();
+
+    const scroll = pageToolCallSchema.parse({
+      requestId: 8,
+      threadId: "thread-1",
+      turnId: "turn-1",
+      callId: "call-5",
+      namespace: "page",
+      tool: "scroll",
+      arguments: { idempotencyKey: "scroll-00001", direction: "element" },
+    });
+    expect(() => parsePageToolArguments(scroll)).toThrow(/requires a reference/i);
   });
 });

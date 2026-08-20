@@ -4,6 +4,7 @@ import {
   JsonLineDecoder,
   LengthPrefixedJsonDecoder,
   normalizeAppServerNotification,
+  isAllowedDynamicTool,
 } from "../bridge/protocol.mjs";
 
 describe("native bridge framing", () => {
@@ -29,5 +30,13 @@ describe("native bridge framing", () => {
       }),
     ).toEqual({ event: "chat.delta", data: { turnId: "turn-1", delta: "Hello" } });
     expect(normalizeAppServerNotification({ method: "command/exec/outputDelta", params: {} })).toBeNull();
+  });
+
+  it("allows only declared tabs and page tools", () => {
+    expect(isAllowedDynamicTool("tabs", "list")).toBe(true);
+    expect(isAllowedDynamicTool("page", "inspect")).toBe(true);
+    expect(isAllowedDynamicTool("page", "submit")).toBe(true);
+    expect(isAllowedDynamicTool("page", "executeScript")).toBe(false);
+    expect(isAllowedDynamicTool("computer", "click")).toBe(false);
   });
 });

@@ -175,11 +175,17 @@ button:focus-visible, textarea:focus-visible, select:focus-visible, a:focus-visi
 .tool-status { display: grid; grid-template-columns: 1fr auto; gap: 3px 12px; margin: 0 0 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 11px; color: var(--muted); font-size: 12px; }
 .tool-status strong { color: var(--text); font-size: 11px; text-transform: capitalize; }
 .tool-status small { grid-column: 1 / -1; color: var(--danger); }
+.tool-status .tool-origin { color: var(--muted); }
 .approval-card { margin: 16px 0; padding: 16px; border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--border)); border-radius: 16px; background: var(--danger-soft); }
+.approval-card.permission-card { border-color: var(--border-strong); background: var(--panel-solid); }
 .approval-card h2 { margin: 0 0 7px; font-size: 17px; }
 .approval-card p { margin: 0 0 4px; font-weight: 600; }
 .approval-card small { display: block; overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
 .approval-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.form-preview { max-height: 180px; margin: 12px 0 0; overflow-y: auto; border-top: 1px solid var(--border); }
+.form-preview div { display: grid; grid-template-columns: minmax(80px, 0.7fr) minmax(0, 1.3fr); gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--border); }
+.form-preview dt, .form-preview dd { margin: 0; overflow-wrap: anywhere; font-size: 11px; }
+.form-preview dt { color: var(--muted); }
 
 .composer-wrap { padding: 9px 12px 10px; background: linear-gradient(transparent, var(--bg) 18%); }
 .composer { padding: 7px; border: 1px solid var(--border-strong); border-radius: 17px; background: var(--panel-solid); box-shadow: 0 8px 28px rgba(25, 25, 24, 0.07); }

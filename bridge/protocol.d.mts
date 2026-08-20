@@ -13,3 +13,5 @@ export function normalizeAppServerNotification(message: {
   method: string;
   params?: unknown;
 }): { event: string; data: unknown } | null;
+
+export function isAllowedDynamicTool(namespace: unknown, tool: unknown): boolean;

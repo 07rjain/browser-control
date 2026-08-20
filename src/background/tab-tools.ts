@@ -9,12 +9,12 @@ export const dynamicToolCallSchema = z.object({
   namespace: z.literal("tabs"),
   tool: z.enum(["list", "activate", "open", "reload", "close"]),
   arguments: z.unknown(),
-});
+}).strict();
 
 export type DynamicToolCall = z.infer<typeof dynamicToolCallSchema>;
 
-const tabIdSchema = z.object({ tabId: z.number().int().positive() });
-const openSchema = z.object({ url: z.string().refine(isSafeHttpUrl, "Only http/https URLs are allowed") });
+const tabIdSchema = z.object({ tabId: z.number().int().positive() }).strict();
+const openSchema = z.object({ url: z.string().refine(isSafeHttpUrl, "Only http/https URLs are allowed") }).strict();
 
 export interface SafeTabSummary {
   id: number;
@@ -25,7 +25,7 @@ export interface SafeTabSummary {
 }
 
 export function parseToolArguments(call: DynamicToolCall): Record<string, unknown> {
-  if (call.tool === "list") return z.object({}).parse(call.arguments ?? {});
+  if (call.tool === "list") return z.object({}).strict().parse(call.arguments ?? {});
   if (call.tool === "open") return openSchema.parse(call.arguments);
   return tabIdSchema.parse(call.arguments);
 }

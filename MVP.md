@@ -1,6 +1,6 @@
-# Codex Sidebar MVP Build Plan
+# Codex Sidebar MVP and Supervised Browser-Control Build Plan
 
-- Status: MVP implementation complete locally; signed-in Chrome validation pending
+- Status: MVP implementation complete locally; approved supervised browser control implemented, Chrome validation pending
 - Product requirements: `PRD.md`
 - Owner: `codex-chrome-extension-manager`
 - Updated: 2026-08-20
@@ -9,7 +9,7 @@
 
 Ship a private development MVP of a Chromium Manifest V3 extension that opens as a persistent side panel, lets a user authenticate through a supported ChatGPT/Codex flow, streams a Codex chat, optionally attaches current-page context, and performs a small allowlist of local tab actions.
 
-This is an MVP, not a general browser agent. Work stops at the definition of done in this document.
+The MVP remains the product foundation. The approved follow-on milestone adds only the supervised, allowlisted page controls defined here and in `next_set_off_feature.md`; this is not remote or arbitrary browser automation.
 
 ## 2. What ships
 
@@ -22,6 +22,7 @@ The MVP must include:
 - Explicit “Attach current page” control with preview and removal before sending.
 - Current-page title, URL, selected text, and size-limited readable text extraction.
 - Five validated tab tools: list, activate, open, reload, and confirmed close.
+- Ten validated page tools with exact-origin permission, opaque references, activity visibility, Stop, and confirmation for consequential actions.
 - Local settings, active-conversation state, logout, and clear-local-data controls.
 - Automated checks plus real-browser validation of the unpacked extension.
 
@@ -30,8 +31,9 @@ The MVP must include:
 - Remote browser control or remote access.
 - Agent Bus integration in the user-facing extension.
 - Actions initiated by other agents or devices.
-- Unattended multi-step automation.
-- Page clicking, typing, form submission, purchases, downloads, or arbitrary JavaScript.
+- Unattended or remotely initiated automation.
+- Purchases, downloads, arbitrary JavaScript/selectors/coordinates, secret entry, or security bypasses.
+- Connectors until supervised browser-control validation passes and a connector PRD is approved.
 - Continuous collection of tabs, page contents, browsing history, or cookies.
 - Telemetry, analytics, billing, organization administration, or sync.
 - Chrome Web Store submission or production release.
@@ -47,9 +49,10 @@ Any request to add one of these items requires explicit user approval and an upd
 4. Send a message and receive a streamed response.
 5. Optionally attach the current page after reviewing what will be shared.
 6. Ask about open tabs or request one of the five allowed tab actions.
-7. Review action status and explicitly confirm closing a tab.
-8. Close/reopen the panel or change tabs without losing the active conversation.
-9. Sign out or clear locally retained chat data.
+7. Ask Codex to navigate the current site; grant exact-origin access when Chrome prompts.
+8. Review the activity log and explicitly confirm buttons, external/new-tab links, Enter, closing, or form submission.
+9. Stop any active browser task or close/reopen the panel without silently repeating actions.
+10. Sign out or clear locally retained chat data.
 
 ## 5. System boundary
 
@@ -58,7 +61,11 @@ Side-panel React UI
         |
         | typed extension messages
         v
-Manifest V3 service worker ----> Chrome Tabs / Side Panel / Storage APIs
+Manifest V3 service worker ----> Chrome Tabs / Side Panel / Storage / Scripting APIs
+        |
+        | validated page commands after exact-origin grant
+        v
+Packaged isolated-world page executor ----> current tab DOM
         |
         | authenticated, schema-validated local protocol
         v
@@ -66,7 +73,7 @@ Local Codex bridge ----> supported Codex app-server/authentication interface
 ```
 
 - The side panel renders state and asks for user decisions; it does not execute privileged browser actions.
-- The service worker validates requests and is the only extension component allowed to invoke tab tools.
+- The service worker validates requests, applies browser-action policy, owns approvals/idempotency, and is the only extension component allowed to invoke tab or page tools.
 - A content extractor runs only after an explicit user gesture using temporary `activeTab` access.
 - The local bridge owns Codex credentials and streaming transport. Reusable credentials never enter extension storage or logs.
 - Model and page output are untrusted. Code-side policy, not model prose, decides whether an action is allowed.
@@ -198,6 +205,40 @@ Exit gate:
 - The permission list matches the table above and each permission has a concrete justification.
 - The private-beta installation is repeatable from a clean test profile.
 
+### M6 — Supervised page-control foundation
+
+Deliverables:
+
+- Add strict `page.*` schemas, exact-origin policy, task state in `chrome.storage.session`, idempotency, activity history, cancellation, and generic confirmations.
+- Build a stable packaged `page-executor.js`; never accept scripts, selectors, XPath, coordinates, or unsafe URLs from the model.
+- Redeclare the exact dynamic tool set when a Codex thread resumes.
+
+Exit gate:
+
+- Unauthorized, malformed, stale, cross-tab, cross-origin, duplicate, or canceled actions fail closed before DOM execution.
+
+### M7 — Navigation controls
+
+Deliverables:
+
+- Implement bounded semantic inspection, ordinary same-origin link clicking, scrolling, history navigation, and load waits.
+- Use no more than 80 elements per snapshot, 30-second references, eight-second waits, and 20 page actions per turn.
+
+Exit gate:
+
+- Inspect, click, scroll, back/forward, stale-reference refusal, Stop, and permission revocation pass in Chrome.
+
+### M8 — Fields and confirmed forms
+
+Deliverables:
+
+- Implement non-sensitive fill, select, check, allowlisted keypress, form preview, and confirmed submission.
+- Refuse password, OTP, payment, private-key, CAPTCHA, purchase, and financial workflows in code-side policy.
+
+Exit gate:
+
+- Representative search/contact/scheduling forms work, sensitive values never enter tool output, and no consequential form is submitted without a fresh exact confirmation.
+
 ## 9. Intended project layout
 
 Create only paths needed by implemented features:
@@ -225,6 +266,8 @@ Do not create empty popup, options, remote-control, telemetry, or automation mod
 | Chat | Stream, stop, retry, new chat, link safety, Markdown injection, reconnect. |
 | Page context | Attach, preview, remove, truncate, protected page, form/password exclusion. |
 | Tab tools | Success, rejection, stale ID, bad URL scheme, close confirmation, duplicate prevention. |
+| Page tools | Exact-origin grant, inspect bounds, link click, button confirmation, scroll, history, wait timeout, stale ref, Stop. |
+| Forms | Fill/select/check, controlled inputs, sensitive refusal, preview, approval expiry, validation failure, confirmed submit. |
 | Persistence | Browser restart, service-worker suspension, clear data, logout. |
 | Accessibility | Keyboard flow, focus, labels, contrast, reduced motion, streaming announcements. |
 | Security | Message-schema failures, origin rejection, CSP, bundle/log/storage credential scan. |
@@ -254,6 +297,6 @@ The MVP is complete only when:
 - `PRD.md`, this file, `AGENTS.md`, and `README.md` agree on scope and commands.
 - Authentication uses a supported Codex mechanism and exposes no reusable credential to the extension.
 - Page content is attached only through an explicit user action.
-- Only the five approved local tab tools exist, and tab closing requires confirmation.
-- Remote control, external agents, arbitrary page automation, telemetry, and store submission remain absent.
+- Only the five approved tab tools and ten approved supervised page tools exist; consequential actions require confirmation.
+- Remote control, external agents, arbitrary scripting/automation, connectors, telemetry, and store submission remain absent.
 - The manager reviews the final diff and browser evidence and signs off the private development beta.

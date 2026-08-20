@@ -11,10 +11,15 @@ export default defineConfig({
       input: {
         sidepanel: resolve(import.meta.dirname, "sidepanel.html"),
         background: resolve(import.meta.dirname, "src/background/service-worker.ts"),
+        pageExecutor: resolve(import.meta.dirname, "src/content/page-executor.ts"),
       },
       output: {
         entryFileNames: (chunk) =>
-          chunk.name === "background" ? "background.js" : "assets/[name]-[hash].js",
+          chunk.name === "background"
+            ? "background.js"
+            : chunk.name === "pageExecutor"
+              ? "page-executor.js"
+              : "assets/[name]-[hash].js",
         chunkFileNames: "assets/[name]-[hash].js",
         assetFileNames: "assets/[name]-[hash][extname]",
       },

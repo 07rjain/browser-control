@@ -27,15 +27,34 @@ interface LoginDetails {
 
 interface ToolApproval {
   callId: string;
-  tool: "close";
-  target: { id: number; title: string; url: string };
+  namespace: "tabs" | "page";
+  tool: string;
+  title: string;
+  description: string;
+  target: {
+    label: string;
+    url?: string;
+    form?: { action: string; method: string; fields: Array<{ name: string; value: string; sensitive: boolean }> } | null;
+  };
+  approveLabel: string;
+  rejectLabel: string;
+  danger?: boolean;
 }
 
 interface ToolStatus {
   callId: string;
+  namespace?: string;
   tool: string;
   status: string;
+  timestamp?: number;
+  origin?: string;
   error?: string;
+}
+
+interface ToolPermission {
+  callId: string;
+  origin: string;
+  originPattern: string;
 }
 
 interface PersistedState {
@@ -52,6 +71,7 @@ interface RetryPayload {
 const INITIAL_STATE: PersistedState = { threadId: null, messages: [], theme: "system" };
 const STORAGE_KEY = "codexSidebarState";
 const PAGE_ORIGINS_KEY = "codexSidebarGrantedPageOrigins";
+const TASK_ORIGINS_KEY = "codexSidebarTaskControlOrigins";
 
 class ExtensionRequestError extends Error {
   readonly code?: string;
@@ -107,6 +127,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [theme, setTheme] = useState<Theme>("system");
   const [toolApproval, setToolApproval] = useState<ToolApproval | null>(null);
+  const [toolPermission, setToolPermission] = useState<ToolPermission | null>(null);
   const [toolStatuses, setToolStatuses] = useState<ToolStatus[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
   const [hydrated, setHydrated] = useState(false);
@@ -116,6 +137,7 @@ export default function App() {
   const threadReadyRef = useRef(false);
   const inFlightPayloadRef = useRef<RetryPayload | null>(null);
   const turnExecutedToolRef = useRef(false);
+  const stopRequestedRef = useRef(false);
 
   const streaming = activeTurnId !== null || isSending;
 
@@ -145,6 +167,19 @@ export default function App() {
   }, [refreshAccount]);
 
   useEffect(() => {
+    void sendRequest<{
+      activities: ToolStatus[];
+      prompts: Array<{ type: "approval" | "permission"; data: ToolApproval | ToolPermission }>;
+    }>({ type: "BROWSER_STATE_READ" }).then((state) => {
+      setToolStatuses(Array.isArray(state.activities) ? state.activities.slice(-100) : []);
+      const approval = state.prompts.find((prompt) => prompt.type === "approval");
+      const permission = state.prompts.find((prompt) => prompt.type === "permission");
+      if (approval) setToolApproval(approval.data as ToolApproval);
+      if (permission) setToolPermission(permission.data as ToolPermission);
+    }).catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
     if (!hydrated) return;
     const retainedMessages = messages.slice(-100).map((message) => ({
       ...message,
@@ -161,7 +196,7 @@ export default function App() {
 
   useEffect(() => {
     transcriptRef.current?.scrollTo({ top: transcriptRef.current.scrollHeight, behavior: "smooth" });
-  }, [messages, toolApproval, toolStatuses]);
+  }, [messages, toolApproval, toolPermission, toolStatuses]);
 
   useEffect(() => {
     const listener = (message: SidebarEvent) => {
@@ -200,6 +235,7 @@ export default function App() {
           break;
         }
         case "chat.turnCompleted":
+          stopRequestedRef.current = false;
           setActiveTurnId(null);
           setIsSending(false);
           setRetryPayload(null);
@@ -207,6 +243,7 @@ export default function App() {
           setMessages((current) => current.map((item) => ({ ...item, streaming: false })));
           break;
         case "chat.error":
+          stopRequestedRef.current = false;
           setActiveTurnId(null);
           setIsSending(false);
           setRetryPayload(turnExecutedToolRef.current ? null : inFlightPayloadRef.current);
@@ -222,12 +259,16 @@ export default function App() {
         case "tool.approval":
           setToolApproval(message.data as ToolApproval);
           break;
+        case "tool.permission":
+          setToolPermission(message.data as ToolPermission);
+          break;
         case "tool.status": {
           const status = message.data as ToolStatus;
           if (status.status === "succeeded") turnExecutedToolRef.current = true;
-          setToolStatuses((current) => [...current.filter((item) => item.callId !== status.callId), status].slice(-5));
-          if (["succeeded", "failed", "rejected"].includes(status.status)) {
+          setToolStatuses((current) => [...current, status].slice(-100));
+          if (["succeeded", "failed", "rejected", "canceled", "stale"].includes(status.status)) {
             setToolApproval((current) => (current?.callId === status.callId ? null : current));
+            setToolPermission((current) => (current?.callId === status.callId ? null : current));
           }
           break;
         }
@@ -333,6 +374,7 @@ export default function App() {
     setRetryPayload(null);
     inFlightPayloadRef.current = payload;
     turnExecutedToolRef.current = false;
+    stopRequestedRef.current = false;
     const messageId = crypto.randomUUID();
     setMessages((current) => {
       const withoutFailedAssistant = appendUser
@@ -352,6 +394,13 @@ export default function App() {
         text: payload.outboundText,
         clientMessageId: messageId,
       });
+      if (stopRequestedRef.current) {
+        await sendRequest({ type: "BROWSER_TASK_CANCEL", threadId: activeThreadId, turnId: result.turnId }).catch(() => undefined);
+        await sendRequest({ type: "CHAT_INTERRUPT", threadId: activeThreadId, turnId: result.turnId }).catch(() => undefined);
+        setIsSending(false);
+        setMessages((current) => current.map((item) => ({ ...item, streaming: false })));
+        return;
+      }
       setActiveTurnId(result.turnId);
       setIsSending(false);
     } catch (cause) {
@@ -382,12 +431,17 @@ export default function App() {
   };
 
   const stop = async () => {
-    if (!threadId || !activeTurnId) return;
-    await sendRequest({ type: "CHAT_INTERRUPT", threadId, turnId: activeTurnId }).catch((cause) => {
-      setError(cause instanceof Error ? cause.message : "Unable to stop the response.");
-    });
-    setActiveTurnId(null);
+    stopRequestedRef.current = true;
+    setIsSending(false);
     setMessages((current) => current.map((item) => ({ ...item, streaming: false })));
+    if (!threadId) return;
+    await sendRequest({ type: "BROWSER_TASK_CANCEL", threadId, turnId: activeTurnId ?? undefined }).catch(() => undefined);
+    if (activeTurnId) {
+      await sendRequest({ type: "CHAT_INTERRUPT", threadId, turnId: activeTurnId }).catch((cause) => {
+        setError(cause instanceof Error ? cause.message : "Unable to stop the response.");
+      });
+    }
+    setActiveTurnId(null);
   };
 
   const newChat = () => {
@@ -398,6 +452,8 @@ export default function App() {
     threadReadyRef.current = false;
     setMessages([]);
     setToolStatuses([]);
+    setToolApproval(null);
+    setToolPermission(null);
     setRetryPayload(null);
     setAttachment(null);
     setMenuOpen(false);
@@ -405,18 +461,28 @@ export default function App() {
 
   const clearLocalData = async () => {
     if (!confirm("Clear the local transcript and preferences on this browser?")) return;
-    const stored = await chrome.storage.local.get(PAGE_ORIGINS_KEY);
-    const origins = Array.isArray(stored[PAGE_ORIGINS_KEY])
+    if (threadId) await sendRequest({ type: "BROWSER_TASK_CANCEL", threadId }).catch(() => undefined);
+    const stored = await chrome.storage.local.get([PAGE_ORIGINS_KEY, TASK_ORIGINS_KEY]);
+    const attachmentOrigins = Array.isArray(stored[PAGE_ORIGINS_KEY])
       ? (stored[PAGE_ORIGINS_KEY] as string[])
       : [];
+    const taskOrigins = Array.isArray(stored[TASK_ORIGINS_KEY])
+      ? (stored[TASK_ORIGINS_KEY] as string[])
+      : [];
+    const origins = [...new Set([...attachmentOrigins, ...taskOrigins])];
     if (origins.length > 0) await chrome.permissions.remove({ origins }).catch(() => false);
     await chrome.storage.local.remove(STORAGE_KEY);
     await chrome.storage.local.remove(PAGE_ORIGINS_KEY);
+    await chrome.storage.local.remove(TASK_ORIGINS_KEY);
+    await chrome.storage.session.clear();
     setThreadId(null);
     setMessages([]);
     setTheme("system");
     setMenuOpen(false);
     setPendingPageOrigin(null);
+    setToolStatuses([]);
+    setToolApproval(null);
+    setToolPermission(null);
   };
 
   const decideTool = async (approved: boolean) => {
@@ -426,6 +492,32 @@ export default function App() {
     await sendRequest({ type: "TOOL_DECISION", callId, approved }).catch((cause) => {
       setError(cause instanceof Error ? cause.message : "Unable to answer the browser-action request.");
     });
+  };
+
+  const decidePagePermission = async (approved: boolean) => {
+    if (!toolPermission) return;
+    const pending = toolPermission;
+    setToolPermission(null);
+    try {
+      const granted = approved
+        ? await chrome.permissions.request({ origins: [pending.originPattern] })
+        : false;
+      await sendRequest({
+        type: "PAGE_CONTROL_PERMISSION_RESULT",
+        callId: pending.callId,
+        originPattern: pending.originPattern,
+        granted,
+      });
+      if (approved && !granted) setError("Site access was not granted. The browser action was canceled.");
+    } catch (cause) {
+      await sendRequest({
+        type: "PAGE_CONTROL_PERMISSION_RESULT",
+        callId: pending.callId,
+        originPattern: pending.originPattern,
+        granted: false,
+      }).catch(() => undefined);
+      setError(cause instanceof Error ? cause.message : "Unable to grant browser-control access.");
+    }
   };
 
   const canSend = draft.trim().length > 0 && !streaming && authState === "ready";
@@ -506,7 +598,7 @@ export default function App() {
           <section className="empty-state">
             <div className="orb" aria-hidden="true"><span /></div>
             <h1>{emptyTitle}</h1>
-            <p>Ask about what you’re reading, attach the current page, or manage your open tabs.</p>
+            <p>Ask about what you’re reading, attach the page, or navigate the current site with supervised browser actions.</p>
             <div className="prompt-grid">
               <button onClick={() => setDraft("Summarize the page I attach in five bullets.")}>Summarize a page</button>
               <button onClick={() => setDraft("List my open tabs and group them by topic.")}>Organize my tabs</button>
@@ -539,22 +631,47 @@ export default function App() {
         )}
 
         {toolStatuses.map((tool) => (
-          <div key={tool.callId} className="tool-status">
-            <span>Browser · {tool.tool}</span>
+          <div key={`${tool.callId}-${tool.status}-${tool.timestamp ?? 0}`} className="tool-status">
+            <span>Browser · {tool.namespace ? `${tool.namespace}.` : ""}{tool.tool}</span>
             <strong>{tool.status}</strong>
+            {tool.origin && <small className="tool-origin">{tool.origin}</small>}
             {tool.error && <small>{tool.error}</small>}
           </div>
         ))}
 
+        {toolPermission && (
+          <section className="approval-card permission-card" role="alertdialog" aria-labelledby="permission-title">
+            <p className="eyebrow">Site access required</p>
+            <h2 id="permission-title">Allow browser actions here?</h2>
+            <p>{toolPermission.origin}</p>
+            <small>Access is limited to this site and revoked when the current browser task ends.</small>
+            <div className="approval-actions">
+              <button className="secondary-button" onClick={() => void decidePagePermission(false)}>Cancel</button>
+              <button className="primary-button" onClick={() => void decidePagePermission(true)}>Allow this site</button>
+            </div>
+          </section>
+        )}
+
         {toolApproval && (
           <section className="approval-card" role="alertdialog" aria-labelledby="approval-title">
             <p className="eyebrow">Confirmation required</p>
-            <h2 id="approval-title">Close this tab?</h2>
-            <p>{toolApproval.target.title}</p>
-            <small>{toolApproval.target.url}</small>
+            <h2 id="approval-title">{toolApproval.title}</h2>
+            <p>{toolApproval.target.label}</p>
+            <small>{toolApproval.description}</small>
+            {toolApproval.target.url && <small>{toolApproval.target.url}</small>}
+            {toolApproval.target.form && toolApproval.target.form.fields.length > 0 && (
+              <dl className="form-preview">
+                {toolApproval.target.form.fields.map((field) => (
+                  <div key={field.name}>
+                    <dt>{field.name}</dt>
+                    <dd>{field.value || "Empty"}</dd>
+                  </div>
+                ))}
+              </dl>
+            )}
             <div className="approval-actions">
-              <button className="secondary-button" onClick={() => void decideTool(false)}>Keep tab</button>
-              <button className="danger-button" onClick={() => void decideTool(true)}>Close tab</button>
+              <button className="secondary-button" onClick={() => void decideTool(false)}>{toolApproval.rejectLabel}</button>
+              <button className={toolApproval.danger ? "danger-button" : "primary-button"} onClick={() => void decideTool(true)}>{toolApproval.approveLabel}</button>
             </div>
           </section>
         )}

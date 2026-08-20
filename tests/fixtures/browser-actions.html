@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Codex Sidebar Browser Actions Fixture</title>
+    <style>
+      body { max-width: 720px; margin: 0 auto; padding: 32px; font: 16px/1.5 system-ui, sans-serif; }
+      form { display: grid; gap: 14px; padding: 20px; border: 1px solid #ccc; border-radius: 12px; }
+      label { display: grid; gap: 5px; }
+      .spacer { height: 900px; background: linear-gradient(#f5f5f5, #ddd); }
+      #result { padding: 12px; background: #eef8ef; }
+    </style>
+  </head>
+  <body>
+    <h1>Browser action test</h1>
+    <nav><a href="destination.html">Open the safe destination</a></nav>
+    <button id="toggle" type="button" aria-expanded="false">Show details</button>
+    <p id="details" hidden>Details are visible.</p>
+    <form id="test-form">
+      <label>Name <input name="name" autocomplete="off" required></label>
+      <label>Topic
+        <select name="topic"><option value="demo">Demo</option><option value="support">Support</option></select>
+      </label>
+      <label><input name="updates" type="checkbox"> Receive test updates</label>
+      <button type="submit">Submit local test</button>
+    </form>
+    <label>Password must stay private <input name="password" type="password" value="never-share-this"></label>
+    <p id="result" aria-live="polite">Not submitted.</p>
+    <div class="spacer" aria-label="Scroll test area"></div>
+    <a href="#top" id="bottom-link">Back to top</a>
+    <script>
+      document.querySelector("#toggle").addEventListener("click", (event) => {
+        const details = document.querySelector("#details");
+        details.hidden = !details.hidden;
+        event.currentTarget.setAttribute("aria-expanded", String(!details.hidden));
+      });
+      document.querySelector("#test-form").addEventListener("submit", (event) => {
+        event.preventDefault();
+        const data = new FormData(event.currentTarget);
+        document.querySelector("#result").textContent = `Submitted locally for ${data.get("name")} about ${data.get("topic")}.`;
+      });
+    </script>
+  </body>
+</html>
