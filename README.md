@@ -4,6 +4,42 @@ A private-development Chrome side-panel extension powered by the user's ChatGPT 
 
 The repository contains the private-development MVP plus the approved supervised browser-control milestone: sidebar chat, managed ChatGPT sign-in, model selection, explicit current-page attachment, five tab tools, and eleven typed page tools. It does not contain remote control, unattended automation, arbitrary JavaScript/selectors, connectors, analytics, or ChatGPT cookie scraping.
 
+## Project status
+
+The MVP and supervised browser controls are implemented locally. The current focus is manual Chrome testing and reliability hardening on dynamic applications such as Google Calendar. This is a private development build, not a Chrome Web Store release.
+
+Known limitation: `page.inspect` currently returns the first 80 visible interactive controls in document order. Dense pages can place the requested control beyond that limit, so Codex may report that it cannot see or click a control that is visibly present. Active-dialog and viewport prioritization are not implemented yet.
+
+Product scope and delivery decisions live in:
+
+- [`PRD.md`](PRD.md) — product requirements and acceptance criteria.
+- [`MVP.md`](MVP.md) — MVP boundary and implementation plan.
+- [`next_set_off_feature.md`](next_set_off_feature.md) — supervised page-control requirements.
+- [`docs/decisions/0001-native-codex-bridge.md`](docs/decisions/0001-native-codex-bridge.md) — authentication and native bridge architecture.
+- [`docs/decisions/0002-supervised-page-control.md`](docs/decisions/0002-supervised-page-control.md) — browser-action architecture and safety policy.
+
+## Architecture
+
+```text
+React side panel
+      |
+      | validated extension messages
+      v
+Manifest V3 service worker -----> Chrome tabs, permissions, storage, scripting
+      |                                      |
+      | native messaging                     v
+      v                              isolated page executor
+Local Codex companion -----> Codex App Server / ChatGPT authentication
+```
+
+- `src/sidepanel/` renders chat, settings, confirmations, attachments, and grouped activity.
+- `src/background/` owns privileged Chrome APIs, policy enforcement, and message routing.
+- `src/content/page-executor.ts` performs allowlisted DOM actions using short-lived opaque references.
+- `src/shared/` contains runtime-validated protocol and tool schemas.
+- `bridge/` contains the native-messaging companion and Codex App Server transport.
+- `scripts/` installs and smoke-tests the macOS native host.
+- `tests/` covers protocol validation, action policy, activity grouping, and page execution.
+
 ## Requirements
 
 - macOS and current stable Google Chrome
@@ -54,6 +90,78 @@ npm run uninstall:host:mac
 
 After rebuilding, select **Reload** for the extension on `chrome://extensions`.
 
+## Automated validation
+
+Run the standard local gate before manual browser testing:
+
+```sh
+npm run typecheck
+npm run lint
+npm test
+npm run test:bridge
+npm run build
+```
+
+After installing the native host, also run:
+
+```sh
+npm run test:installed-host
+```
+
+`test:bridge` exercises a real signed-out Codex App Server/native-host exchange. It does not replace testing the installed extension in Chrome.
+
+## Manual Chrome testing
+
+Manual testing is required for browser-visible or browser-action changes because unit tests cannot fully reproduce Chrome permissions, native messaging, side-panel lifecycle, dynamic DOM updates, or real site behavior.
+
+### Prepare the build
+
+1. Run the automated validation commands above.
+2. Run `npm run install:host:mac` if the host or extension ID changed.
+3. Open `chrome://extensions`, enable **Developer mode**, and load `dist/` unpacked.
+4. Confirm the extension ID is `fodoakcimglhplkoohggjdggdffhkdam` and select **Reload** after every rebuild.
+5. Open the extension service-worker inspector and keep the Console visible while testing.
+
+Use a disposable test page or test account when an action could send, publish, delete, invite, or otherwise change external state. Do not use real secrets, payment fields, authentication codes, or private data.
+
+### Core MVP checklist
+
+- Open, close, and reopen the side panel from the toolbar; verify the current chat remains usable and the composer stays pinned correctly.
+- Sign in with ChatGPT, return to the panel, and verify the account state. Then sign out and verify credentials are not exposed in extension storage or logs.
+- Open Settings, change the model, send a message, start a new chat, and verify the selected model and thread behavior.
+- Stream a response, press **Stop**, retry, and verify reconnecting does not duplicate a message or tool action.
+- Attach a normal `http` or `https` page, inspect the preview, remove it, and verify no page content is shared before attachment.
+- Attempt attachment on `chrome://extensions` and verify the extension reports the protected-page limitation cleanly.
+- Exercise tab list, activate, open, reload, and confirmed close. Verify the active tab and result are correct.
+
+### Browser-action checklist
+
+- On a fresh origin, request a page action and verify both **Allow this site** and Chrome's exact-origin permission prompt appear once. Repeat an action and verify the remembered grant is reused.
+- Inspect and click an ordinary link, button, menu item, and SPA control. Verify the action result instead of trusting only the click event.
+- Fill and clear text fields; select an option; toggle a checkbox/radio; and send an allowlisted key. Confirm sensitive inputs are refused and their values never appear in activity logs.
+- Scroll up, down, top, bottom, to an element, and within a scrollable container. Verify bounded movement and honest no-progress results.
+- Drag between two visible controls on the same page. Verify file, cross-frame, cross-tab, and coordinate-only drags are refused.
+- Trigger a reactive re-render between inspection and action. Verify unique controls can be rebound and ambiguous or changed controls fail safely as stale.
+- Open a form that changes external state. Verify the panel shows one specific confirmation, rejection makes no change, approval runs only once, and success or validation failure is reported.
+- Press **Stop** during an active browser task. Verify pending work becomes canceled and does not resume after reopening the panel.
+- Complete a second request and verify each request keeps its own collapsed activity dropdown in chronological order.
+
+### Dense-page regression
+
+Google Calendar is the current representative dynamic-site test:
+
+1. Open one Calendar tab on the target week and wait until its data has loaded.
+2. Ask Codex to inspect and open a named event, then open its Edit view.
+3. Record whether the event and Edit control appear in `page.inspect`, whether `truncated` is true, and the number of stale retries.
+4. Verify the extension does not silently switch to another Calendar tab.
+5. Do not save or send an invitation unless that exact consequential action was intentionally approved for the test.
+
+Until inspection prioritization is fixed, a target after the first 80 controls is an expected known failure and must be recorded rather than misreported as an unsupported click.
+
+### Record the result
+
+For every manual pass, record Chrome version, macOS version, extension commit, test URL/origin, expected result, observed result, console errors, and screenshots for visual failures. Mark each scenario **pass**, **fail**, or **blocked**. A browser-visible feature is not complete solely because the automated gate passes.
+
 ## Supervised browser actions
 
 Ask Codex to inspect or navigate the active `http` or `https` page. The first page action for a site pauses until you select **Allow this site** in the sidebar and approve Chrome's exact-origin permission prompt. That exact-origin grant is remembered until you choose **Clear local data** or revoke it in Chrome.
@@ -85,6 +193,8 @@ No broad host permission, cookies, history, bookmarks, downloads, `webRequest`, 
 **Codex not found:** make sure `which codex` succeeds before running the host installer; the installer records its absolute path.
 
 **Cannot attach a page:** Chrome blocks scripting on internal pages such as `chrome://extensions`. Open a normal `http` or `https` page and click the toolbar icon again before attaching.
+
+**Codex cannot see a visible control:** `page.inspect` may have reached its 80-control limit, the reference may have expired after a DOM update, the wrong tab may be active, or the control may be inside an unsupported frame/shadow root. Re-inspect the intended tab and check the activity result for `truncated` or `stale` before assuming clicking itself is broken.
 
 **Reset product authentication:** sign out in the side panel. For development-only cleanup, uninstall the host registration and remove `~/.codex-sidebar` manually only after confirming no sidebar data is needed.
 

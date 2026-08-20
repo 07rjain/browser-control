@@ -61,7 +61,7 @@ The repository contains the Chromium **Codex Sidebar**, built on the completed M
 
 ### PRD status
 
-- Status: MVP implemented locally; supervised browser control implemented and undergoing Chrome validation/hardening.
+- Status: MVP implemented locally; supervised browser control implemented and undergoing manual Chrome validation and reliability hardening.
 - Product requirements: `PRD.md`.
 - Phase 0 must prove an officially supported ChatGPT/Codex login and streaming path before the full chat UI is implemented.
 - Each feature must have testable acceptance criteria and a stated privacy/security impact.
@@ -121,6 +121,37 @@ The page executor must remain packaged extension code in an isolated content-scr
 - Use `npm run test:installed-host` after installing the native host.
 - Keep `package.json` and `README.md` synchronized when commands change.
 - For browser-visible work, load `dist/` unpacked and verify the affected side panel, service worker, page executor, permissions, storage, and native-host behavior in Chrome.
+
+## Running the extension locally
+
+The complete extension does not run as an ordinary localhost website. Vite builds the Manifest V3 files into `dist/`, and Chrome runs that directory as an unpacked extension. Use this workflow:
+
+1. Install dependencies with `npm install`.
+2. Build the extension with `npm run build`.
+3. Install or refresh the macOS native-messaging companion with `npm run install:host:mac`. The installer records the local Codex executable and permits extension ID `fodoakcimglhplkoohggjdggdffhkdam`.
+4. Open `chrome://extensions`, enable **Developer mode**, select **Load unpacked**, and choose this repository's `dist/` directory.
+5. Confirm Chrome shows extension ID `fodoakcimglhplkoohggjdggdffhkdam`. A different ID cannot connect to the installed native host.
+6. Pin or open **Codex Sidebar**, then use the toolbar icon to open its side panel.
+7. After source changes, run `npm run build` again and select **Reload** on `chrome://extensions`. Reopen the side panel if Chrome has discarded its previous extension context.
+8. Inspect runtime failures from the extension's **Service worker** link on `chrome://extensions` and from the side panel's own DevTools console.
+
+Use `npm run dev` only for fast visual work on the React page served by Vite. Treat it as a UI preview: localhost does not provide real `chrome.sidePanel`, extension service-worker, optional host-permission, content-script, or native-messaging behavior. Validate those features through the unpacked `dist/` build.
+
+Run `npm run test:installed-host` after host installation to verify the Chrome-style native-host launch environment. If sign-in reports that the Codex App Server stopped, first rebuild and reload the extension, rerun the host installer, confirm `which codex` succeeds, and inspect both consoles before changing authentication code.
+
+## Manual testing protocol
+
+- Treat manual Chrome testing as required for changes to the side panel, service worker lifecycle, authentication, native messaging, permissions, page attachment, tabs, or `page.*` tools. Automated tests are necessary but not sufficient for these surfaces.
+- Build first, reload the unpacked `dist/` extension, and confirm the fixed extension ID `fodoakcimglhplkoohggjdggdffhkdam`. Reinstall the native host when its files, manifest, Codex path, or extension ID changes.
+- Test the changed flow plus its nearest failure path. At minimum, verify expected UI state, activity state, resulting tab/page state, cancellation, and relevant service-worker/side-panel console output.
+- Use a disposable page or test account for consequential actions. Never use real passwords, authentication codes, payment data, private keys, or other sensitive values in test fields or evidence.
+- Require a fresh, specific confirmation before a manual test submits, sends, publishes, books, deletes, uploads, or modifies external state. Confirmation is for one exact action and does not authorize later repetitions.
+- Verify exact-origin permission from a clean or revoked state when permission behavior changes. Confirm the first request prompts, remembered access is reused, revocation fails closed, and protected URLs remain unsupported.
+- For dynamic-page changes, test a reactive DOM update between inspect and action, a stale or ambiguous target, and a dense page with more than 80 controls. Google Calendar is the current representative dense dynamic application.
+- When testing Calendar, confirm the intended tab and week are active and fully loaded. Record `truncated`, `stale`, and retry outcomes; do not describe a target omitted by the 80-control cap as a click-execution failure.
+- Exercise the activity UI across at least two user requests. Each request must own its chronological tool history, collapse after completion, expand on demand, and remain aligned with the correct message.
+- Record Chrome version, OS version, commit, URL/origin, preconditions, exact steps, expected and observed results, pass/fail/blocked status, console errors, and screenshots for visual defects.
+- Do not claim a browser-visible change is complete without reporting the manual scenarios actually run. If browser testing was unavailable, say so explicitly and identify the remaining checklist from `README.md`.
 
 ## Security and quality gates
 
