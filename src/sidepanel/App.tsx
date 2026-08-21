@@ -780,6 +780,13 @@ export default function App() {
               : undefined;
             return (
               <div key={message.id} className="turn-block">
+                {activity && (
+                  <ToolActivity
+                    key={`${message.id}-${String(!message.streaming && activeTurnId !== message.id)}`}
+                    statuses={activity}
+                    complete={!message.streaming && activeTurnId !== message.id}
+                  />
+                )}
                 {(message.role === "user" || message.text || message.streaming) && <article className={`message message-${message.role} ${message.failed ? "message-failed" : ""}`}>
                   <span className="message-role">{message.role === "user" ? "You" : "Browser Control"}</span>
                   {message.role === "assistant" ? (
@@ -801,13 +808,6 @@ export default function App() {
                     <p>{message.text}</p>
                   )}
                 </article>}
-                {activity && (
-                  <ToolActivity
-                    key={`${message.id}-${String(!message.streaming && activeTurnId !== message.id)}`}
-                    statuses={activity}
-                    complete={!message.streaming && activeTurnId !== message.id}
-                  />
-                )}
               </div>
             );
           })
