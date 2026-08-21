@@ -82,6 +82,8 @@ The assistant must never claim an action succeeded until it has inspected the re
 - Display the action, target, tab, origin, status, and result without exposing sensitive field values.
 - Use the states `planned`, `awaiting confirmation`, `running`, `succeeded`, `failed`, `rejected`, `canceled`, and `stale`.
 - Let the user stop an active browser task at any point.
+- While a task is active, provide a sidebar control that explicitly focuses the task's pinned working tab and browser window.
+- On an authorized normal web page, illuminate the working tab with a pointer-transparent frame and status badge while Browser Control is operating it.
 - Keep consequential confirmations specific: show exactly what will be submitted and where.
 - Prevent retries, reconnects, and model repetition from executing the same action twice.
 
@@ -269,6 +271,8 @@ This milestone is complete only when all of the following are true:
 - The assistant can fill common non-sensitive fields, choose options, and correct validation errors.
 - Ask every time cannot submit a consequential form without a fresh, specific user confirmation; Full access may submit supported forms directly and records the skipped-approval preview in activity.
 - The user sees every action and result in a chronological activity log and can stop an active task.
+- The user can explicitly jump to the active task's pinned tab from the sidebar without retargeting the task.
+- The active authorized working page shows a non-interactive visual frame only for the lifetime of the browser task; completion, cancellation, or moving the pin clears the old frame.
 - Reloads, redirects, DOM changes, and retries do not cause stale or duplicate actions.
 - Unsupported pages, frames, elements, and security-sensitive requests fail with a clear explanation.
 - No arbitrary model-generated JavaScript, selector, or unsafe URL reaches execution.

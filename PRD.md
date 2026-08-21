@@ -210,6 +210,8 @@ Chrome documents that `chrome.tabs` can create, modify, and rearrange tabs, whil
 - As a user, I can ask Codex to inspect visible controls, follow an ordinary same-origin link, scroll, navigate backward or forward, and wait for a page to load.
 - As a user, I can ask Codex to fill non-sensitive fields, choose options, check controls, and submit a reviewed form.
 - As a user, I can see every requested and executed action, stop the task, and choose whether consequential supported actions require approval.
+- As a user, I can jump from the sidebar to the tab where the active browser task is running without changing which tab the task controls.
+- As a user viewing the active working tab, I can see a non-interactive illuminated frame that makes it clear Browser Control—not me—is currently operating the page.
 
 #### Allowed page tools
 
@@ -237,6 +239,8 @@ Chrome documents that `chrome.tabs` can create, modify, and rearrange tabs, whil
 - Stop cancels the Codex turn, pending page action, and pending confirmation. It does not revoke an exact-origin grant the user chose to remember. Permission-mode changes apply only to the next browser task.
 - Service-worker suspension, reconnect, or retry cannot silently repeat a completed action.
 - The visible tab is snapshotted as the thread working tab before a turn begins. Page tools and permission resumes remain bound to that tab even when the user changes tabs, and the pin persists across follow-up turns until explicitly replaced or closed.
+- After an active turn begins browser-tool activity, the sidebar offers a **View working tab** control that focuses the pinned tab and its window only after that explicit user gesture. Chat-only responses do not claim that a browser tab is being operated.
+- On an authorized normal web page, the pinned working tab displays a non-interactive Browser Control frame while its browser task is active. The frame moves with the working-tab pin and is removed on completion or cancellation; protected and unapproved pages fail without requesting broader access.
 - Pending permission/confirmation metadata, completion notices, and finished/canceled turn tombstones survive MV3 service-worker suspension in session storage.
 - Page tools are redeclared when a Codex thread resumes; authentication remains the ADR 0001 ChatGPT browser flow.
 - The Chrome validation matrix in `next_set_off_feature.md` passes before private-beta sign-off.

@@ -60,6 +60,25 @@ function command<T>(message: Record<string, unknown>): T {
 }
 
 describe("packaged page executor", () => {
+  it("shows and removes a non-interactive agent-working frame", () => {
+    expect(command({ action: "TASK_INDICATOR", active: true })).toEqual({ active: true });
+    const indicator = document.querySelector<HTMLElement>("[data-browser-control-task-indicator='active']");
+    expect(indicator).not.toBeNull();
+    expect(indicator?.getAttribute("aria-hidden")).toBe("true");
+    expect(indicator?.style.pointerEvents).toBe("none");
+
+    expect(command({ action: "TASK_INDICATOR", active: false })).toEqual({ active: false });
+    expect(document.querySelector("[data-browser-control-task-indicator='active']")).toBeNull();
+  });
+
+  it("expires an unrefreshed working frame if task completion is lost", () => {
+    vi.useFakeTimers();
+    expect(command({ action: "TASK_INDICATOR", active: true })).toEqual({ active: true });
+    vi.advanceTimersByTime(2 * 60 * 1_000);
+    expect(document.querySelector("[data-browser-control-task-indicator='active']")).toBeNull();
+    vi.useRealTimers();
+  });
+
   it("inspects visible controls without exposing password values", async () => {
     document.body.innerHTML = `
       <a href="/pricing">Pricing</a>

@@ -2,6 +2,7 @@ export {};
 
 type ExecutorCommand =
   | { type: "CODEX_PAGE_EXECUTOR"; action: "PING" }
+  | { type: "CODEX_PAGE_EXECUTOR"; action: "TASK_INDICATOR"; active: boolean }
   | { type: "CODEX_PAGE_EXECUTOR"; action: "INSPECT" }
   | { type: "CODEX_PAGE_EXECUTOR"; action: "DESCRIBE"; snapshotId: string; refId: string }
   | { type: "CODEX_PAGE_EXECUTOR"; action: "REVALIDATE"; snapshotId: string; refId: string }
@@ -51,6 +52,54 @@ if (!executorGlobal.__codexPageExecutorInstalled) {
   const refs = new Map<string, { element: Element; fingerprint: string }>();
   let snapshotId = "";
   let snapshotCreatedAt = 0;
+  let taskIndicatorHost: HTMLDivElement | null = null;
+  let taskIndicatorLease: ReturnType<typeof setTimeout> | null = null;
+
+  function clearTaskIndicator(): void {
+    if (taskIndicatorLease !== null) clearTimeout(taskIndicatorLease);
+    taskIndicatorLease = null;
+    taskIndicatorHost?.remove();
+    taskIndicatorHost = null;
+  }
+
+  function setTaskIndicator(active: boolean): { active: boolean } {
+    if (!active) {
+      clearTaskIndicator();
+      return { active: false };
+    }
+    if (taskIndicatorLease !== null) clearTimeout(taskIndicatorLease);
+    taskIndicatorLease = setTimeout(clearTaskIndicator, 2 * 60 * 1_000);
+    if (taskIndicatorHost?.isConnected) return { active: true };
+
+    const host = document.createElement("div");
+    host.setAttribute("aria-hidden", "true");
+    host.dataset.browserControlTaskIndicator = "active";
+    host.style.cssText = "all:initial!important;position:fixed!important;inset:0!important;display:block!important;pointer-events:none!important;z-index:2147483647!important;";
+    const shadow = host.attachShadow({ mode: "closed" });
+    const style = document.createElement("style");
+    style.textContent = `
+      :host { all: initial; }
+      .frame { position: fixed; inset: 0; box-sizing: border-box; border: 3px solid rgba(93, 140, 255, .92); box-shadow: inset 0 0 26px rgba(93, 140, 255, .18), inset 0 0 5px rgba(82, 211, 168, .22); animation: browser-control-frame 1.8s ease-in-out infinite; }
+      .badge { position: fixed; top: 10px; left: 50%; display: flex; align-items: center; gap: 7px; max-width: calc(100vw - 32px); transform: translateX(-50%); padding: 7px 11px; border: 1px solid rgba(255, 255, 255, .18); border-radius: 999px; background: rgba(20, 22, 27, .92); box-shadow: 0 8px 26px rgba(0, 0, 0, .24); color: #fff; font: 600 12px/1.2 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; letter-spacing: .01em; white-space: nowrap; }
+      .dot { width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; background: #65d6ad; box-shadow: 0 0 0 4px rgba(101, 214, 173, .15); animation: browser-control-dot 1.2s ease-in-out infinite; }
+      @keyframes browser-control-frame { 0%, 100% { border-color: rgba(93, 140, 255, .72); } 50% { border-color: rgba(101, 214, 173, .94); } }
+      @keyframes browser-control-dot { 0%, 100% { opacity: .55; transform: scale(.9); } 50% { opacity: 1; transform: scale(1.08); } }
+      @media (prefers-reduced-motion: reduce) { .frame, .dot { animation: none; } }
+    `;
+    const frame = document.createElement("div");
+    frame.className = "frame";
+    const badge = document.createElement("div");
+    badge.className = "badge";
+    const dot = document.createElement("span");
+    dot.className = "dot";
+    const label = document.createElement("span");
+    label.textContent = "Browser Control is working";
+    badge.append(dot, label);
+    shadow.append(style, frame, badge);
+    document.documentElement.append(host);
+    taskIndicatorHost = host;
+    return { active: true };
+  }
 
   function text(value: string | null | undefined, max = 500): string {
     return (value ?? "").replace(/\s+/g, " ").trim().slice(0, max);
@@ -297,6 +346,8 @@ if (!executorGlobal.__codexPageExecutorInstalled) {
     switch (command.action) {
       case "PING":
         return { installed: true, url: location.href, origin: location.origin };
+      case "TASK_INDICATOR":
+        return setTaskIndicator(command.active);
       case "INSPECT":
         return inspect();
       case "DESCRIBE": {

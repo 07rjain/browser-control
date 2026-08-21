@@ -58,6 +58,10 @@ export const uiRequestSchema = z.discriminatedUnion("type", [
     turnId: z.string().min(1).optional(),
   }),
   requestBase.extend({
+    type: z.literal("WORKING_TAB_FOCUS"),
+    threadId: z.string().min(1),
+  }),
+  requestBase.extend({
     type: z.literal("OPEN_EXTERNAL"),
     url: z.string().url(),
   }),

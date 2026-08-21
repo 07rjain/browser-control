@@ -49,6 +49,19 @@ describe("extension boundary validation", () => {
     expect(result.success).toBe(false);
   });
 
+  it("accepts only a specific conversation for working-tab focus", () => {
+    expect(uiRequestSchema.safeParse({
+      type: "WORKING_TAB_FOCUS",
+      requestId: crypto.randomUUID(),
+      threadId: "thread-1",
+    }).success).toBe(true);
+    expect(uiRequestSchema.safeParse({
+      type: "WORKING_TAB_FOCUS",
+      requestId: crypto.randomUUID(),
+      threadId: "",
+    }).success).toBe(false);
+  });
+
   it("rejects unlisted browser tools", () => {
     const result = dynamicToolCallSchema.safeParse({
       requestId: 4,

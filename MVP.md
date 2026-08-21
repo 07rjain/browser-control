@@ -23,7 +23,7 @@ The MVP must include:
 - Current-page title, URL, selected text, and size-limited readable text extraction.
 - Seven validated tab tools: list, activate, open, reload, group, ungroup, and permission-mode-governed close.
 - Eleven validated page tools with exact-origin permission, opaque references, activity visibility, Stop, and task-captured Full access or Ask every time behavior for consequential actions.
-- Task-scoped background working tabs that do not steal focus, plus an optional local completion tone and sidebar completion notice.
+- Task-scoped background working tabs that do not steal focus, an explicit **View working tab** control, an authorized-page working frame, plus an optional local completion tone and sidebar completion notice.
 - Local settings, active-conversation state, logout, and clear-local-data controls.
 - Automated checks plus real-browser validation of the unpacked extension.
 
@@ -52,8 +52,9 @@ Any request to add one of these items requires explicit user approval and an upd
 6. Ask about open tabs or request one of the seven allowed tab actions.
 7. Ask Codex to navigate the current site; grant exact-origin access when Chrome prompts.
 8. Review the activity log. Full access runs supported consequential controls, form submission, form-associated Enter, and tab closing directly; Ask every time pauses for explicit confirmation.
-9. Stop any active browser task or close/reopen the panel without silently repeating actions.
-10. Sign out or clear locally retained chat data.
+9. Continue browsing elsewhere, or use **View working tab** to focus the pinned task tab and see its active Browser Control frame on an authorized normal page.
+10. Stop any active browser task or close/reopen the panel without silently repeating actions.
+11. Sign out or clear locally retained chat data.
 
 ## 5. System boundary
 

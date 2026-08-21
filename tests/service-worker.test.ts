@@ -291,6 +291,7 @@ describe("service-worker browser orchestration", () => {
       [99, { id: 99, windowId: 1, index: 1, active: false, pinned: false, highlighted: false, incognito: false, selected: false, discarded: false, autoDiscardable: true, frozen: false, lastAccessed: Date.now(), groupId: -1, url: "https://mail.google.com/mail", title: "Mail", status: "complete" }],
     ]);
     const nativeRequests: NativeRequest[] = [];
+    const indicatorStates: Array<{ tabId: number; active: boolean }> = [];
     let turnSequence = 0;
     let nativeMessageListener: ((message: unknown) => void) | undefined;
     let removedListener: ((tabId: number) => void) | undefined;
@@ -330,6 +331,10 @@ describe("service-worker browser orchestration", () => {
           },
         };
       }
+      if (command.action === "TASK_INDICATOR") {
+        indicatorStates.push({ tabId, active: Boolean(command.active) });
+        return { ok: true, data: { active: Boolean(command.active) } };
+      }
       if (command.action === "CLICK") return { ok: true, data: { clicked: true, beforeUrl: tab.url, label: "Open workspace" } };
       throw new Error(`Unexpected executor action ${String(command.action)}`);
     });
@@ -355,6 +360,18 @@ describe("service-worker browser orchestration", () => {
       tabs.set(77, created);
       return created;
     });
+    const update = vi.fn(async (tabId: number, properties: chrome.tabs.UpdateProperties) => ({
+      ...tabs.get(tabId),
+      active: properties.active ?? tabs.get(tabId)?.active ?? false,
+    } as chrome.tabs.Tab));
+    const updateWindow = vi.fn(async (windowId: number, properties: chrome.windows.UpdateInfo) => ({
+      id: windowId,
+      focused: properties.focused ?? false,
+      alwaysOnTop: false,
+      incognito: false,
+      type: "normal" as const,
+      state: "normal" as const,
+    }));
     const port = {
       onMessage: { addListener: (listener: (message: unknown) => void) => { nativeMessageListener = listener; } },
       onDisconnect: { addListener: vi.fn() },
@@ -384,9 +401,11 @@ describe("service-worker browser orchestration", () => {
         get,
         sendMessage,
         reload: vi.fn(async () => undefined),
+        update,
         create,
         onRemoved: { addListener: (listener: (tabId: number) => void) => { removedListener = listener; } },
       },
+      windows: { update: updateWindow },
       permissions: { contains: vi.fn(async () => permissionGranted) },
       scripting: {
         executeScript: vi.fn(async (injection: { func?: { name?: string } }) =>
@@ -398,6 +417,8 @@ describe("service-worker browser orchestration", () => {
     });
 
     const { serviceWorkerTestHooks } = await import("../src/background/service-worker");
+    expect(serviceWorkerTestHooks.isTrustedUiSender({ id: "extension-id" })).toBe(true);
+    expect(serviceWorkerTestHooks.isTrustedUiSender({ id: "extension-id", tab: tabs.get(12) })).toBe(false);
     const requestId = () => crypto.randomUUID();
     await expect(serviceWorkerTestHooks.routeRequest({
       type: "CHAT_SEND",
@@ -408,6 +429,13 @@ describe("service-worker browser orchestration", () => {
     })).resolves.toEqual({ turnId: "turn-1" });
 
     visibleTabId = 99;
+    await expect(serviceWorkerTestHooks.routeRequest({
+      type: "WORKING_TAB_FOCUS",
+      requestId: requestId(),
+      threadId: "thread-1",
+    })).resolves.toMatchObject({ tabId: 12, title: "Calendar" });
+    expect(updateWindow).toHaveBeenCalledWith(1, { focused: true });
+    expect(update).toHaveBeenCalledWith(12, { active: true });
     const inspectCall = {
       requestId: 10,
       threadId: "thread-1",
@@ -433,6 +461,7 @@ describe("service-worker browser orchestration", () => {
       granted: true,
     })).resolves.toEqual({ continued: true });
     expect(sendMessage).toHaveBeenCalledWith(12, expect.objectContaining({ action: "INSPECT" }));
+    expect(indicatorStates).toContainEqual({ tabId: 12, active: true });
     expect(query).toHaveBeenCalledTimes(1);
 
     permissionGranted = false;
@@ -466,6 +495,7 @@ describe("service-worker browser orchestration", () => {
     }));
 
     await serviceWorkerTestHooks.finishBrowserTurn("turn-1");
+    expect(indicatorStates.at(-1)).toEqual({ tabId: 12, active: false });
     const queryCount = query.mock.calls.length;
     await serviceWorkerTestHooks.handleDynamicToolCall({
       requestId: 11,
@@ -481,6 +511,46 @@ describe("service-worker browser orchestration", () => {
       method: "tool.respond",
       params: expect.objectContaining({ success: false }),
     }));
+
+    visibleTabId = 12;
+    const indicatorCount = indicatorStates.length;
+    await expect(serviceWorkerTestHooks.routeRequest({
+      type: "CHAT_SEND",
+      requestId: requestId(),
+      threadId: "thread-3",
+      clientMessageId: requestId(),
+      text: "Check my calendar again",
+    })).resolves.toEqual({ turnId: "turn-3" });
+    expect(indicatorStates).toHaveLength(indicatorCount);
+    await serviceWorkerTestHooks.handleDynamicToolCall({
+      ...inspectCall,
+      requestId: 14,
+      threadId: "thread-3",
+      turnId: "turn-3",
+      callId: "call-inspect-again",
+      arguments: { idempotencyKey: "inspect-00000003" },
+    });
+    expect(indicatorStates.at(-1)).toEqual({ tabId: 12, active: true });
+    await serviceWorkerTestHooks.handleDynamicToolCall({
+      requestId: 15,
+      threadId: "thread-3",
+      turnId: "turn-3",
+      callId: "call-open-calendar",
+      namespace: "tabs",
+      tool: "open",
+      arguments: { url: "https://calendar.google.com/calendar/day" },
+    });
+    expect(indicatorStates.slice(-2)).toEqual([
+      { tabId: 12, active: false },
+      { tabId: 77, active: true },
+    ]);
+    await serviceWorkerTestHooks.routeRequest({
+      type: "BROWSER_TASK_CANCEL",
+      requestId: requestId(),
+      threadId: "thread-3",
+      turnId: "turn-3",
+    });
+    expect(indicatorStates.at(-1)).toEqual({ tabId: 77, active: false });
 
     removedListener?.(12);
     await new Promise((resolve) => setTimeout(resolve, 0));

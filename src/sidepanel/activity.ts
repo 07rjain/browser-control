@@ -35,6 +35,10 @@ export function groupToolStatuses(statuses: ToolStatus[]): Map<string, ToolStatu
   return groups;
 }
 
+export function hasBrowserActivityForTurn(statuses: ToolStatus[], turnId: string | null): boolean {
+  return turnId !== null && statuses.some((status) => status.turnId === turnId);
+}
+
 export function visibleActivityFormFields(status: ToolStatus): Array<{ name: string; value: string }> {
   return (status.target?.form?.fields ?? [])
     .filter((field) => !field.sensitive)

@@ -243,6 +243,24 @@ async function ensureExecutor(target: PageTarget): Promise<void> {
   }
 }
 
+export async function setPageTaskIndicator(tabId: number, active: boolean): Promise<boolean> {
+  if (active) {
+    try {
+      const target = await authorizedTarget(tabId);
+      await ensureExecutor(target);
+    } catch {
+      await sendExecutor(tabId, { action: "TASK_INDICATOR", active: false }).catch(() => undefined);
+      return false;
+    }
+  }
+  try {
+    const result = await sendExecutor<{ active: boolean }>(tabId, { action: "TASK_INDICATOR", active });
+    return result.active === active;
+  } catch {
+    return false;
+  }
+}
+
 function assertRefTarget(ref: ElementRef, target: PageTarget): void {
   if (ref.tabId !== target.tabId || ref.origin !== target.origin) {
     throw new Error("The page element belongs to a different tab or origin. Inspect the task's working tab again.");

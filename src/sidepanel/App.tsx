@@ -13,7 +13,7 @@ import {
   normalizeBrowserTaskActionLimit,
   type BrowserPermissionMode,
 } from "../shared/page-tools";
-import { groupToolStatuses, summarizeToolStatuses, visibleActivityFormFields, type ToolStatus } from "./activity";
+import { groupToolStatuses, hasBrowserActivityForTurn, summarizeToolStatuses, visibleActivityFormFields, type ToolStatus } from "./activity";
 import { settleCanceledMessages, type ChatMessage } from "./chat-state";
 import {
   createConversationRecord,
@@ -228,6 +228,7 @@ export default function App() {
   const completionSoundEnabledRef = useRef(false);
 
   const streaming = activeTurnId !== null || isSending;
+  const activeBrowserTask = streaming && hasBrowserActivityForTurn(toolStatuses, activeTurnId);
 
   const refreshAccount = useCallback(async () => {
     try {
@@ -615,6 +616,16 @@ export default function App() {
     setActiveTurnId(null);
   };
 
+  const viewWorkingTab = async () => {
+    if (!threadId) return;
+    try {
+      await sendRequest({ type: "WORKING_TAB_FOCUS", threadId });
+      setError(null);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to open the agent's working tab.");
+    }
+  };
+
   const newChat = () => {
     if (streaming) void stop();
     setConversationHistory((current) => upsertConversation(
@@ -1000,6 +1011,15 @@ export default function App() {
       </div>
 
       <footer className="composer-wrap">
+        {activeBrowserTask && threadId && (
+          <>
+            <span className="sr-only" role="status">Browser Control started working in a browser tab.</span>
+            <button type="button" className="working-tab-banner" onClick={() => void viewWorkingTab()}>
+              <span className="working-tab-status"><i aria-hidden="true" />Agent is working in a browser tab</span>
+              <strong>View working tab <span aria-hidden="true">↗</span></strong>
+            </button>
+          </>
+        )}
         {completionNotice && (
           <div className="completion-banner" role="status">
             <span>{completionNotice}</span>

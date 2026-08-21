@@ -24,6 +24,7 @@ import {
   describePageTarget,
   executePageTool,
   PageControlPermissionRequiredError,
+  setPageTaskIndicator,
 } from "./page-executor-host";
 import { decidePageAction, type PageTargetDescription } from "./page-policy";
 import {
@@ -85,6 +86,7 @@ interface BrowserTaskState {
   permissionMode?: BrowserPermissionMode;
   canceled: boolean;
   finished?: boolean;
+  browserActivityStarted?: boolean;
   authorizedOrigin?: string;
   authorizedOriginPattern?: string;
   authorizedTabId?: number;
@@ -311,6 +313,73 @@ async function saveTask(task: BrowserTaskState): Promise<void> {
   await chrome.storage.session.set({ [TASK_KEY]: tasks.slice(-20) });
 }
 
+async function syncTaskIndicator(tabId: number): Promise<void> {
+  const tasks = await storedList<BrowserTaskState>(TASK_KEY);
+  const shouldShow = tasks.some((task) =>
+    task.authorizedTabId === tabId &&
+    task.browserActivityStarted === true &&
+    Boolean(task.authorizedOriginPattern) &&
+    !task.canceled &&
+    !task.finished,
+  );
+  await setPageTaskIndicator(tabId, shouldShow).catch(() => false);
+}
+
+async function refreshRememberedTaskOrigin(task: BrowserTaskState, tabId: number): Promise<void> {
+  task.authorizedTabId = tabId;
+  task.authorizedOrigin = undefined;
+  task.authorizedOriginPattern = undefined;
+  try {
+    const controlOrigin = await currentControlOrigin(tabId);
+    const storedOrigins = await chrome.storage.local.get(TASK_ORIGINS_KEY);
+    const rememberedOrigins = Array.isArray(storedOrigins[TASK_ORIGINS_KEY])
+      ? (storedOrigins[TASK_ORIGINS_KEY] as string[])
+      : [];
+    const remembered =
+      rememberedOrigins.includes(controlOrigin.originPattern) &&
+      (await chrome.permissions.contains({ origins: [controlOrigin.originPattern] }));
+    if (remembered) {
+      task.authorizedTabId = controlOrigin.tabId;
+      task.authorizedOrigin = controlOrigin.origin;
+      task.authorizedOriginPattern = controlOrigin.originPattern;
+    }
+  } catch {
+    // Protected, loading, or unapproved pages remain focusable without receiving an indicator.
+  }
+}
+
+async function initializeBrowserTask(threadId: string, turnId: string, tabId: number): Promise<void> {
+  const key = `${threadId}:${turnId}`;
+  const tasks = await storedList<BrowserTaskState>(TASK_KEY);
+  const existing = tasks.find((task) => task.key === key);
+  const task: BrowserTaskState = existing ?? {
+    key,
+    threadId,
+    turnId,
+    actionCount: 0,
+    canceled: false,
+    updatedAt: Date.now(),
+  };
+  task.authorizedTabId ??= tabId;
+  task.updatedAt = Date.now();
+  await saveTask(task);
+}
+
+async function focusThreadWorkingTab(threadId: string): Promise<Record<string, unknown>> {
+  const tabId = await getThreadWorkingTab(threadId);
+  if (tabId === undefined) throw new Error("This conversation does not have an available working tab.");
+  const tab = await chrome.tabs.get(tabId);
+  await chrome.windows.update(tab.windowId, { focused: true });
+  const focused = await chrome.tabs.update(tabId, { active: true });
+  if (!focused) throw new Error("Chrome could not focus the agent's working tab.");
+  return {
+    tabId,
+    windowId: focused.windowId,
+    title: focused.title ?? "Agent working tab",
+    url: focused.url ?? "",
+  };
+}
+
 async function recordAction(call: BrowserToolCall): Promise<void> {
   const task = await getTask(call);
   if (finishedTurns.has(call.turnId)) throw new Error("This browser turn already finished.");
@@ -381,6 +450,11 @@ function parseBrowserToolCall(input: unknown): BrowserToolCall | null {
 async function handleTabCall(call: DynamicToolCall, announce: boolean): Promise<void> {
   const task = await activeTask(call);
   if (announce) await storeActivity(call, "requested");
+  task.browserActivityStarted = true;
+  if (task.authorizedTabId !== undefined) await refreshRememberedTaskOrigin(task, task.authorizedTabId);
+  task.updatedAt = Date.now();
+  await saveTask(task);
+  if (task.authorizedTabId !== undefined) await syncTaskIndicator(task.authorizedTabId);
   const permissionMode = await getTaskPermissionMode(task);
   let bypassedApproval: Record<string, unknown> | undefined;
   if (call.tool === "close") {
@@ -424,12 +498,13 @@ async function handleTabCall(call: DynamicToolCall, announce: boolean): Promise<
     const tabId = (result as { id?: unknown }).id;
     if (typeof tabId === "number") {
       const updatedTask = await getTask(call);
-      updatedTask.authorizedTabId = tabId;
-      updatedTask.authorizedOrigin = undefined;
-      updatedTask.authorizedOriginPattern = undefined;
+      const previousTabId = updatedTask.authorizedTabId;
+      await refreshRememberedTaskOrigin(updatedTask, tabId);
       updatedTask.updatedAt = Date.now();
       await saveTask(updatedTask);
       await setThreadWorkingTab(call.threadId, tabId);
+      if (previousTabId !== undefined && previousTabId !== tabId) await syncTaskIndicator(previousTabId);
+      await syncTaskIndicator(tabId);
     }
   }
   await finishTool(call, true, result, "succeeded");
@@ -442,15 +517,16 @@ async function executePageCallForTask(
 ): Promise<unknown> {
   if (call.tool === "click" && target?.newTab && target.href && isSafeHttpUrl(target.href)) {
     if (task.authorizedTabId === undefined) throw new Error("This browser task has no working tab.");
-    const source = await chrome.tabs.get(task.authorizedTabId);
+    const previousTabId = task.authorizedTabId;
+    const source = await chrome.tabs.get(previousTabId);
     const created = await chrome.tabs.create({ url: target.href, active: false, windowId: source.windowId });
     if (created.id === undefined) throw new Error("Chrome did not return the opened background tab.");
-    task.authorizedTabId = created.id;
-    task.authorizedOrigin = undefined;
-    task.authorizedOriginPattern = undefined;
+    await refreshRememberedTaskOrigin(task, created.id);
     task.updatedAt = Date.now();
     await saveTask(task);
     await setThreadWorkingTab(call.threadId, created.id);
+    await syncTaskIndicator(previousTabId);
+    await syncTaskIndicator(created.id);
     return {
       tabId: created.id,
       url: created.url ?? target.href,
@@ -493,19 +569,20 @@ async function processCapturedPopup(
   }
 
   if (task.authorizedTabId === undefined) throw new Error("This browser task has no working tab.");
-  const source = await chrome.tabs.get(task.authorizedTabId).catch(() => undefined);
+  const previousTabId = task.authorizedTabId;
+  const source = await chrome.tabs.get(previousTabId).catch(() => undefined);
   const created = await chrome.tabs.create({
     url: popupUrls[0],
     active: false,
     ...(source?.windowId === undefined ? {} : { windowId: source.windowId }),
   });
   if (created.id === undefined) throw new Error("Chrome did not return the opened background tab.");
-  task.authorizedTabId = created.id;
-  task.authorizedOrigin = undefined;
-  task.authorizedOriginPattern = undefined;
+  await refreshRememberedTaskOrigin(task, created.id);
   task.updatedAt = Date.now();
   await saveTask(task);
   await setThreadWorkingTab(call.threadId, created.id);
+  await syncTaskIndicator(previousTabId);
+  await syncTaskIndicator(created.id);
   return {
     ...clickResult,
     popupBlocked: popupAttempts > 1,
@@ -550,6 +627,10 @@ async function handlePageCall(call: PageToolCall, announce: boolean): Promise<vo
     task.updatedAt = Date.now();
     await saveTask(task);
   }
+  task.browserActivityStarted = true;
+  task.updatedAt = Date.now();
+  await saveTask(task);
+  await syncTaskIndicator(task.authorizedTabId);
   let target: PageTargetDescription | undefined;
   if (["click", "keypress", "submit"].includes(call.tool)) target = await describePageTarget(call, false, task.authorizedTabId);
   const permissionMode = await getTaskPermissionMode(task);
@@ -739,9 +820,15 @@ async function continueAfterPermission(callId: string, originPattern: string, gr
 
 async function finishBrowserTurn(turnId: string): Promise<void> {
   const now = Date.now();
-  const tasks = (await storedList<BrowserTaskState>(TASK_KEY))
+  const storedTasks = await storedList<BrowserTaskState>(TASK_KEY);
+  const tasks = storedTasks
     .filter((task) => now - task.updatedAt < TASK_TOMBSTONE_TTL_MS);
-  const completedTask = tasks.find((task) => task.turnId === turnId);
+  const completedTask = storedTasks.find((task) => task.turnId === turnId);
+  const affectedTabIds = new Set(
+    storedTasks
+      .filter((task) => task.turnId === turnId && task.authorizedTabId !== undefined)
+      .map((task) => task.authorizedTabId as number),
+  );
   for (const task of tasks) {
     if (task.turnId === turnId) {
       task.finished = true;
@@ -749,6 +836,7 @@ async function finishBrowserTurn(turnId: string): Promise<void> {
     }
   }
   await chrome.storage.session.set({ [TASK_KEY]: tasks.slice(-40) });
+  await Promise.all([...affectedTabIds].map((tabId) => syncTaskIndicator(tabId)));
   if (completedTask && (completedTask.successfulActionCount ?? 0) > 0 && !completedTask.canceled) {
     await chrome.storage.session.set({
       [COMPLETION_NOTICE_KEY]: {
@@ -763,9 +851,11 @@ async function finishBrowserTurn(turnId: string): Promise<void> {
 async function cancelBrowserTask(threadId: string, turnId?: string): Promise<void> {
   const tasks = await storedList<BrowserTaskState>(TASK_KEY);
   let matched = false;
+  const affectedTabIds = new Set<number>();
   for (const task of tasks) {
     if (task.threadId === threadId && (!turnId || task.turnId === turnId)) {
       matched = true;
+      if (task.authorizedTabId !== undefined) affectedTabIds.add(task.authorizedTabId);
       task.canceled = true;
       task.updatedAt = Date.now();
     }
@@ -781,6 +871,7 @@ async function cancelBrowserTask(threadId: string, turnId?: string): Promise<voi
     });
   }
   await chrome.storage.session.set({ [TASK_KEY]: tasks });
+  await Promise.all([...affectedTabIds].map((tabId) => syncTaskIndicator(tabId)));
   const pendingByCall = new Map<string, { call: BrowserToolCall }>();
   for (const item of pendingApprovals.values()) pendingByCall.set(item.call.callId, { call: item.call });
   for (const item of pendingPermissions.values()) pendingByCall.set(item.call.callId, { call: item.call });
@@ -829,11 +920,14 @@ async function routeRequest(input: unknown): Promise<unknown> {
     case "CHAT_START": return threadResponseSchema.parse(await requestNative("chat.start", { model: request.model }));
     case "CHAT_RESUME": return threadResponseSchema.parse(await requestNative("chat.resume", { threadId: request.threadId, model: request.model }));
     case "CHAT_SEND": {
-      await ensureThreadWorkingTab(request.threadId);
-      return turnResponseSchema.parse(await requestNative("chat.send", { threadId: request.threadId, text: request.text, clientMessageId: request.clientMessageId, model: request.model }));
+      const tabId = await ensureThreadWorkingTab(request.threadId);
+      const result = turnResponseSchema.parse(await requestNative("chat.send", { threadId: request.threadId, text: request.text, clientMessageId: request.clientMessageId, model: request.model }));
+      await initializeBrowserTask(request.threadId, result.turnId, tabId);
+      return result;
     }
     case "CHAT_INTERRUPT": return requestNative("chat.interrupt", { threadId: request.threadId, turnId: request.turnId });
     case "BROWSER_TASK_CANCEL": return cancelBrowserTask(request.threadId, request.turnId);
+    case "WORKING_TAB_FOCUS": return focusThreadWorkingTab(request.threadId);
     case "PAGE_ATTACH": return captureCurrentPage();
     case "PAGE_CONTROL_PERMISSION_RESULT": return continueAfterPermission(request.callId, request.originPattern, request.granted);
     case "OPEN_EXTERNAL":
@@ -843,9 +937,13 @@ async function routeRequest(input: unknown): Promise<unknown> {
   }
 }
 
+function isTrustedUiSender(sender: chrome.runtime.MessageSender): boolean {
+  return sender.id === chrome.runtime.id && sender.tab === undefined;
+}
+
 chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {
   if ((message as Partial<SidebarEvent>)?.source === "codex-sidebar-background") return false;
-  if (sender.id !== chrome.runtime.id) {
+  if (!isTrustedUiSender(sender)) {
     sendResponse({ ok: false, error: "Rejected message from an unknown sender." } satisfies UiResponse);
     return false;
   }
@@ -902,4 +1000,5 @@ export const serviceWorkerTestHooks = {
   getThreadWorkingTab,
   processCapturedPopup,
   actionResultFailed,
+  isTrustedUiSender,
 };

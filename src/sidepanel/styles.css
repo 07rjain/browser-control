@@ -219,6 +219,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .form-preview dt { color: var(--muted); }
 
 .composer-wrap { position: relative; z-index: 4; padding: 9px 12px 10px; background: linear-gradient(transparent, var(--bg) 18%); }
+.working-tab-banner { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 0 7px; padding: 10px 12px; border: 1px solid color-mix(in srgb, #5d8cff 42%, var(--border)); border-radius: 12px; background: color-mix(in srgb, #5d8cff 10%, var(--panel-solid)); color: var(--text); cursor: pointer; text-align: left; box-shadow: 0 7px 22px rgba(49, 85, 160, 0.08); }
+.working-tab-banner:hover { background: color-mix(in srgb, #5d8cff 15%, var(--panel-solid)); }
+.working-tab-banner strong { flex: 0 0 auto; font-size: 11px; }
+.working-tab-status { min-width: 0; display: flex; align-items: center; gap: 8px; overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.working-tab-status i { width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; background: #45b98d; box-shadow: 0 0 0 4px rgba(69, 185, 141, 0.13); animation: pulse 1.2s infinite ease-in-out; }
 .completion-banner { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 0 7px; padding: 10px 12px; border: 1px solid color-mix(in srgb, #33a36b 28%, var(--border)); border-radius: 11px; background: color-mix(in srgb, #33a36b 10%, var(--panel-solid)); color: var(--text); font-size: 12px; line-height: 1.4; }
 .completion-banner button { flex: 0 0 auto; border: 0; background: transparent; color: var(--muted); cursor: pointer; font-size: 17px; }
 .composer { padding: 7px; border: 1px solid var(--border-strong); border-radius: 17px; background: var(--panel-solid); box-shadow: 0 8px 28px rgba(25, 25, 24, 0.07); }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   groupToolStatuses,
+  hasBrowserActivityForTurn,
   summarizeToolStatuses,
   visibleActivityFormFields,
   type ToolStatus,
@@ -33,6 +34,13 @@ describe("tool activity summaries", () => {
       activity({ status: "succeeded" }),
       activity({ callId: "call-2", tool: "fill", status: "failed" }),
     ])).toEqual({ actionCount: 2, failed: true });
+  });
+
+  it("shows working-tab affordances only after the active turn has browser activity", () => {
+    const statuses = [activity({ turnId: "turn-1" })];
+    expect(hasBrowserActivityForTurn(statuses, null)).toBe(false);
+    expect(hasBrowserActivityForTurn(statuses, "turn-2")).toBe(false);
+    expect(hasBrowserActivityForTurn(statuses, "turn-1")).toBe(true);
   });
 
   it("retains Full access bypass previews for the activity UI", () => {
