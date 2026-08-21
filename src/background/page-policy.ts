@@ -1,4 +1,8 @@
-import { isBlockedConsequentialTarget, type PageToolCall } from "../shared/page-tools";
+import {
+  isBlockedConsequentialTarget,
+  type BrowserPermissionMode,
+  type PageToolCall,
+} from "../shared/page-tools";
 
 export interface PageTargetDescription {
   refId: string;
@@ -29,7 +33,19 @@ export type PageActionDecision =
 
 const consequentialClickPattern = /^(save|send|publish|delete|book|schedule|invite)\b|\b(create account|sign up)\b/i;
 
-export function decidePageAction(call: PageToolCall, target?: PageTargetDescription): PageActionDecision {
+function confirmation(
+  permissionMode: BrowserPermissionMode,
+  title: string,
+  description: string,
+): PageActionDecision {
+  return permissionMode === "full" ? { decision: "allow" } : { decision: "confirm", title, description };
+}
+
+export function decidePageAction(
+  call: PageToolCall,
+  target: PageTargetDescription | undefined,
+  permissionMode: BrowserPermissionMode,
+): PageActionDecision {
   if (["inspect", "fill", "select", "check", "drag", "scroll", "history", "wait"].includes(call.tool)) {
     return { decision: "allow" };
   }
@@ -50,22 +66,22 @@ export function decidePageAction(call: PageToolCall, target?: PageTargetDescript
   }
 
   if (call.tool === "submit") {
-    return {
-      decision: "confirm",
-      title: "Submit this form?",
-      description: `Send the reviewed form to ${target.form?.action ?? "this site"}.`,
-    };
+    return confirmation(
+      permissionMode,
+      "Submit this form?",
+      `Send the reviewed form to ${target.form?.action ?? "this site"}.`,
+    );
   }
 
   if (call.tool === "keypress" && call.arguments && typeof call.arguments === "object" && "key" in call.arguments && call.arguments.key === "Enter") {
     if (!target.formAssociated && !target.submitter && !consequentialClickPattern.test(target.label)) {
       return { decision: "allow" };
     }
-    return {
-      decision: "confirm",
-      title: "Press Enter here?",
-      description: "Enter may submit a form or trigger an external action.",
-    };
+    return confirmation(
+      permissionMode,
+      "Press Enter here?",
+      "Enter may submit a form or trigger an external action.",
+    );
   }
   if (call.tool === "keypress") return { decision: "allow" };
 
@@ -78,11 +94,11 @@ export function decidePageAction(call: PageToolCall, target?: PageTargetDescript
       return { decision: "refuse", reason: "This link does not have a safe http or https destination." };
     }
     if (target.submitter || consequentialClickPattern.test(target.label)) {
-      return {
-        decision: "confirm",
-        title: "Confirm this page action?",
-        description: "This control may send, save, publish, book, invite, delete, or otherwise change external data.",
-      };
+      return confirmation(
+        permissionMode,
+        "Confirm this page action?",
+        "This control may send, save, publish, book, invite, delete, or otherwise change external data.",
+      );
     }
     return { decision: "allow" };
   }

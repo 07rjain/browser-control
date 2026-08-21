@@ -27,6 +27,260 @@ function storageArea(data: Record<string, unknown>) {
 describe("service-worker browser orchestration", () => {
   beforeEach(() => vi.resetModules());
 
+  it("skips tab-close approval by default and restores it in ask mode", async () => {
+    const sessionData: Record<string, unknown> = {
+      codexSidebarBrowserTasks: [{
+        key: "thread-full:turn-full",
+        threadId: "thread-full",
+        turnId: "turn-full",
+        actionCount: 0,
+        permissionMode: "corrupted",
+        canceled: false,
+        updatedAt: Date.now(),
+      }],
+    };
+    const localData: Record<string, unknown> = {};
+    const remove = vi.fn(async () => undefined);
+    let nativeMessageListener: ((message: unknown) => void) | undefined;
+    const port = {
+      onMessage: { addListener: (listener: (message: unknown) => void) => { nativeMessageListener = listener; } },
+      onDisconnect: { addListener: vi.fn() },
+      postMessage: (message: NativeRequest) => queueMicrotask(() => nativeMessageListener?.({
+        type: "response",
+        id: message.id,
+        ok: true,
+        data: {},
+      })),
+    };
+
+    vi.stubGlobal("chrome", {
+      runtime: {
+        id: "extension-id",
+        connectNative: () => port,
+        sendMessage: vi.fn(async () => undefined),
+        onMessage: { addListener: vi.fn() },
+        onInstalled: { addListener: vi.fn() },
+        onStartup: { addListener: vi.fn() },
+      },
+      storage: { session: storageArea(sessionData), local: storageArea(localData) },
+      tabs: {
+        get: vi.fn(async (tabId: number) => ({
+          id: tabId,
+          windowId: 1,
+          index: 0,
+          active: false,
+          pinned: false,
+          highlighted: false,
+          incognito: false,
+          selected: false,
+          discarded: false,
+          autoDiscardable: true,
+          frozen: false,
+          lastAccessed: Date.now(),
+          groupId: -1,
+          title: `Tab ${tabId}`,
+          url: `https://example.com/${tabId}`,
+        })),
+        remove,
+        onRemoved: { addListener: vi.fn() },
+      },
+      sidePanel: { setPanelBehavior: vi.fn(async () => undefined) },
+    });
+
+    const { serviceWorkerTestHooks } = await import("../src/background/service-worker");
+    await serviceWorkerTestHooks.handleDynamicToolCall({
+      requestId: 1,
+      threadId: "thread-full",
+      turnId: "turn-full",
+      callId: "close-full",
+      namespace: "tabs",
+      tool: "close",
+      arguments: { tabId: 21 },
+    });
+    expect(remove).toHaveBeenCalledWith(21);
+    expect(sessionData.codexSidebarBrowserTasks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ key: "thread-full:turn-full", permissionMode: "full" }),
+    ]));
+
+    localData.codexSidebarBrowserPermissionMode = "ask";
+    await serviceWorkerTestHooks.handleDynamicToolCall({
+      requestId: 2,
+      threadId: "thread-ask",
+      turnId: "turn-ask",
+      callId: "close-ask",
+      namespace: "tabs",
+      tool: "close",
+      arguments: { tabId: 22 },
+    });
+    expect(remove).not.toHaveBeenCalledWith(22);
+    await expect(serviceWorkerTestHooks.routeRequest({
+      type: "BROWSER_STATE_READ",
+      requestId: crypto.randomUUID(),
+    })).resolves.toMatchObject({
+      prompts: [expect.objectContaining({
+        type: "approval",
+        data: expect.objectContaining({ callId: "close-ask", title: "Close this tab?" }),
+      })],
+    });
+  });
+
+  it("executes consequential page actions in full mode, captures the mode per task, and prompts in ask mode", async () => {
+    const sessionData: Record<string, unknown> = {
+      codexSidebarThreadWorkingTabs: [
+        { threadId: "thread-full", tabId: 12, updatedAt: Date.now() },
+        { threadId: "thread-ask", tabId: 12, updatedAt: Date.now() },
+      ],
+    };
+    const localData: Record<string, unknown> = {
+      codexSidebarTaskControlOrigins: ["https://example.com/*"],
+    };
+    const executorActions: string[] = [];
+    let nativeMessageListener: ((message: unknown) => void) | undefined;
+    const tab = {
+      id: 12,
+      windowId: 1,
+      index: 0,
+      active: true,
+      pinned: false,
+      highlighted: true,
+      incognito: false,
+      selected: true,
+      discarded: false,
+      autoDiscardable: true,
+      frozen: false,
+      lastAccessed: Date.now(),
+      groupId: -1,
+      title: "Permission fixture",
+      url: "https://example.com/form",
+      status: "complete" as const,
+    };
+    const targetFor = (refId: unknown) => {
+      if (refId === "submit") {
+        return {
+          refId: "submit", snapshotId: "snapshot-1", role: "button", label: "Submit local test", tag: "button",
+          inputType: null, disabled: false, sensitive: false, sameOrigin: true, newTab: false, download: false,
+          formAssociated: true, submitter: true,
+          form: {
+            action: "https://example.com/form",
+            method: "POST",
+            fields: [{ name: "Name", value: "Codex test", sensitive: false }],
+          },
+        };
+      }
+      if (refId === "enter") {
+        return {
+          refId: "enter", snapshotId: "snapshot-1", role: "textbox", label: "Name", tag: "input",
+          inputType: "text", disabled: false, sensitive: false, sameOrigin: true, newTab: false, download: false,
+          formAssociated: true, submitter: false, form: null,
+        };
+      }
+      return {
+        refId: "save", snapshotId: "snapshot-1", role: "button", label: "Save event", tag: "button",
+        inputType: null, disabled: false, sensitive: false, sameOrigin: true, newTab: false, download: false,
+        formAssociated: false, submitter: false, form: null,
+      };
+    };
+    const sendMessage = vi.fn(async (_tabId: number, command: Record<string, unknown>) => {
+      if (command.action === "PING") return { ok: true, data: { origin: "https://example.com" } };
+      if (command.action === "DESCRIBE") return { ok: true, data: targetFor(command.refId) };
+      if (["SUBMIT", "CLICK", "KEYPRESS"].includes(String(command.action))) {
+        executorActions.push(String(command.action));
+        return { ok: true, data: { completed: true } };
+      }
+      throw new Error(`Unexpected executor action ${String(command.action)}`);
+    });
+    const port = {
+      onMessage: { addListener: (listener: (message: unknown) => void) => { nativeMessageListener = listener; } },
+      onDisconnect: { addListener: vi.fn() },
+      postMessage: (message: NativeRequest) => queueMicrotask(() => nativeMessageListener?.({
+        type: "response",
+        id: message.id,
+        ok: true,
+        data: {},
+      })),
+    };
+
+    vi.stubGlobal("chrome", {
+      runtime: {
+        id: "extension-id",
+        connectNative: () => port,
+        sendMessage: vi.fn(async () => undefined),
+        onMessage: { addListener: vi.fn() },
+        onInstalled: { addListener: vi.fn() },
+        onStartup: { addListener: vi.fn() },
+      },
+      storage: { session: storageArea(sessionData), local: storageArea(localData) },
+      tabs: {
+        get: vi.fn(async () => tab),
+        sendMessage,
+        create: vi.fn(),
+        onRemoved: { addListener: vi.fn() },
+      },
+      permissions: { contains: vi.fn(async () => true) },
+      scripting: {
+        executeScript: vi.fn(async (injection: { func?: unknown }) =>
+          injection.func
+            ? [{ frameId: 0, result: { attempted: 0, urls: [] } }]
+            : []),
+      },
+      sidePanel: { setPanelBehavior: vi.fn(async () => undefined) },
+    });
+
+    const { serviceWorkerTestHooks } = await import("../src/background/service-worker");
+    const ref = (id: string) => ({ id, snapshotId: "snapshot-1", tabId: 12, origin: "https://example.com" });
+    const pageCall = (threadId: string, turnId: string, callId: string, tool: "submit" | "click" | "keypress", id: string) => ({
+      requestId: callId,
+      threadId,
+      turnId,
+      callId,
+      namespace: "page" as const,
+      tool,
+      arguments: {
+        idempotencyKey: `${callId}-idempotency`,
+        ref: ref(id),
+        ...(tool === "keypress" ? { key: "Enter" } : {}),
+      },
+    });
+
+    await serviceWorkerTestHooks.handleDynamicToolCall(pageCall("thread-full", "turn-full", "full-submit", "submit", "submit"));
+    localData.codexSidebarBrowserPermissionMode = "ask";
+    await serviceWorkerTestHooks.handleDynamicToolCall(pageCall("thread-full", "turn-full", "full-save", "click", "save"));
+    await serviceWorkerTestHooks.handleDynamicToolCall(pageCall("thread-full", "turn-full", "full-enter", "keypress", "enter"));
+    expect(executorActions).toEqual(["SUBMIT", "CLICK", "KEYPRESS"]);
+
+    await serviceWorkerTestHooks.handleDynamicToolCall(pageCall("thread-ask", "turn-ask", "ask-submit", "submit", "submit"));
+    await serviceWorkerTestHooks.handleDynamicToolCall(pageCall("thread-ask", "turn-ask", "ask-save", "click", "save"));
+    await serviceWorkerTestHooks.handleDynamicToolCall(pageCall("thread-ask", "turn-ask", "ask-enter", "keypress", "enter"));
+    expect(executorActions).toEqual(["SUBMIT", "CLICK", "KEYPRESS"]);
+
+    const browserState = await serviceWorkerTestHooks.routeRequest({
+      type: "BROWSER_STATE_READ",
+      requestId: crypto.randomUUID(),
+    }) as {
+      activities: Array<Record<string, unknown>>;
+      prompts: Array<{ type: string; data: { callId: string } }>;
+    };
+    expect(browserState.prompts.map((prompt) => prompt.data.callId)).toEqual(expect.arrayContaining([
+      "ask-submit", "ask-save", "ask-enter",
+    ]));
+    expect(browserState.activities).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        callId: "full-submit",
+        status: "running",
+        permissionMode: "full",
+        confirmationBypassed: true,
+        target: expect.objectContaining({
+          label: "Submit local test",
+          form: expect.objectContaining({ fields: [{ name: "Name", value: "Codex test", sensitive: false }] }),
+        }),
+      }),
+    ]));
+    expect(sessionData.codexSidebarBrowserTasks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ key: "thread-full:turn-full", permissionMode: "full" }),
+      expect.objectContaining({ key: "thread-ask:turn-ask", permissionMode: "ask" }),
+    ]));
+  });
+
   it("pins before send, resumes permission on that tab, and rejects late calls", async () => {
     const sessionData: Record<string, unknown> = {};
     const localData: Record<string, unknown> = {};

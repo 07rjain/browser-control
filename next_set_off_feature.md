@@ -62,7 +62,7 @@ The assistant must never claim an action succeeded until it has inspected the re
 
 - Inspect the form and summarize the fields and destination before submission.
 - Validate that required visible fields appear complete.
-- Require explicit user confirmation immediately before any form submission that creates, changes, sends, books, posts, uploads, purchases, deletes, or otherwise affects external state.
+- In Ask every time mode, require explicit user confirmation immediately before any supported form submission that creates, changes, sends, books, posts, deletes, or otherwise affects external state. In the default Full access mode, execute supported submissions without another approval card while retaining hard safety refusals and activity visibility.
 - Use normal page behavior such as activating the visible submit control or calling the form's standard submission path; do not bypass client-side validation.
 - Verify and report the resulting success, validation error, or navigation state.
 
@@ -92,7 +92,7 @@ The first implementation should expose a small typed tool namespace rather than 
 | Tool | Purpose | Default approval |
 | --- | --- | --- |
 | `page.inspect` | Return a bounded semantic page and interactive-element snapshot. | Automatic on an authorized origin. |
-| `page.click` | Activate one visible element by a fresh reference. | Automatic for ordinary navigation; confirmation when consequential. |
+| `page.click` | Activate one visible element by a fresh reference. | Automatic in Full access; confirmation when consequential in Ask every time. |
 | `page.fill` | Set or clear a non-sensitive form field. | Automatic, visibly logged; sensitive categories refused. |
 | `page.select` | Choose an option, checkbox, or radio value. | Automatic, visibly logged. |
 | `page.drag` | Drag one visible referenced control onto another referenced control from the same inspection. | Automatic, visibly logged. |
@@ -100,7 +100,7 @@ The first implementation should expose a small typed tool namespace rather than 
 | `page.scroll` | Scroll viewport, container, or referenced element. | Automatic. |
 | `page.history` | Move backward or forward in the task's working tab. | Automatic. |
 | `page.wait` | Wait for bounded navigation or element readiness. | Automatic with timeout. |
-| `page.submit` | Submit a reviewed form through normal page behavior. | Explicit confirmation required. |
+| `page.submit` | Submit a reviewed form through normal page behavior. | Automatic in Full access; explicit confirmation in Ask every time. |
 
 Tool arguments and results must use runtime-validated schemas. Unknown tools, unknown fields, coordinate-only clicks, arbitrary selectors from model output, arbitrary scripts, and unsupported key combinations fail closed.
 
@@ -120,9 +120,9 @@ Exact-origin access is requested once and remembered until the user clears local
 
 #### Level 3 — Consequential external action
 
-The extension must pause for a just-in-time confirmation before it submits or triggers an action that sends data, creates an appointment, publishes content, changes an account, deletes data, uploads a file, communicates with another person, or commits a transaction.
+The Settings permission level governs supported consequential actions. Full access is the default and may run them without an approval card; Ask every time pauses for a just-in-time confirmation before submission, sending data, creating an appointment, publishing content, changing an account, deleting data, or communicating with another person.
 
-The confirmation must name the site, action, relevant non-secret values, and expected effect. Approval applies to one exact action only and expires if the page, tab, origin, form, or values change.
+When Ask every time is selected, the confirmation must name the site, action, relevant non-secret values, and expected effect. Approval applies to one exact action only and expires if the page, tab, origin, form, or values change. Both modes retain the activity log, task action budget, Stop, stale-reference checks, exact-origin access, and Level 4 refusals. A mode change is captured when the next browser task starts and cannot alter an in-flight task.
 
 #### Level 4 — Prohibited in this milestone
 
@@ -142,7 +142,7 @@ Additional restricted categories can be added before implementation, but protect
 
 - Continue using `activeTab` for action access gained from a direct user gesture where possible.
 - If a multi-step task must survive navigation within an origin, request optional permission only for that exact `http` or `https` origin and explain why.
-- Never silently promote optional origin access into required `<all_urls>` access.
+- Never silently promote optional origin access into required `<all_urls>` access. Full access controls extension approval cards; it does not bypass Chrome's initial exact-origin permission prompt.
 - Display the currently controlled tab and origin in the side panel throughout an active task.
 - Revoke task-scoped element references when the tab navigates, reloads, changes origin, closes, or the task ends.
 - Do not collect browser history, cookies, saved passwords, autofill data, or unrelated tab contents.
@@ -231,9 +231,9 @@ Exit gate: the assistant can reliably navigate representative static and single-
 
 - Implement fill, clear, select, check, radio, and allowlisted keypress actions.
 - Detect sensitive fields and prevent their values from entering model context or logs.
-- Implement form previews, code-side validation, just-in-time confirmation, submission, and result verification.
+- Implement form previews, code-side validation, permission-mode approval handling, submission, and result verification.
 
-Exit gate: representative search, contact, and scheduling forms work; consequential submissions never occur without a fresh explicit approval.
+Exit gate: representative search, contact, and scheduling forms work; Ask every time never submits consequential forms without a fresh explicit approval, while Full access records the skipped-approval preview in activity.
 
 ### Phase 4 — Multi-step reliability and hardening
 
@@ -267,7 +267,7 @@ This milestone is complete only when all of the following are true:
 - The assistant can click a named visible item and verify the resulting state.
 - The assistant can scroll up, down, to the top, to the bottom, to an element, and within a referenced scroll container.
 - The assistant can fill common non-sensitive fields, choose options, and correct validation errors.
-- The assistant cannot submit a consequential form without a fresh, specific user confirmation.
+- Ask every time cannot submit a consequential form without a fresh, specific user confirmation; Full access may submit supported forms directly and records the skipped-approval preview in activity.
 - The user sees every action and result in a chronological activity log and can stop an active task.
 - Reloads, redirects, DOM changes, and retries do not cause stale or duplicate actions.
 - Unsupported pages, frames, elements, and security-sensitive requests fail with a clear explanation.
@@ -283,7 +283,7 @@ This milestone is complete only when all of the following are true:
 | Inspection | Visible/hidden controls, duplicate names, disabled controls, ARIA roles, DOM mutation, stale references. |
 | Click | Links, buttons, menus, SPA navigation, detached/covered targets, popup/new-tab behavior. |
 | Fields | Input, textarea, select, checkbox, radio, contenteditable, controlled components, sensitive-field refusal. |
-| Submit | Native validation, application validation, confirmation approval/rejection/expiry, duplicate prevention, success/error detection. |
+| Submit | Native validation, application validation, Full access bypass visibility, Ask every time approval/rejection/expiry, duplicate prevention, success/error detection. |
 | Scroll | Viewport, nested container, element target, top/bottom boundaries, lazy-loaded content, no-progress loop. |
 | Navigation | Back, forward, reload interaction, redirects, origin changes, closed or switched tabs. |
 | Activity | Every state, redaction, stop, retry, reconnect, sidebar reopen, clear local data. |

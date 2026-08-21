@@ -9,10 +9,13 @@ import {
   isSafeHttpUrl,
 } from "../shared/protocol";
 import {
+  BROWSER_PERMISSION_MODE_KEY,
   BROWSER_TASK_ACTION_LIMIT_KEY,
+  normalizeBrowserPermissionMode,
   normalizeBrowserTaskActionLimit,
   pageToolCallSchema,
   parsePageToolArguments,
+  type BrowserPermissionMode,
   type PageToolCall,
 } from "../shared/page-tools";
 import { captureCurrentPage, PagePermissionRequiredError } from "./page-extractor";
@@ -79,6 +82,7 @@ interface BrowserTaskState {
   actionCount: number;
   successfulActionCount?: number;
   actionLimit?: number;
+  permissionMode?: BrowserPermissionMode;
   canceled: boolean;
   finished?: boolean;
   authorizedOrigin?: string;
@@ -324,6 +328,23 @@ async function recordAction(call: BrowserToolCall): Promise<void> {
   await saveTask(task);
 }
 
+async function getTaskPermissionMode(task: BrowserTaskState): Promise<BrowserPermissionMode> {
+  if (task.permissionMode !== undefined) {
+    const normalized = normalizeBrowserPermissionMode(task.permissionMode);
+    if (task.permissionMode !== normalized) {
+      task.permissionMode = normalized;
+      task.updatedAt = Date.now();
+      await saveTask(task);
+    }
+    return normalized;
+  }
+  const stored = await chrome.storage.local.get(BROWSER_PERMISSION_MODE_KEY);
+  task.permissionMode = normalizeBrowserPermissionMode(stored[BROWSER_PERMISSION_MODE_KEY]);
+  task.updatedAt = Date.now();
+  await saveTask(task);
+  return task.permissionMode;
+}
+
 async function activeTask(call: BrowserToolCall): Promise<BrowserTaskState> {
   const task = await getTask(call);
   if (finishedTurns.has(call.turnId) || task.finished) throw new Error("This browser turn already finished.");
@@ -358,31 +379,40 @@ function parseBrowserToolCall(input: unknown): BrowserToolCall | null {
 }
 
 async function handleTabCall(call: DynamicToolCall, announce: boolean): Promise<void> {
-  await activeTask(call);
+  const task = await activeTask(call);
   if (announce) await storeActivity(call, "requested");
+  const permissionMode = await getTaskPermissionMode(task);
+  let bypassedApproval: Record<string, unknown> | undefined;
   if (call.tool === "close") {
     const target = await describeCloseTarget(call);
-    await storeActivity(call, "awaiting confirmation", { target: { title: target.title, url: target.url } });
-    const prompt = {
-      callId: call.callId,
-      namespace: call.namespace,
-      tool: call.tool,
-      title: "Close this tab?",
-      description: "Closing a tab can discard unsaved page state.",
+    if (permissionMode === "ask") {
+      await storeActivity(call, "awaiting confirmation", { target: { title: target.title, url: target.url } });
+      const prompt = {
+        callId: call.callId,
+        namespace: call.namespace,
+        tool: call.tool,
+        title: "Close this tab?",
+        description: "Closing a tab can discard unsaved page state.",
+        target: { label: target.title, url: target.url },
+        approveLabel: "Close tab",
+        rejectLabel: "Keep tab",
+        danger: true,
+      };
+      await activeTask(call);
+      pendingApprovals.set(call.callId, { call });
+      pendingPrompts.set(call.callId, { type: "approval", data: prompt });
+      await persistPendingPrompt({ callId: call.callId, type: "approval", data: prompt, approval: { call } });
+      broadcast("tool.approval", prompt);
+      return;
+    }
+    bypassedApproval = {
+      permissionMode,
+      confirmationBypassed: true,
       target: { label: target.title, url: target.url },
-      approveLabel: "Close tab",
-      rejectLabel: "Keep tab",
-      danger: true,
     };
-    await activeTask(call);
-    pendingApprovals.set(call.callId, { call });
-    pendingPrompts.set(call.callId, { type: "approval", data: prompt });
-    await persistPendingPrompt({ callId: call.callId, type: "approval", data: prompt, approval: { call } });
-    broadcast("tool.approval", prompt);
-    return;
   }
   await recordAction(call);
-  await storeActivity(call, "running");
+  await storeActivity(call, "running", bypassedApproval);
   let result = await executeTabTool(call);
   if (call.tool === "list" && Array.isArray(result)) {
     const workingTabId = await getThreadWorkingTab(call.threadId);
@@ -522,7 +552,9 @@ async function handlePageCall(call: PageToolCall, announce: boolean): Promise<vo
   }
   let target: PageTargetDescription | undefined;
   if (["click", "keypress", "submit"].includes(call.tool)) target = await describePageTarget(call, false, task.authorizedTabId);
-  const policy = decidePageAction(call, target);
+  const permissionMode = await getTaskPermissionMode(task);
+  const confirmationBypassed = permissionMode === "full" && decidePageAction(call, target, "ask").decision === "confirm";
+  const policy = decidePageAction(call, target, permissionMode);
   if (policy.decision === "refuse") {
     await finishTool(call, false, { error: policy.reason }, "failed");
     return;
@@ -552,7 +584,17 @@ async function handlePageCall(call: PageToolCall, announce: boolean): Promise<vo
     return;
   }
   await recordAction(call);
-  await storeActivity(call, "running");
+  await storeActivity(call, "running", confirmationBypassed
+    ? {
+        permissionMode,
+        confirmationBypassed: true,
+        target: {
+          label: target?.label ?? call.tool,
+          url: target?.href ?? target?.form?.action,
+          form: target?.form,
+        },
+      }
+    : undefined);
   const result = await executePageCallForTask(call, task, target);
   const actionFailed = actionResultFailed(result);
   await finishTool(call, !actionFailed, result, actionFailed ? "failed" : "succeeded");

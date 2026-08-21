@@ -3,13 +3,17 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { PageAttachment, SidebarEvent, UiResponse } from "../shared/protocol";
 import {
+  BROWSER_PERMISSION_MODE_KEY,
   BROWSER_TASK_ACTION_LIMIT_KEY,
+  DEFAULT_BROWSER_PERMISSION_MODE,
   DEFAULT_BROWSER_TASK_ACTION_LIMIT,
   MAX_BROWSER_TASK_ACTION_LIMIT,
   MIN_BROWSER_TASK_ACTION_LIMIT,
+  normalizeBrowserPermissionMode,
   normalizeBrowserTaskActionLimit,
+  type BrowserPermissionMode,
 } from "../shared/page-tools";
-import { groupToolStatuses, summarizeToolStatuses, type ToolStatus } from "./activity";
+import { groupToolStatuses, summarizeToolStatuses, visibleActivityFormFields, type ToolStatus } from "./activity";
 import { settleCanceledMessages, type ChatMessage } from "./chat-state";
 import {
   createConversationRecord,
@@ -166,6 +170,19 @@ function ToolActivity({ statuses, complete }: { statuses: ToolStatus[]; complete
             <span>Browser · {status.namespace ? `${status.namespace}.` : ""}{status.tool}</span>
             <strong>{status.status}</strong>
             {status.origin && <small>{status.origin}</small>}
+            {status.confirmationBypassed && (
+              <small className="tool-step-bypass">
+                Full access · approval skipped{status.target?.label ? ` for ${status.target.label}` : ""}
+              </small>
+            )}
+            {status.confirmationBypassed && (status.target?.form?.action ?? status.target?.url) && (
+              <small>{status.target?.form?.action ?? status.target?.url}</small>
+            )}
+            {status.confirmationBypassed && visibleActivityFormFields(status).map((field) => (
+              <small key={`${status.callId}-${status.status}-${field.name}`}>
+                {field.name}: {field.value || "Empty"}
+              </small>
+            ))}
             {status.error && <small className="tool-step-error">{status.error}</small>}
           </li>
         ))}
@@ -187,6 +204,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [theme, setTheme] = useState<Theme>("system");
   const [selectedModel, setSelectedModel] = useState("");
+  const [browserPermissionMode, setBrowserPermissionMode] = useState<BrowserPermissionMode>(DEFAULT_BROWSER_PERMISSION_MODE);
   const [browserTaskActionLimit, setBrowserTaskActionLimit] = useState(DEFAULT_BROWSER_TASK_ACTION_LIMIT);
   const [browserTaskActionLimitDraft, setBrowserTaskActionLimitDraft] = useState(String(DEFAULT_BROWSER_TASK_ACTION_LIMIT));
   const [completionSoundEnabled, setCompletionSoundEnabled] = useState(false);
@@ -225,7 +243,7 @@ export default function App() {
 
   useEffect(() => {
     void chrome.storage.local
-      .get([STORAGE_KEY, BROWSER_TASK_ACTION_LIMIT_KEY])
+      .get([STORAGE_KEY, BROWSER_PERMISSION_MODE_KEY, BROWSER_TASK_ACTION_LIMIT_KEY])
       .then((stored) => {
         const state = (stored[STORAGE_KEY] as PersistedState | undefined) ?? INITIAL_STATE;
         const restoredMessages = Array.isArray(state.messages)
@@ -245,6 +263,7 @@ export default function App() {
         setSelectedModel(state.selectedModel ?? "");
         setCompletionSoundEnabled(Boolean(state.completionSoundEnabled));
         completionSoundEnabledRef.current = Boolean(state.completionSoundEnabled);
+        setBrowserPermissionMode(normalizeBrowserPermissionMode(stored[BROWSER_PERMISSION_MODE_KEY]));
         const storedActionLimit = normalizeBrowserTaskActionLimit(stored[BROWSER_TASK_ACTION_LIMIT_KEY]);
         setBrowserTaskActionLimit(storedActionLimit);
         setBrowserTaskActionLimitDraft(String(storedActionLimit));
@@ -305,6 +324,11 @@ export default function App() {
     if (!hydrated) return;
     void chrome.storage.local.set({ [BROWSER_TASK_ACTION_LIMIT_KEY]: browserTaskActionLimit });
   }, [browserTaskActionLimit, hydrated]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    void chrome.storage.local.set({ [BROWSER_PERMISSION_MODE_KEY]: browserPermissionMode });
+  }, [browserPermissionMode, hydrated]);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -646,6 +670,7 @@ export default function App() {
     const origins = [...new Set([...attachmentOrigins, ...taskOrigins])];
     if (origins.length > 0) await chrome.permissions.remove({ origins }).catch(() => false);
     await chrome.storage.local.remove(STORAGE_KEY);
+    await chrome.storage.local.remove(BROWSER_PERMISSION_MODE_KEY);
     await chrome.storage.local.remove(BROWSER_TASK_ACTION_LIMIT_KEY);
     await chrome.storage.local.remove(PAGE_ORIGINS_KEY);
     await chrome.storage.local.remove(TASK_ORIGINS_KEY);
@@ -656,6 +681,7 @@ export default function App() {
     setMessages([]);
     setTheme("system");
     setSelectedModel("");
+    setBrowserPermissionMode(DEFAULT_BROWSER_PERMISSION_MODE);
     setBrowserTaskActionLimit(DEFAULT_BROWSER_TASK_ACTION_LIMIT);
     setBrowserTaskActionLimitDraft(String(DEFAULT_BROWSER_TASK_ACTION_LIMIT));
     setCompletionSoundEnabled(false);
@@ -829,6 +855,22 @@ export default function App() {
             </label>
             <p className="menu-hint">Model changes apply to your next message.</p>
             <label>
+              Agent permission
+              <select
+                value={browserPermissionMode}
+                onChange={(event) => setBrowserPermissionMode(normalizeBrowserPermissionMode(event.target.value))}
+              >
+                <option value="full">Full access · Default</option>
+                <option value="ask">Ask every time</option>
+              </select>
+            </label>
+            <p className="menu-hint">
+              {browserPermissionMode === "full"
+                ? "Runs supported actions without approval cards. Site access and hard safety blocks still apply."
+                : "Pauses before form submission, consequential controls, Enter submissions, and tab closing."}
+              {" "}Applies to the next browser task.
+            </p>
+            <label>
               Browser actions per request
               <input
                 type="number"
@@ -848,7 +890,7 @@ export default function App() {
               />
             </label>
             <p className="menu-hint">
-              {MIN_BROWSER_TASK_ACTION_LIMIT}–{MAX_BROWSER_TASK_ACTION_LIMIT}; applies to the next request. Consequential actions still require confirmation.
+              {MIN_BROWSER_TASK_ACTION_LIMIT}–{MAX_BROWSER_TASK_ACTION_LIMIT}; applies to the next request.
             </p>
             <label className="toggle-row">
               <span>Task completion sound<small>Play a quiet tone after browser work finishes.</small></span>

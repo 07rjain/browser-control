@@ -1,3 +1,5 @@
+import type { BrowserPermissionMode } from "../shared/page-tools";
+
 export interface ToolStatus {
   callId: string;
   namespace?: string;
@@ -8,6 +10,18 @@ export interface ToolStatus {
   timestamp?: number;
   origin?: string;
   error?: string;
+  permissionMode?: BrowserPermissionMode;
+  confirmationBypassed?: boolean;
+  target?: {
+    label?: string;
+    title?: string;
+    url?: string;
+    form?: {
+      action: string;
+      method: string;
+      fields: Array<{ name: string; value: string; sensitive: boolean }>;
+    } | null;
+  };
 }
 
 export function groupToolStatuses(statuses: ToolStatus[]): Map<string, ToolStatus[]> {
@@ -19,6 +33,12 @@ export function groupToolStatuses(statuses: ToolStatus[]): Map<string, ToolStatu
     groups.set(status.turnId, group);
   }
   return groups;
+}
+
+export function visibleActivityFormFields(status: ToolStatus): Array<{ name: string; value: string }> {
+  return (status.target?.form?.fields ?? [])
+    .filter((field) => !field.sensitive)
+    .map(({ name, value }) => ({ name, value }));
 }
 
 export function summarizeToolStatuses(statuses: ToolStatus[]): {

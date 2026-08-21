@@ -133,7 +133,7 @@ Use a disposable test page or test account when an action could send, publish, d
 - Stream a response, press **Stop**, retry, and verify reconnecting does not duplicate a message or tool action.
 - Attach a normal `http` or `https` page, inspect the preview, remove it, and verify no page content is shared before attachment.
 - Attempt attachment on `chrome://extensions` and verify the extension reports the protected-page limitation cleanly.
-- Exercise tab list, activate, open, reload, group, ungroup, and confirmed close. For grouping, verify the tabs share one window, pinned tabs are refused, the requested title/color are applied, and unrelated tabs are unchanged. Verify ungrouping removes group labels without closing tabs.
+- Exercise tab list, activate, open, reload, group, ungroup, and close in both permission modes. Verify Full access closes directly with an activity preview and Ask every time shows the exact confirmation. For grouping, verify the tabs share one window, pinned tabs are refused, the requested title/color are applied, and unrelated tabs are unchanged. Verify ungrouping removes group labels without closing tabs.
 
 ### Browser-action checklist
 
@@ -145,7 +145,7 @@ Use a disposable test page or test account when an action could send, publish, d
 - Scroll up, down, top, bottom, to an element, and within a scrollable container. Verify bounded movement and honest no-progress results.
 - Drag between two visible controls on the same page. Verify file, cross-frame, cross-tab, and coordinate-only drags are refused.
 - Trigger a reactive re-render between inspection and action. Verify unique controls can be rebound and ambiguous or changed controls fail safely as stale.
-- Open a form that changes external state. Verify the panel shows one specific confirmation, rejection makes no change, approval runs only once, and success or validation failure is reported.
+- Open a disposable local form. Verify Full access submits directly while showing the skipped-approval destination/field preview in activity. Then select Ask every time and verify one specific confirmation, rejection makes no change, approval runs only once, and success or validation failure is reported.
 - Press **Stop** during an active browser task. Verify pending work becomes canceled and does not resume after reopening the panel.
 - Complete a second request and verify each request keeps its own collapsed activity dropdown in chronological order.
 
@@ -171,7 +171,7 @@ Ask Codex to inspect or navigate the active `http` or `https` page. The first pa
 
 - Inspection returns at most 80 visible interactive controls using opaque references that expire after 30 seconds or any meaningful page change.
 - After that grant, routine navigation (including external/new-tab links), ordinary buttons, field edits, scrolling, and drag-and-drop run automatically and remain visible in the activity log.
-- A fresh one-action confirmation is reserved for consequential controls such as Save, Send, Publish, Delete, Book, Schedule, form submission or form-associated Enter, and tab closing.
+- Full access is the default and runs supported consequential controls such as Save, Send, Publish, Delete, Book, Schedule, form submission, form-associated Enter, and tab closing without an approval card. Ask every time requires a fresh one-action confirmation. Both modes keep exact-origin access, activity previews, Stop, action limits, and hard refusals.
 - **Settings → Browser actions per request** controls the shared `tabs.*` and `page.*` execution budget for one Codex request. It defaults to 40, accepts 5–100, and a change applies to the next request.
 - Browser tasks snapshot a thread working tab before the request begins and retain it across follow-up requests. Opening or selecting another work tab updates that pin in the background, so changing the tab you are viewing does not pull focus back or retarget the task. An explicit user request to show or switch to a tab may foreground it.
 - New-tab links opened by page actions are created in the background and become the thread working tab. Closed or discarded working tabs fail closed or reload without falling back to the currently visible tab.

@@ -17,7 +17,7 @@ Using an AI assistant while browsing usually requires switching applications, ma
 
 ### MVP solution
 
-Build a Manifest V3 extension whose toolbar action toggles a chat UI in Chrome's side panel. A user authenticates with their ChatGPT account for Codex subscription access, starts or resumes a local chat, optionally attaches current-page context, and can ask the assistant to perform a tightly limited set of tab actions with clear confirmation for destructive actions.
+Build a Manifest V3 extension whose toolbar action toggles a chat UI in Chrome's side panel. A user authenticates with their ChatGPT account for Codex subscription access, starts or resumes a local chat, optionally attaches current-page context, and can ask the assistant to perform a tightly limited set of tab actions governed by a visible, user-selected permission mode.
 
 The original MVP is a local, user-driven chat, attachment, and tab-tool experience. The approved next milestone adds a narrow set of supervised page controls while remote agents, remote control, arbitrary scripting, remotely initiated automation, and general-purpose computer control remain deferred. A user-started task may continue in its own background working tab while the user views another tab.
 
@@ -166,7 +166,7 @@ Chrome documents `activeTab` as temporary access granted after a user gesture an
 - As a user, I can ask the assistant what tabs are open.
 - As a user, I can ask it to select a working tab, open a URL, reload a tab, or close a tab without losing the tab I am currently viewing.
 - As a user, I can explicitly ask to foreground a selected or newly opened tab when I do want to view it.
-- As a user, I approve a destructive tab action before it runs.
+- As a user, I choose whether supported destructive tab actions require approval before they run.
 
 #### Allowed MVP tools
 
@@ -176,14 +176,14 @@ Chrome documents `activeTab` as temporary access granted after a user gesture an
 - `tabs.reload`: reload a specified tab.
 - `tabs.group`: organize one or more existing unpinned tabs from the same window into a named, optionally colored/collapsed Chrome tab group.
 - `tabs.ungroup`: remove grouping from selected tabs while keeping every tab open.
-- `tabs.close`: close a specified tab only after explicit confirmation.
+- `tabs.close`: close a specified tab directly in Full access mode or after explicit confirmation in Ask every time mode.
 
 #### Acceptance criteria
 
 - Tool calls use a fixed schema and runtime validation; model text cannot directly call Chrome APIs.
 - The background service worker is the only extension context authorized to execute tab tools.
 - Unknown tools, malformed arguments, disallowed URL schemes, and stale tab IDs fail closed.
-- `tabs.close` always presents a confirmation containing the target tab title and origin.
+- `tabs.close` presents a confirmation containing the target tab title and origin in Ask every time mode; Full access mode may execute it directly while recording it in activity.
 - The UI records requested, approved/rejected, succeeded/failed status for every action.
 - Retrying or reconnecting a turn cannot execute the same action twice.
 - No MVP tool clicks page elements, types text, submits a form, downloads a file, changes browser settings, or accesses history/bookmarks.
@@ -199,6 +199,7 @@ Chrome documents that `chrome.tabs` can create, modify, and rearrange tabs, whil
 - Do not store raw authentication credentials in extension storage.
 - Include settings for theme (`system`, `light`, `dark`) and whether page attachments include readable body text by default; the safe default is off.
 - Load the models available to the signed-in Codex account and let the user choose a model. The selection is stored locally and applies to the next message without requiring a new conversation.
+- Include a locally persisted agent-permission setting. Full access is the default and skips per-action approval cards for supported actions; Ask every time restores confirmations for consequential actions and tab closing. The selected value is captured when the next browser task begins.
 - Do not add analytics or telemetry in the MVP.
 
 ### Epic G — Supervised page control (post-MVP, approved P0)
@@ -208,7 +209,7 @@ Chrome documents that `chrome.tabs` can create, modify, and rearrange tabs, whil
 - As a user, I can explicitly allow browser actions on the current site once and keep that exact-origin grant until I clear local data or revoke it in Chrome.
 - As a user, I can ask Codex to inspect visible controls, follow an ordinary same-origin link, scroll, navigate backward or forward, and wait for a page to load.
 - As a user, I can ask Codex to fill non-sensitive fields, choose options, check controls, and submit a reviewed form.
-- As a user, I can see every requested and executed action, stop the task, and approve or reject consequential actions.
+- As a user, I can see every requested and executed action, stop the task, and choose whether consequential supported actions require approval.
 
 #### Allowed page tools
 
@@ -220,10 +221,10 @@ Chrome documents that `chrome.tabs` can create, modify, and rearrange tabs, whil
 
 - A page tool cannot execute until the user grants optional host access for the exact active `http` or `https` origin.
 - An approved browser-control grant is remembered only for the exact origin. Attachment-only permission does not silently become browser-control consent. The user can revoke remembered grants through Clear local data or Chrome site-access controls.
-- Routine navigation (including external/new-tab links), menu buttons, field edits, scrolling, and drag-and-drop may run automatically under the remembered origin grant and remain visible in activity. Actions recognized as consequential require confirmation. Downloads remain unsupported.
-- Form submission, Enter that may submit, tab closing, and recognized Save/Send/Publish/Delete/Book/Schedule actions require a fresh one-action confirmation.
+- Routine navigation (including external/new-tab links), menu buttons, field edits, scrolling, and drag-and-drop may run automatically under the remembered origin grant and remain visible in activity. Downloads remain unsupported.
+- Full access is the default permission mode and may automatically run supported form submission, Enter that may submit, tab closing, and recognized Save/Send/Publish/Delete/Book/Schedule actions. Ask every time requires a fresh one-action confirmation for those actions. Hard refusals apply in both modes.
 - Purchases, financial transactions, passwords, authentication codes, payment data, private keys, CAPTCHAs, security bypasses, arbitrary downloads, and browser-setting changes are refused.
-- Form confirmation shows the destination and non-sensitive visible values. Approval expires when the tab, origin, form, values, or element reference changes.
+- In Ask every time mode, form confirmation shows the destination and non-sensitive visible values. Approval expires when the tab, origin, form, values, or element reference changes. Full access records the same preview in activity when it skips the approval card.
 
 #### Acceptance criteria
 
@@ -233,7 +234,7 @@ Chrome documents that `chrome.tabs` can create, modify, and rearrange tabs, whil
 - The activity log records requested, awaiting permission/confirmation, running, succeeded, failed, rejected, canceled, and stale states.
 - Tool activity is grouped with the request that caused it, expands while running, and collapses to a summary dropdown after completion.
 - A completed browser task produces a dismissible sidebar notice. An off-by-default local completion tone can be enabled in Settings.
-- Stop cancels the Codex turn, pending page action, and pending confirmation. It does not revoke an exact-origin grant the user chose to remember.
+- Stop cancels the Codex turn, pending page action, and pending confirmation. It does not revoke an exact-origin grant the user chose to remember. Permission-mode changes apply only to the next browser task.
 - Service-worker suspension, reconnect, or retry cannot silently repeat a completed action.
 - The visible tab is snapshotted as the thread working tab before a turn begins. Page tools and permission resumes remain bound to that tab even when the user changes tabs, and the pin persists across follow-up turns until explicitly replaced or closed.
 - Pending permission/confirmation metadata, completion notices, and finished/canceled turn tombstones survive MV3 service-worker suspension in session storage.
@@ -250,7 +251,7 @@ Chrome documents that `chrome.tabs` can create, modify, and rearrange tabs, whil
 4. The panel shows a ready composer and a clear indicator that no page content is attached.
 5. The user optionally attaches the current page, reviews the attachment, and sends a message.
 6. The answer streams in the sidebar.
-7. If the response proposes an allowed tab action, the user reviews it; destructive actions require confirmation.
+7. If the response proposes an allowed tab action, the activity log shows it; consequential actions require confirmation only in Ask every time mode.
 8. The user changes tabs while the sidebar and conversation remain available.
 
 ### Key screens and states
@@ -371,7 +372,7 @@ Do not request persistent required `<all_urls>`, `history`, `bookmarks`, `downlo
 
 - Add strict `page.*` schemas, code-side action policy, task state, cancellation, idempotency, activity history, and generalized confirmations.
 - Add exact-origin permission prompts and the packaged persistent page executor.
-- Deliver inspect/click/scroll/history/wait first, then fields and confirmed submission.
+- Deliver inspect/click/scroll/history/wait first, then fields and permission-mode-governed submission.
 - Validate stale references, sensitive-field refusal, permission revocation, Stop, form preview expiry, and Chrome MV3 restart behavior.
 - Connectors remain blocked until this phase passes and a separate connector PRD is approved.
 
@@ -396,8 +397,8 @@ Chrome Web Store submission is a separate, explicitly authorized post-MVP activi
 | No supported direct ChatGPT OAuth flow for a third-party extension | High | High | Make auth a Phase 0 gate; use a supported local Codex bridge; never scrape cookies/private endpoints. |
 | Codex app-server interface changes | High | Medium | Isolate it behind a versioned bridge adapter, pin versions for MVP, and surface compatibility errors. |
 | Native companion makes installation difficult | High | Medium | Keep packaging minimal, document it, measure onboarding success, and revisit when an official direct integration exists. |
-| Broad tab/page access erodes trust | High | Medium | Use explicit attachments, `activeTab`, visible indicators, an allowlisted tool set, and action confirmations. |
-| Prompt injection causes unsafe actions | High | High | Treat page/model content as untrusted; enforce code-side policies and confirmations independent of model instructions. |
+| Broad tab/page access erodes trust | High | Medium | Use explicit attachments, `activeTab`, visible indicators, an allowlisted tool set, a clear permission-mode setting, activity previews, and Stop. |
+| Prompt injection causes unsafe actions | High | High | Treat page/model content as untrusted; enforce code-side hard refusals, exact-origin grants, task budgets, and the selected confirmation mode independent of model instructions. |
 | Service-worker suspension interrupts streaming | Medium | Medium | Keep streaming transport in the appropriate durable component and implement reconnect/resume semantics. |
 | Scope expands into remote control/general automation | High | High | Enforce the supervised allowlist and require a PRD revision before adding remote, arbitrary, or unattended capabilities. |
 

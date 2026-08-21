@@ -206,6 +206,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .tool-steps strong { color: var(--text); font-size: 10px; font-weight: 650; text-transform: capitalize; }
 .tool-steps small { grid-column: 1 / -1; overflow-wrap: anywhere; }
 .tool-step-error { color: var(--danger); }
+.tool-step-bypass { color: var(--text); font-weight: 650; }
 .approval-card { margin: 16px 0; padding: 16px; border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--border)); border-radius: 16px; background: var(--danger-soft); }
 .approval-card.permission-card { border-color: var(--border-strong); background: var(--panel-solid); }
 .approval-card h2 { margin: 0 0 7px; font-size: 17px; }

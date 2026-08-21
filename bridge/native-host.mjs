@@ -109,7 +109,7 @@ const dynamicTools = [
       {
         type: "function",
         name: "close",
-        description: "Request to close an existing browser tab. The user will always be asked to confirm.",
+        description: "Close an existing browser tab. Ask every time mode shows a confirmation first; the default Full access mode runs the supported action directly. Both modes log the action and preserve hard safety refusals.",
         inputSchema: {
           type: "object",
           properties: { tabId: { type: "integer", minimum: 1 } },
@@ -133,7 +133,7 @@ const dynamicTools = [
       {
         type: "function",
         name: "click",
-        description: "Click one visible control using a fresh reference from page.inspect. Routine controls and links run automatically; submitters and recognized save, send, publish, delete, book, schedule, invite, or account-creation actions require confirmation. Downloads are refused.",
+        description: "Click one visible control using a fresh reference from page.inspect. Routine controls and links run automatically. Ask every time mode confirms submitters and recognized save, send, publish, delete, book, schedule, invite, or account-creation actions; the default Full access mode runs supported actions directly. Downloads and prohibited targets are refused in both modes.",
         inputSchema: { type: "object", properties: { ...idempotencyProperty, ref: pageRefSchema }, required: ["idempotencyKey", "ref"], additionalProperties: false },
       },
       {
@@ -173,7 +173,7 @@ const dynamicTools = [
       {
         type: "function",
         name: "keypress",
-        description: "Send one allowlisted navigation key to a fresh element reference. Enter requires confirmation only when the target is form-associated, a submitter, or recognized as consequential.",
+        description: "Send one allowlisted navigation key to a fresh element reference. Ask every time mode confirms Enter when the target is form-associated, a submitter, or recognized as consequential; the default Full access mode runs supported Enter actions directly. Sensitive targets are refused in both modes.",
         inputSchema: { type: "object", properties: { ...idempotencyProperty, ref: pageRefSchema, key: { type: "string", enum: ["Enter", "Escape", "Tab", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"] } }, required: ["idempotencyKey", "ref", "key"], additionalProperties: false },
       },
       {
@@ -202,7 +202,7 @@ const dynamicTools = [
       {
         type: "function",
         name: "submit",
-        description: "Submit a form associated with a fresh element reference. The user must confirm the exact form first.",
+        description: "Submit a reviewed non-sensitive form associated with a fresh element reference. Ask every time mode confirms the exact form first; the default Full access mode submits supported forms directly. Financial, sensitive, unsafe, and unsupported forms are refused in both modes.",
         inputSchema: { type: "object", properties: { ...idempotencyProperty, ref: pageRefSchema }, required: ["idempotencyKey", "ref"], additionalProperties: false },
       },
     ],
@@ -217,6 +217,7 @@ Use tabs.list before tabs.group or tabs.ungroup. Group only tabs from the same b
 Keep browser work in the background. tabs.open and tabs.activate select a working tab without changing what the user is viewing by default. Set foreground true only when the user explicitly asks to open, show, view, or switch to that tab.
 Use page.inspect before page actions and use only fresh opaque references it returned. Never provide selectors, coordinates, scripts, or invented page state.
 Never claim a browser action succeeded until the tool result verifies it. Never attempt purchases, financial transactions, passwords, one-time codes, CAPTCHAs, or security bypasses.
+The user's agent-permission setting controls approval cards: Ask every time confirms supported consequential actions, while the default Full access mode runs them directly. Never tell the user a confirmation is pending unless a tool result actually reports one.
 Never claim to have seen browser or page state unless it was attached or returned by an allowed tool.`;
 
 let appServer = null;

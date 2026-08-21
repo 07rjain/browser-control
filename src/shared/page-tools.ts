@@ -7,6 +7,10 @@ export const DEFAULT_BROWSER_TASK_ACTION_LIMIT = 40;
 export const MIN_BROWSER_TASK_ACTION_LIMIT = 5;
 export const MAX_BROWSER_TASK_ACTION_LIMIT = 100;
 export const BROWSER_TASK_ACTION_LIMIT_KEY = "codexSidebarBrowserTaskActionLimit";
+export const BROWSER_PERMISSION_MODE_KEY = "codexSidebarBrowserPermissionMode";
+export const browserPermissionModeSchema = z.enum(["ask", "full"]);
+export type BrowserPermissionMode = z.infer<typeof browserPermissionModeSchema>;
+export const DEFAULT_BROWSER_PERMISSION_MODE: BrowserPermissionMode = "full";
 export const browserTaskActionLimitSchema = z.number().int()
   .min(MIN_BROWSER_TASK_ACTION_LIMIT)
   .max(MAX_BROWSER_TASK_ACTION_LIMIT);
@@ -15,6 +19,11 @@ export function normalizeBrowserTaskActionLimit(value: unknown): number {
   const numeric = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(numeric)) return DEFAULT_BROWSER_TASK_ACTION_LIMIT;
   return Math.min(MAX_BROWSER_TASK_ACTION_LIMIT, Math.max(MIN_BROWSER_TASK_ACTION_LIMIT, Math.round(numeric)));
+}
+
+export function normalizeBrowserPermissionMode(value: unknown): BrowserPermissionMode {
+  const parsed = browserPermissionModeSchema.safeParse(value);
+  return parsed.success ? parsed.data : DEFAULT_BROWSER_PERMISSION_MODE;
 }
 
 export const elementRefSchema = z

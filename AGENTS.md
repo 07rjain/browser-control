@@ -54,15 +54,15 @@ The repository contains the Chromium **Browser Control** extension, built on the
 ### Approved scope directive
 
 - Preserve the implemented MVP: Manifest V3 side-panel chat, supported ChatGPT/Codex authentication, explicit current-page attachment, and the seven allowlisted tab tools.
-- The approved tab-tool surface is `tabs.list`, `tabs.activate`, `tabs.open`, `tabs.reload`, `tabs.group`, `tabs.ungroup`, and confirmed `tabs.close`. Grouping is limited to existing, unpinned tabs in one browser window and uses the typed Chrome Tabs/Tab Groups APIs. Ungrouping must keep every tab open.
+- The approved tab-tool surface is `tabs.list`, `tabs.activate`, `tabs.open`, `tabs.reload`, `tabs.group`, `tabs.ungroup`, and permission-mode-governed `tabs.close`. Grouping is limited to existing, unpinned tabs in one browser window and uses the typed Chrome Tabs/Tab Groups APIs. Ungrouping must keep every tab open.
 - One Codex request shares a persisted, user-configurable browser-action budget across `tabs.*` and `page.*`: default 40, minimum 5, maximum 100. Capture the value at the request's first executed action so changing Settings cannot alter an in-flight task.
-- Exact-origin browser-control approval is remembered and reused. Keep it distinct from attachment-only page access; require fresh confirmation only for consequential actions identified by policy, not routine navigation or interaction.
+- Exact-origin browser-control approval is remembered and reused. Keep it distinct from attachment-only page access. Full access is the default and runs supported actions without approval cards; Ask every time requires fresh confirmation only for consequential actions identified by policy, not routine navigation or interaction.
 - Keep user-started browser work pinned to its task working tab. `tabs.open` and `tabs.activate` must not foreground a tab unless the user explicitly asked to view or switch to it. Moving to another tab must not retarget an in-flight page task.
 - Snapshot the thread working tab before `CHAT_SEND`, retain it across turns in session storage, and bind permission resumes and opaque references to its exact tab ID. Never fall back to the newly visible tab after the request starts.
 - Retain short-lived finished/canceled turn tombstones and pending prompt metadata across MV3 service-worker suspension so late calls fail closed and approval cards can recover.
 - Completion notices remain local to the sidebar. The optional completion tone is off by default and must not require network, notification, or additional Chrome permissions.
-- The approved next milestone adds only the typed, user-supervised `page.*` tools in `next_set_off_feature.md`: inspect, click, fill, select, check, allowlisted keypress, scroll, history navigation, bounded wait, and confirmed form submission.
-- Page actions require an exact-origin user grant, opaque short-lived element references, code-side policy, activity visibility, cancellation, and confirmation for consequential actions.
+- The approved next milestone adds only the typed, user-supervised `page.*` tools in `next_set_off_feature.md`: inspect, click, fill, select, check, allowlisted keypress, scroll, history navigation, bounded wait, and permission-mode-governed form submission.
+- Page actions require an exact-origin user grant, opaque short-lived element references, code-side policy, activity visibility, cancellation, and the task-captured Full access or Ask every time confirmation mode.
 - Do not implement remote agents, Agent Bus product integration, remote browser control, arbitrary JavaScript/selectors/coordinates, `debugger`/CDP access, remotely initiated unattended automation, purchases, secret entry, store publication, telemetry, or connectors.
 - Connectors are a later, separately approved phase after supervised browser-control validation. A new idea is not in scope without an explicit user decision and PRD update.
 
@@ -105,7 +105,7 @@ The page executor must remain packaged extension code in an isolated content-scr
 1. Preserve the supported authentication, streaming, attachment, and tab-tool baseline recorded in ADR 0001.
 2. Keep strict page-tool schemas, origin/risk policy, task cancellation, idempotency, and generic confirmations ahead of DOM execution.
 3. Inject only the packaged `page-executor.js` after an exact-origin permission grant; use fresh opaque references and fail stale actions closed.
-4. Validate inspect/click/scroll/navigation before fields and confirmed form submission.
+4. Validate inspect/click/scroll/navigation before fields and permission-mode-governed form submission.
 5. Run focused automated checks, then validate permissions, activity, Stop, stale references, and submissions in current stable Chrome.
 6. Review the manifest, CSP, bundle, storage, logs, and credential exposure before private-beta handoff.
 7. Do not begin connector work until the browser-control acceptance gates pass and a connector PRD is approved.
@@ -177,6 +177,6 @@ For tab grouping, open several disposable tabs in one window, include at least t
 - Avoid dynamic code execution, remotely hosted executable code, and unsafe HTML injection.
 - Sanitize rendered content and use a restrictive Content Security Policy compatible with Manifest V3.
 - Minimize logged or persisted browsing data and never log secrets or full sensitive page contents.
-- Make model-triggered actions previewable and reversible where practical; require user confirmation for consequential actions.
+- Make model-triggered actions previewable and reversible where practical; enforce the task-captured permission mode for supported consequential actions and retain hard refusals in every mode.
 - Do not add telemetry, analytics, remote services, or data collection without explicit user approval and documentation.
 - Review the final diff, extension manifest, generated bundle, and permission changes before handoff.

@@ -21,8 +21,8 @@ The MVP must include:
 - Streaming text chat with safe Markdown, stop, retry, new chat, and active-chat continuity.
 - Explicit “Attach current page” control with preview and removal before sending.
 - Current-page title, URL, selected text, and size-limited readable text extraction.
-- Seven validated tab tools: list, activate, open, reload, group, ungroup, and confirmed close.
-- Eleven validated page tools with exact-origin permission, opaque references, activity visibility, Stop, and confirmation for consequential actions.
+- Seven validated tab tools: list, activate, open, reload, group, ungroup, and permission-mode-governed close.
+- Eleven validated page tools with exact-origin permission, opaque references, activity visibility, Stop, and task-captured Full access or Ask every time behavior for consequential actions.
 - Task-scoped background working tabs that do not steal focus, plus an optional local completion tone and sidebar completion notice.
 - Local settings, active-conversation state, logout, and clear-local-data controls.
 - Automated checks plus real-browser validation of the unpacked extension.
@@ -51,7 +51,7 @@ Any request to add one of these items requires explicit user approval and an upd
 5. Optionally attach the current page after reviewing what will be shared.
 6. Ask about open tabs or request one of the seven allowed tab actions.
 7. Ask Codex to navigate the current site; grant exact-origin access when Chrome prompts.
-8. Review the activity log and explicitly confirm only consequential controls, form submission or form-associated Enter, and tab closing.
+8. Review the activity log. Full access runs supported consequential controls, form submission, form-associated Enter, and tab closing directly; Ask every time pauses for explicit confirmation.
 9. Stop any active browser task or close/reopen the panel without silently repeating actions.
 10. Sign out or clear locally retained chat data.
 
@@ -183,7 +183,7 @@ Deliverables:
 - Let `tabs.ungroup` remove groups from validated tab IDs without closing their tabs.
 - Validate tab IDs and allow only `http`/`https` destinations for model-proposed opens.
 - Show requested, awaiting approval, rejected, running, succeeded, and failed states.
-- Require explicit confirmation for `tabs.close` with the target title and origin.
+- In Ask every time, require explicit confirmation for `tabs.close` with the target title and origin. In Full access, execute it directly and record the skipped-approval target in activity.
 - Add idempotency keys so reconnect/retry cannot repeat an action.
 
 Exit gate:
@@ -231,16 +231,16 @@ Exit gate:
 
 - Inspect, click, scroll, back/forward, stale-reference refusal, Stop, and permission revocation pass in Chrome.
 
-### M8 — Fields and confirmed forms
+### M8 — Fields and permission-mode-governed forms
 
 Deliverables:
 
-- Implement non-sensitive fill, select, check, allowlisted keypress, form preview, and confirmed submission.
+- Implement non-sensitive fill, select, check, allowlisted keypress, form preview, and permission-mode-governed submission.
 - Refuse password, OTP, payment, private-key, CAPTCHA, purchase, and financial workflows in code-side policy.
 
 Exit gate:
 
-- Representative search/contact/scheduling forms work, sensitive values never enter tool output, and no consequential form is submitted without a fresh exact confirmation.
+- Representative search/contact/scheduling forms work, sensitive values never enter tool output, Ask every time requires a fresh exact confirmation, and Full access records the skipped-approval preview.
 
 ## 9. Intended project layout
 
@@ -268,9 +268,9 @@ Do not create empty popup, options, remote-control, telemetry, or automation mod
 | Authentication | Success, cancel, invalid/expired state, restart, logout, bridge unavailable. |
 | Chat | Stream, stop, retry, new chat, link safety, Markdown injection, reconnect. |
 | Page context | Attach, preview, remove, truncate, protected page, form/password exclusion. |
-| Tab tools | Success, rejection, stale ID, bad URL scheme, close confirmation, duplicate prevention. |
-| Page tools | Exact-origin grant reuse, inspect bounds, routine link/button click, consequential-button confirmation, configurable task limit, scroll, history, wait timeout, stale ref, Stop. |
-| Forms | Fill/select/check, controlled inputs, sensitive refusal, preview, approval expiry, validation failure, confirmed submit. |
+| Tab tools | Success, rejection, stale ID, bad URL scheme, close behavior in both permission modes, duplicate prevention. |
+| Page tools | Exact-origin grant reuse, inspect bounds, routine link/button click, consequential-button behavior in both modes, configurable task limit, scroll, history, wait timeout, stale ref, Stop. |
+| Forms | Fill/select/check, controlled inputs, sensitive refusal, preview, Full access bypass visibility, Ask every time approval expiry, validation failure, submit. |
 | Persistence | Browser restart, service-worker suspension, clear data, logout. |
 | Accessibility | Keyboard flow, focus, labels, contrast, reduced motion, streaming announcements. |
 | Security | Message-schema failures, origin rejection, CSP, bundle/log/storage credential scan. |
@@ -300,6 +300,6 @@ The MVP is complete only when:
 - `PRD.md`, this file, `AGENTS.md`, and `README.md` agree on scope and commands.
 - Authentication uses a supported Codex mechanism and exposes no reusable credential to the extension.
 - Page content is attached only through an explicit user action.
-- Only the seven approved tab tools and eleven approved supervised page tools exist; consequential actions require confirmation.
+- Only the seven approved tab tools and eleven approved supervised page tools exist; consequential supported actions follow the task-captured permission mode and prohibited actions remain refused.
 - Remote control, external agents, arbitrary scripting/automation, connectors, telemetry, and store submission remain absent.
 - The manager reviews the final diff and browser evidence and signs off the private development beta.

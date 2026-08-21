@@ -2,14 +2,26 @@ import { describe, expect, it } from "vitest";
 import { isSafeHttpUrl, uiRequestSchema } from "../src/shared/protocol";
 import { dynamicToolCallSchema, parseToolArguments } from "../src/background/tab-tools";
 import {
+  browserPermissionModeSchema,
   browserTaskActionLimitSchema,
+  DEFAULT_BROWSER_PERMISSION_MODE,
   DEFAULT_BROWSER_TASK_ACTION_LIMIT,
+  normalizeBrowserPermissionMode,
   normalizeBrowserTaskActionLimit,
   pageToolCallSchema,
   parsePageToolArguments,
 } from "../src/shared/page-tools";
 
 describe("extension boundary validation", () => {
+  it("defaults browser permission mode to full access and rejects unknown modes", () => {
+    expect(browserPermissionModeSchema.safeParse("full").success).toBe(true);
+    expect(browserPermissionModeSchema.safeParse("ask").success).toBe(true);
+    expect(browserPermissionModeSchema.safeParse("always").success).toBe(false);
+    expect(normalizeBrowserPermissionMode("ask")).toBe("ask");
+    expect(normalizeBrowserPermissionMode("invalid")).toBe(DEFAULT_BROWSER_PERMISSION_MODE);
+    expect(DEFAULT_BROWSER_PERMISSION_MODE).toBe("full");
+  });
+
   it("bounds the configurable browser task action limit", () => {
     expect(browserTaskActionLimitSchema.safeParse(20).success).toBe(true);
     expect(browserTaskActionLimitSchema.safeParse(4).success).toBe(false);
