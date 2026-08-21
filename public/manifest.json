@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Codex Sidebar",
+  "name": "Browser Control",
   "description": "Chat with Codex and use supervised browser actions beside the current page.",
   "version": "0.2.0",
   "minimum_chrome_version": "114",
@@ -23,7 +23,7 @@
     "type": "module"
   },
   "action": {
-    "default_title": "Open Codex Sidebar"
+    "default_title": "Open Browser Control"
   },
   "side_panel": {
     "default_path": "sidepanel.html"

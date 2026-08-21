@@ -53,7 +53,7 @@ writeFileSync(
   `${JSON.stringify(
     {
       name: hostName,
-      description: "Native Codex App Server bridge for Codex Sidebar MVP",
+      description: "Native Codex App Server bridge for Browser Control",
       path: launcher,
       type: "stdio",
       allowed_origins: [`chrome-extension://${extensionId}/`],

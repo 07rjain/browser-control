@@ -1,4 +1,4 @@
-# Codex Sidebar MVP and Supervised Browser-Control Build Plan
+# Browser Control MVP and Supervised Browser-Control Build Plan
 
 - Status: MVP implementation complete locally; approved supervised browser control implemented, Chrome validation pending
 - Product requirements: `PRD.md`
@@ -45,7 +45,7 @@ Any request to add one of these items requires explicit user approval and an upd
 ## 4. Primary user flow
 
 1. Install the development build and required local companion.
-2. Click the toolbar icon; the Codex sidebar opens.
+2. Click the toolbar icon; Browser Control opens in the sidebar.
 3. Select “Sign in with ChatGPT” and finish the supported browser flow.
 4. Send a message and receive a streamed response.
 5. Optionally attach the current page after reviewing what will be shared.

@@ -349,8 +349,8 @@ export default function App() {
           setRetryPayload(turnExecutedToolRef.current ? null : inFlightPayloadRef.current);
           setError(
             turnExecutedToolRef.current
-              ? "Codex stopped after a browser action. Review the result before sending another request."
-              : "Codex could not complete this response. You can retry your message.",
+              ? "Browser Control stopped after a browser action. Review the result before sending another request."
+              : "Browser Control could not complete this response. You can retry your message.",
           );
           setMessages((current) =>
             current.map((item) => (item.streaming ? { ...item, streaming: false, failed: true } : item)),
@@ -654,8 +654,8 @@ export default function App() {
   if (authState !== "ready") {
     return (
       <main className="welcome-shell">
-        <div className="brand-mark" aria-hidden="true">C</div>
-        <p className="eyebrow">Codex Sidebar</p>
+        <div className="brand-mark" aria-hidden="true">B</div>
+        <p className="eyebrow">Browser Control</p>
         <h1>Think with the page beside you.</h1>
         <p className="welcome-copy">
           Sign in with ChatGPT to use your Codex subscription. Credentials stay in the local Codex companion.
@@ -692,9 +692,9 @@ export default function App() {
     <main className="app-shell">
       <header className="app-header">
         <div className="brand-row">
-          <div className="brand-mark brand-mark-small" aria-hidden="true">C</div>
+          <div className="brand-mark brand-mark-small" aria-hidden="true">B</div>
           <div>
-            <strong>Codex</strong>
+            <strong>Browser Control</strong>
             <span className="account-line">{compactPlan(account?.planType ?? null)} plan</span>
           </div>
         </div>
@@ -781,7 +781,7 @@ export default function App() {
             return (
               <div key={message.id} className="turn-block">
                 {(message.role === "user" || message.text || message.streaming) && <article className={`message message-${message.role} ${message.failed ? "message-failed" : ""}`}>
-                  <span className="message-role">{message.role === "user" ? "You" : "Codex"}</span>
+                  <span className="message-role">{message.role === "user" ? "You" : "Browser Control"}</span>
                   {message.role === "assistant" ? (
                     message.text ? (
                       <ReactMarkdown
@@ -795,7 +795,7 @@ export default function App() {
                         {message.text}
                       </ReactMarkdown>
                     ) : (
-                      <span className="thinking"><i /><i /><i /><span className="sr-only">Codex is thinking</span></span>
+                      <span className="thinking"><i /><i /><i /><span className="sr-only">Browser Control is thinking</span></span>
                     )
                   ) : (
                     <p>{message.text}</p>
@@ -895,8 +895,8 @@ export default function App() {
                 if (canSend) event.currentTarget.form?.requestSubmit();
               }
             }}
-            placeholder="Ask Codex…"
-            aria-label="Message Codex"
+            placeholder="Ask Browser Control…"
+            aria-label="Message Browser Control"
             rows={1}
           />
           <div className="composer-toolbar">
@@ -910,7 +910,7 @@ export default function App() {
             )}
           </div>
         </form>
-        <p className="composer-note">Page content is shared only when attached. Codex can make mistakes.</p>
+        <p className="composer-note">Page content is shared only when attached. AI can make mistakes.</p>
       </footer>
     </main>
   );

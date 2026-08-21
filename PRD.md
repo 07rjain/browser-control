@@ -1,4 +1,4 @@
-# Product Requirements Document: Codex Sidebar MVP
+# Product Requirements Document: Browser Control MVP
 
 - Status: MVP implemented locally; supervised browser-control milestone approved and implemented, Chrome validation pending
 - Owner: `codex-chrome-extension-manager`

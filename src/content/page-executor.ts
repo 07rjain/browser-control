@@ -319,7 +319,7 @@ if (!executorGlobal.__codexPageExecutorInstalled) {
         const element = assertFresh(command.refId, command.snapshotId);
         assertInteractable(element);
         if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)) throw new Error("The target is not a text field.");
-        if (isSensitive(element)) throw new Error("Codex Sidebar will not read or fill sensitive fields.");
+        if (isSensitive(element)) throw new Error("Browser Control will not read or fill sensitive fields.");
         if (["checkbox", "radio", "file", "button", "submit", "reset", "image"].includes(element.type)) {
           throw new Error("Use the matching page control tool for this field type.");
         }

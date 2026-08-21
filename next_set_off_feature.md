@@ -3,12 +3,12 @@
 - Status: Approved and implemented locally; Chrome validation and hardening pending
 - Owner: `codex-chrome-extension-manager`
 - Created: 2026-08-20
-- Depends on: the Codex Sidebar MVP defined in `PRD.md` and `MVP.md`
+- Depends on: the Browser Control MVP defined in `PRD.md` and `MVP.md`
 - Product rule: connectors are added only in the final phase of this milestone
 
 ## 1. Outcome
 
-Extend the Codex Sidebar from a chat and tab-management assistant into a user-supervised browser assistant that can perform the basic actions people use to navigate ordinary websites.
+Extend Browser Control from a chat and tab-management assistant into a user-supervised browser assistant that can perform the basic actions people use to navigate ordinary websites.
 
 The user should be able to ask the assistant to inspect a page, click a visible item, enter information, select an option, scroll, navigate backward or forward, and submit a form. Every action must be visible in an activity log, limited to the page and tab the user authorized, and governed by code-side safety policy.
 

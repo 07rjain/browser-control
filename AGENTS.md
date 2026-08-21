@@ -49,7 +49,7 @@ Agent IDs are routing metadata supplied by the user. If the active runtime canno
 
 ## Product definition
 
-The repository contains the Chromium **Codex Sidebar**, built on the completed MVP and now implementing the approved supervised browser-control milestone. Treat `PRD.md` as the product source of truth and `next_set_off_feature.md` as the detailed page-control specification.
+The repository contains the Chromium **Browser Control** extension, built on the completed MVP and now implementing the approved supervised browser-control milestone. Treat `PRD.md` as the product source of truth and `next_set_off_feature.md` as the detailed page-control specification.
 
 ### Approved scope directive
 
@@ -138,7 +138,7 @@ The complete extension does not run as an ordinary localhost website. Vite build
 3. Install or refresh the macOS native-messaging companion with `npm run install:host:mac`. The installer records the local Codex executable and permits extension ID `fodoakcimglhplkoohggjdggdffhkdam`.
 4. Open `chrome://extensions`, enable **Developer mode**, select **Load unpacked**, and choose this repository's `dist/` directory.
 5. Confirm Chrome shows extension ID `fodoakcimglhplkoohggjdggdffhkdam`. A different ID cannot connect to the installed native host.
-6. Pin or open **Codex Sidebar**, then use the toolbar icon to open its side panel.
+6. Pin or open **Browser Control**, then use the toolbar icon to open its side panel.
 7. After source changes, run `npm run build` again and select **Reload** on `chrome://extensions`. Reopen the side panel if Chrome has discarded its previous extension context.
 8. Inspect runtime failures from the extension's **Service worker** link on `chrome://extensions` and from the side panel's own DevTools console.
 
@@ -165,7 +165,7 @@ Run `npm run test:installed-host` after host installation to verify the Chrome-s
 Keep these two browser-testing paths distinct in reports:
 
 1. **Direct Codex Chrome control** uses the Codex session's connected-browser capability to inspect and operate the user's Chrome UI. This is useful for establishing expected site behavior and reproducing browser conditions, but it bypasses this repository's native bridge, dynamic-tool schemas, service-worker policy, activity UI, and page executor. The August 22 Calendar create-and-reschedule check was performed this way and therefore validated Google Calendar behavior, not the extension's end-to-end tool path.
-2. **Codex Sidebar end-to-end testing** loads `dist/` unpacked, opens the repository's side panel, and sends the test request through its chat composer. The resulting Codex App Server dynamic calls must pass through `bridge/native-host.mjs`, the service worker, and the allowlisted `tabs.*` or `page.*` executor. Only this path validates the actual agent product.
+2. **Browser Control end-to-end testing** loads `dist/` unpacked, opens the repository's side panel, and sends the test request through its chat composer. The resulting Codex App Server dynamic calls must pass through `bridge/native-host.mjs`, the service worker, and the allowlisted `tabs.*` or `page.*` executor. Only this path validates the actual agent product.
 
 For an end-to-end agent test, record the user prompt, selected model, emitted tool names and arguments with sensitive values redacted, approval/permission prompts, activity states, browser result, final assistant summary, and both extension consoles. Use direct Chrome control afterward only to independently verify the resulting browser state, and label that verification separately.
 

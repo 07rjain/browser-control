@@ -1,4 +1,4 @@
-# Codex Sidebar
+# Browser Control
 
 A private-development Chrome side-panel extension powered by the user's ChatGPT Codex subscription through the official Codex App Server interface.
 
@@ -72,7 +72,7 @@ If Chrome shows a different ID, native messaging will be rejected. Confirm that 
 4. Finish authentication; Codex App Server receives the localhost callback.
 5. Return to the side panel. It will display the email and plan information returned by Codex App Server.
 
-The companion uses `~/.codex-sidebar` as an isolated Codex home. It does not reuse the normal `~/.codex` configuration or place reusable credentials in Chrome storage.
+The companion uses the legacy compatibility path `~/.codex-sidebar` as an isolated Codex home. It does not reuse the normal `~/.codex` configuration or place reusable credentials in Chrome storage. The path and native-host identifier `com.codex.sidebar` intentionally remain unchanged so existing development installations keep their authentication and extension connection.
 
 ## Commands
 
