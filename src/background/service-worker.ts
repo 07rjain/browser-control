@@ -463,8 +463,12 @@ async function processCapturedPopup(
   }
 
   if (task.authorizedTabId === undefined) throw new Error("This browser task has no working tab.");
-  const source = await chrome.tabs.get(task.authorizedTabId);
-  const created = await chrome.tabs.create({ url: popupUrls[0], active: false, windowId: source.windowId });
+  const source = await chrome.tabs.get(task.authorizedTabId).catch(() => undefined);
+  const created = await chrome.tabs.create({
+    url: popupUrls[0],
+    active: false,
+    ...(source?.windowId === undefined ? {} : { windowId: source.windowId }),
+  });
   if (created.id === undefined) throw new Error("Chrome did not return the opened background tab.");
   task.authorizedTabId = created.id;
   task.authorizedOrigin = undefined;
@@ -481,6 +485,10 @@ async function processCapturedPopup(
     openedInBackground: true,
     selectedForTask: true,
   };
+}
+
+function actionResultFailed(result: unknown): boolean {
+  return Boolean(result && typeof result === "object" && "actionError" in result);
 }
 
 async function handlePageCall(call: PageToolCall, announce: boolean): Promise<void> {
@@ -546,7 +554,7 @@ async function handlePageCall(call: PageToolCall, announce: boolean): Promise<vo
   await recordAction(call);
   await storeActivity(call, "running");
   const result = await executePageCallForTask(call, task, target);
-  const actionFailed = Boolean(result && typeof result === "object" && "actionError" in result);
+  const actionFailed = actionResultFailed(result);
   await finishTool(call, !actionFailed, result, actionFailed ? "failed" : "succeeded");
 }
 
@@ -638,7 +646,8 @@ async function decideTool(callId: string, approved: boolean): Promise<unknown> {
     await storeActivity(call, "running");
     const task = await getTask(call);
     const result = call.namespace === "tabs" ? await executeTabTool(call) : await executePageCallForTask(call, task, pending.target);
-    await finishTool(call, true, result, "succeeded");
+    const actionFailed = actionResultFailed(result);
+    await finishTool(call, !actionFailed, result, actionFailed ? "failed" : "succeeded");
     return result;
   } catch (error) {
     const message = error instanceof Error ? error.message : "Browser action failed.";
@@ -850,4 +859,5 @@ export const serviceWorkerTestHooks = {
   getTask,
   getThreadWorkingTab,
   processCapturedPopup,
+  actionResultFailed,
 };

@@ -254,7 +254,10 @@ describe("service-worker browser orchestration", () => {
       },
       storage: { session: storageArea(sessionData), local: storageArea(localData) },
       tabs: {
-        get: vi.fn(async () => ({ id: 12, windowId: 1, url: "https://calendar.google.com/calendar" })),
+        get: vi.fn(async (tabId: number) => {
+          if (tabId === 12) throw new Error("No tab with id");
+          return { id: 77, windowId: 1, url: "https://example.com/deferred-workspace" };
+        }),
         create,
         onRemoved: { addListener: vi.fn() },
       },
@@ -291,13 +294,14 @@ describe("service-worker browser orchestration", () => {
     expect(create).toHaveBeenCalledWith({
       url: "https://example.com/deferred-workspace",
       active: false,
-      windowId: 1,
     });
     expect(result).toEqual(expect.objectContaining({
       actionError: "Executor response failed after dispatch.",
       openedPopupTabId: 77,
       openedInBackground: true,
     }));
+    expect(serviceWorkerTestHooks.actionResultFailed(result)).toBe(true);
+    expect(serviceWorkerTestHooks.actionResultFailed({ clicked: true })).toBe(false);
     await expect(serviceWorkerTestHooks.getThreadWorkingTab("thread-popup")).resolves.toBe(77);
   });
 });

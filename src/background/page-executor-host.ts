@@ -60,28 +60,66 @@ interface PopupGuardReport {
   collectionFailed?: boolean;
 }
 
-type GuardedWindowOpen = typeof window.open & {
-  __codexSidebarPopupGuardControlV2?: (
-    action: "snapshot" | "release" | "replace",
-    requestedGuardId: string,
-  ) => { attempted: number; urls: string[] } | null;
-};
+type PopupGuardControl = (
+  action: "wait" | "release" | "replace",
+  requestedGuardId: string,
+  timing?: { quietMs: number; afterAttemptMs: number; maxMs: number },
+) => { attempted: number; urls: string[] } | Promise<{ attempted: number; urls: string[] }> | null;
 
-export function installPopupGuardInPage(guardId: string): void {
-  const previousControl = (window.open as GuardedWindowOpen).__codexSidebarPopupGuardControlV2;
-  previousControl?.("replace", "");
+const POPUP_QUIET_WINDOW_MS = 350;
+const POPUP_AFTER_ATTEMPT_MS = 50;
+const POPUP_MAX_WINDOW_MS = 1_000;
+const POPUP_RESTORE_MARGIN_MS = 1_000;
+
+export function installPopupGuardInPage(guardId: string, restoreAfterMs = 2_000): void {
+  const controlPrefix = "__codexSidebarPopupGuardControlV3_";
+  const previousOpen = window.open as unknown as Record<string, unknown>;
+  const previousKey = Object.getOwnPropertyNames(window.open).find((key) => key.startsWith(controlPrefix));
+  const previousControl = previousKey ? previousOpen[previousKey] : undefined;
+  if (typeof previousControl === "function") {
+    previousControl("replace", previousKey?.slice(controlPrefix.length) ?? "");
+  }
 
   const originalOpen = window.open;
   const attempts: Array<string | null> = [];
   let timeoutId = 0;
+  let notifyAttempt: (() => void) | undefined;
+  let finishPendingWait: (() => void) | undefined;
   const report = () => ({
     attempted: attempts.length,
     urls: attempts.filter((url): url is string => url !== null),
   });
-  const control = (action: "snapshot" | "release" | "replace", requestedGuardId: string) => {
+  const control: PopupGuardControl = (action, requestedGuardId, timing) => {
     if (action !== "replace" && requestedGuardId !== guardId) return null;
+    if (action === "wait") {
+      if (!timing) return null;
+      return new Promise((resolve) => {
+        let afterAttemptTimeoutId: number | undefined;
+        let quietTimeoutId = 0;
+        const maxTimeoutId = window.setTimeout(() => finish(), timing.maxMs);
+        const finish = () => {
+          window.clearTimeout(quietTimeoutId);
+          window.clearTimeout(maxTimeoutId);
+          if (afterAttemptTimeoutId !== undefined) window.clearTimeout(afterAttemptTimeoutId);
+          notifyAttempt = undefined;
+          finishPendingWait = undefined;
+          resolve(report());
+        };
+        notifyAttempt = () => {
+          window.clearTimeout(quietTimeoutId);
+          if (afterAttemptTimeoutId !== undefined) window.clearTimeout(afterAttemptTimeoutId);
+          afterAttemptTimeoutId = window.setTimeout(finish, timing.afterAttemptMs);
+        };
+        finishPendingWait = finish;
+        quietTimeoutId = window.setTimeout(
+          finish,
+          attempts.length > 0 ? timing.afterAttemptMs : timing.quietMs,
+        );
+      });
+    }
     const currentReport = report();
     if (action === "release" || action === "replace") {
+      finishPendingWait?.();
       window.clearTimeout(timeoutId);
       if (window.open === guardedOpen) window.open = originalOpen;
     }
@@ -99,28 +137,38 @@ export function installPopupGuardInPage(guardId: string): void {
       }
     }
     attempts.push(safeUrl);
+    notifyAttempt?.();
     return null;
   };
-  Object.defineProperty(guardedOpen, "__codexSidebarPopupGuardControlV2", {
+  Object.defineProperty(guardedOpen, `${controlPrefix}${guardId}`, {
     configurable: false,
     enumerable: false,
     writable: false,
     value: control,
   });
   window.open = guardedOpen as typeof window.open;
-  // Keep blocking late popup attempts after the host takes its initial
-  // snapshot. The closure owns originalOpen; no page-visible state exposes it.
-  timeoutId = window.setTimeout(() => control("release", guardId), 1_000);
+  // The closure owns originalOpen; the longer page timer is only a
+  // service-worker interruption failsafe.
+  timeoutId = window.setTimeout(() => control("release", guardId), restoreAfterMs);
 }
 
-export function snapshotPopupGuardInPage(guardId: string): { attempted: number; urls: string[] } | null {
-  const control = (window.open as GuardedWindowOpen).__codexSidebarPopupGuardControlV2;
-  return control?.("snapshot", guardId) ?? null;
+export async function waitForPopupGuardQuietInPage(
+  guardId: string,
+  quietMs: number,
+  afterAttemptMs: number,
+  maxMs: number,
+): Promise<{ attempted: number; urls: string[] } | null> {
+  const key = `__codexSidebarPopupGuardControlV3_${guardId}`;
+  const control = (window.open as unknown as Record<string, unknown>)[key];
+  if (typeof control !== "function") return null;
+  return (control as PopupGuardControl)("wait", guardId, { quietMs, afterAttemptMs, maxMs });
 }
 
 export function releasePopupGuardInPage(guardId: string): { attempted: number; urls: string[] } | null {
-  const control = (window.open as GuardedWindowOpen).__codexSidebarPopupGuardControlV2;
-  return control?.("release", guardId) ?? null;
+  const key = `__codexSidebarPopupGuardControlV3_${guardId}`;
+  const control = (window.open as unknown as Record<string, unknown>)[key];
+  if (typeof control !== "function") return null;
+  return (control as PopupGuardControl)("release", guardId) as { attempted: number; urls: string[] } | null;
 }
 
 async function installPopupGuard(tabId: number, guardId: string): Promise<void> {
@@ -128,17 +176,17 @@ async function installPopupGuard(tabId: number, guardId: string): Promise<void> 
     target: { tabId },
     world: "MAIN",
     func: installPopupGuardInPage,
-    args: [guardId],
+    args: [guardId, POPUP_MAX_WINDOW_MS + POPUP_RESTORE_MARGIN_MS],
   });
 }
 
-async function snapshotPopupGuard(tabId: number, guardId: string): Promise<PopupGuardReport> {
+async function waitForPopupGuardQuiet(tabId: number, guardId: string): Promise<PopupGuardReport> {
   try {
     const results = await chrome.scripting.executeScript({
       target: { tabId },
       world: "MAIN",
-      func: snapshotPopupGuardInPage,
-      args: [guardId],
+      func: waitForPopupGuardQuietInPage,
+      args: [guardId, POPUP_QUIET_WINDOW_MS, POPUP_AFTER_ATTEMPT_MS, POPUP_MAX_WINDOW_MS],
     });
     return results[0]?.result ?? { attempted: 0, urls: [], collectionFailed: true };
   } catch {
@@ -264,18 +312,16 @@ export async function executePageTool(call: PageToolCall, taskTabId?: number): P
           actionError: error instanceof Error ? error.message : "The page click failed.",
         };
       } finally {
-        // Keep the MAIN-world guard installed while microtasks, animation
-        // callbacks, and short deferred handlers spawned by the click settle.
-        await new Promise((resolve) => setTimeout(resolve, 150));
-        popup = await snapshotPopupGuard(args.ref.tabId, guardId);
+        popup = await waitForPopupGuardQuiet(args.ref.tabId, guardId);
       }
       if (clickError && popup.attempted === 0 && !popup.collectionFailed) throw clickError;
-      const tab = await chrome.tabs.get(args.ref.tabId);
+      const tab = await chrome.tabs.get(args.ref.tabId).catch(() => undefined);
       return {
         ...result,
-        url: tab.url ?? "",
-        title: tab.title ?? "",
-        status: tab.status ?? "unknown",
+        url: tab?.url ?? "",
+        title: tab?.title ?? "",
+        status: tab?.status ?? "unavailable",
+        tabUnavailable: tab === undefined,
         popupAttempts: popup.attempted,
         popupUrls: popup.urls,
         popupBlocked: popup.collectionFailed === true || popup.attempted > popup.urls.length,
