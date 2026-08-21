@@ -11,6 +11,8 @@ import {
 import {
   BROWSER_PERMISSION_MODE_KEY,
   BROWSER_TASK_ACTION_LIMIT_KEY,
+  FULL_ACCESS_HOST_GRANT_KEY,
+  FULL_ACCESS_HOST_PATTERNS,
   normalizeBrowserPermissionMode,
   normalizeBrowserTaskActionLimit,
   pageToolCallSchema,
@@ -325,19 +327,27 @@ async function syncTaskIndicator(tabId: number): Promise<void> {
   await setPageTaskIndicator(tabId, shouldShow).catch(() => false);
 }
 
+async function hasRememberedControlAccess(originPattern: string): Promise<boolean> {
+  const stored = await chrome.storage.local.get([TASK_ORIGINS_KEY, FULL_ACCESS_HOST_GRANT_KEY]);
+  const rememberedOrigins = Array.isArray(stored[TASK_ORIGINS_KEY])
+    ? (stored[TASK_ORIGINS_KEY] as string[])
+    : [];
+  if (rememberedOrigins.includes(originPattern)) {
+    return chrome.permissions.contains({ origins: [originPattern] });
+  }
+  if (stored[FULL_ACCESS_HOST_GRANT_KEY] !== true) return false;
+  const broadGrantPresent = await chrome.permissions.contains({ origins: [...FULL_ACCESS_HOST_PATTERNS] });
+  if (!broadGrantPresent) return false;
+  return chrome.permissions.contains({ origins: [originPattern] });
+}
+
 async function refreshRememberedTaskOrigin(task: BrowserTaskState, tabId: number): Promise<void> {
   task.authorizedTabId = tabId;
   task.authorizedOrigin = undefined;
   task.authorizedOriginPattern = undefined;
   try {
     const controlOrigin = await currentControlOrigin(tabId);
-    const storedOrigins = await chrome.storage.local.get(TASK_ORIGINS_KEY);
-    const rememberedOrigins = Array.isArray(storedOrigins[TASK_ORIGINS_KEY])
-      ? (storedOrigins[TASK_ORIGINS_KEY] as string[])
-      : [];
-    const remembered =
-      rememberedOrigins.includes(controlOrigin.originPattern) &&
-      (await chrome.permissions.contains({ origins: [controlOrigin.originPattern] }));
+    const remembered = await hasRememberedControlAccess(controlOrigin.originPattern);
     if (remembered) {
       task.authorizedTabId = controlOrigin.tabId;
       task.authorizedOrigin = controlOrigin.origin;
@@ -613,13 +623,7 @@ async function handlePageCall(call: PageToolCall, announce: boolean): Promise<vo
     task.authorizedOrigin !== controlOrigin.origin ||
     task.authorizedOriginPattern !== controlOrigin.originPattern
   ) {
-    const storedOrigins = await chrome.storage.local.get(TASK_ORIGINS_KEY);
-    const rememberedControlOrigins = Array.isArray(storedOrigins[TASK_ORIGINS_KEY])
-      ? (storedOrigins[TASK_ORIGINS_KEY] as string[])
-      : [];
-    const remembered =
-      rememberedControlOrigins.includes(controlOrigin.originPattern) &&
-      (await chrome.permissions.contains({ origins: [controlOrigin.originPattern] }));
+    const remembered = await hasRememberedControlAccess(controlOrigin.originPattern);
     if (!remembered) throw new PageControlPermissionRequiredError(controlOrigin.origin, controlOrigin.originPattern);
     task.authorizedOrigin = controlOrigin.origin;
     task.authorizedOriginPattern = controlOrigin.originPattern;

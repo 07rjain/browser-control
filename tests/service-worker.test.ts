@@ -513,6 +513,8 @@ describe("service-worker browser orchestration", () => {
     }));
 
     visibleTabId = 12;
+    localData.codexSidebarTaskControlOrigins = [];
+    localData.codexSidebarFullAccessHostGrant = true;
     const indicatorCount = indicatorStates.length;
     await expect(serviceWorkerTestHooks.routeRequest({
       type: "CHAT_SEND",
@@ -531,6 +533,14 @@ describe("service-worker browser orchestration", () => {
       arguments: { idempotencyKey: "inspect-00000003" },
     });
     expect(indicatorStates.at(-1)).toEqual({ tabId: 12, active: true });
+    await expect(serviceWorkerTestHooks.routeRequest({
+      type: "BROWSER_STATE_READ",
+      requestId: requestId(),
+    })).resolves.toMatchObject({
+      prompts: expect.not.arrayContaining([
+        expect.objectContaining({ data: expect.objectContaining({ callId: "call-inspect-again" }) }),
+      ]),
+    });
     await serviceWorkerTestHooks.handleDynamicToolCall({
       requestId: 15,
       threadId: "thread-3",

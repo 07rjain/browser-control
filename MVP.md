@@ -22,7 +22,7 @@ The MVP must include:
 - Explicit “Attach current page” control with preview and removal before sending.
 - Current-page title, URL, selected text, and size-limited readable text extraction.
 - Seven validated tab tools: list, activate, open, reload, group, ungroup, and permission-mode-governed close.
-- Eleven validated page tools with exact-origin permission, opaque references, activity visibility, Stop, and task-captured Full access or Ask every time behavior for consequential actions.
+- Eleven validated page tools with explicit Full-access all-sites or Ask-every-time exact-origin permission, opaque references, activity visibility, Stop, and task-captured consequential-action behavior.
 - Task-scoped background working tabs that do not steal focus, an explicit **View working tab** control, an authorized-page working frame, plus an optional local completion tone and sidebar completion notice.
 - Local settings, active-conversation state, logout, and clear-local-data controls.
 - Automated checks plus real-browser validation of the unpacked extension.
@@ -50,7 +50,7 @@ Any request to add one of these items requires explicit user approval and an upd
 4. Send a message and receive a streamed response.
 5. Optionally attach the current page after reviewing what will be shared.
 6. Ask about open tabs or request one of the seven allowed tab actions.
-7. Ask Codex to navigate the current site; grant exact-origin access when Chrome prompts.
+7. Enable Full access and approve Chrome's optional all-sites access once, or use Ask every time and grant only the current exact origin when prompted.
 8. Review the activity log. Full access runs supported consequential controls, form submission, form-associated Enter, and tab closing directly; Ask every time pauses for explicit confirmation.
 9. Continue browsing elsewhere, or use **View working tab** to focus the pinned task tab and see its active Browser Control frame on an authorized normal page.
 10. Stop any active browser task or close/reopen the panel without silently repeating actions.
@@ -104,7 +104,7 @@ Dependencies and canonical commands are recorded in `package.json` and `README.m
 | `scripting` | Inject the page extractor only after the user attaches the page. |
 | `tabs` | Read tab titles/URLs for the requested all-tabs view and manage allowed tab actions. |
 | `nativeMessaging` | Connect only to the exact-origin local Codex companion. |
-| Optional `http://*/*`, `https://*/*` | Permit a later, user-activated request for only the current origin when `activeTab` is unavailable. These patterns grant no install-time site access. |
+| Optional `http://*/*`, `https://*/*` | Grant nothing at install time. Full access requests both patterns once from a user gesture; Ask every time removes them and requests only the current origin. |
 
 Native messaging is required by the accepted Phase 0 decision. Its host manifest pins `allowed_origins` to the extension's fixed ID; no loopback listener is exposed.
 

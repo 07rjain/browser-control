@@ -7,6 +7,8 @@ import {
   BROWSER_TASK_ACTION_LIMIT_KEY,
   DEFAULT_BROWSER_PERMISSION_MODE,
   DEFAULT_BROWSER_TASK_ACTION_LIMIT,
+  FULL_ACCESS_HOST_GRANT_KEY,
+  FULL_ACCESS_HOST_PATTERNS,
   MAX_BROWSER_TASK_ACTION_LIMIT,
   MIN_BROWSER_TASK_ACTION_LIMIT,
   normalizeBrowserPermissionMode,
@@ -205,6 +207,7 @@ export default function App() {
   const [theme, setTheme] = useState<Theme>("system");
   const [selectedModel, setSelectedModel] = useState("");
   const [browserPermissionMode, setBrowserPermissionMode] = useState<BrowserPermissionMode>(DEFAULT_BROWSER_PERMISSION_MODE);
+  const [fullSiteAccessGranted, setFullSiteAccessGranted] = useState(false);
   const [browserTaskActionLimit, setBrowserTaskActionLimit] = useState(DEFAULT_BROWSER_TASK_ACTION_LIMIT);
   const [browserTaskActionLimitDraft, setBrowserTaskActionLimitDraft] = useState(String(DEFAULT_BROWSER_TASK_ACTION_LIMIT));
   const [completionSoundEnabled, setCompletionSoundEnabled] = useState(false);
@@ -244,8 +247,8 @@ export default function App() {
 
   useEffect(() => {
     void chrome.storage.local
-      .get([STORAGE_KEY, BROWSER_PERMISSION_MODE_KEY, BROWSER_TASK_ACTION_LIMIT_KEY])
-      .then((stored) => {
+      .get([STORAGE_KEY, BROWSER_PERMISSION_MODE_KEY, BROWSER_TASK_ACTION_LIMIT_KEY, FULL_ACCESS_HOST_GRANT_KEY])
+      .then(async (stored) => {
         const state = (stored[STORAGE_KEY] as PersistedState | undefined) ?? INITIAL_STATE;
         const restoredMessages = Array.isArray(state.messages)
           ? state.messages.map((message) => ({ ...message, streaming: false }))
@@ -268,6 +271,9 @@ export default function App() {
         const storedActionLimit = normalizeBrowserTaskActionLimit(stored[BROWSER_TASK_ACTION_LIMIT_KEY]);
         setBrowserTaskActionLimit(storedActionLimit);
         setBrowserTaskActionLimitDraft(String(storedActionLimit));
+        const broadGrantPresent = stored[FULL_ACCESS_HOST_GRANT_KEY] === true &&
+          await chrome.permissions.contains({ origins: [...FULL_ACCESS_HOST_PATTERNS] });
+        setFullSiteAccessGranted(broadGrantPresent);
         setHydrated(true);
       })
       .finally(() => void refreshAccount());
@@ -510,6 +516,38 @@ export default function App() {
     }
   };
 
+  const requestFullSiteAccess = async (): Promise<boolean> => {
+    try {
+      const granted = await chrome.permissions.request({ origins: [...FULL_ACCESS_HOST_PATTERNS] });
+      setFullSiteAccessGranted(granted);
+      if (granted) {
+        await chrome.storage.local.set({ [FULL_ACCESS_HOST_GRANT_KEY]: true });
+        setError(null);
+      } else {
+        await chrome.storage.local.remove(FULL_ACCESS_HOST_GRANT_KEY);
+        setError("Chrome did not grant all-sites access. Browser tasks will still pause for site permission.");
+      }
+      return granted;
+    } catch (cause) {
+      setFullSiteAccessGranted(false);
+      await chrome.storage.local.remove(FULL_ACCESS_HOST_GRANT_KEY);
+      setError(cause instanceof Error ? cause.message : "Unable to enable full browser access.");
+      return false;
+    }
+  };
+
+  const changeBrowserPermissionMode = async (mode: BrowserPermissionMode) => {
+    if (mode === "full") {
+      const granted = await requestFullSiteAccess();
+      if (granted) setBrowserPermissionMode("full");
+      return;
+    }
+    setBrowserPermissionMode("ask");
+    setFullSiteAccessGranted(false);
+    await chrome.storage.local.remove(FULL_ACCESS_HOST_GRANT_KEY);
+    await chrome.permissions.remove({ origins: [...FULL_ACCESS_HOST_PATTERNS] }).catch(() => false);
+  };
+
   const ensureThread = async (): Promise<string> => {
     if (threadId && threadReadyRef.current) return threadId;
     if (threadId) {
@@ -678,10 +716,11 @@ export default function App() {
     const taskOrigins = Array.isArray(stored[TASK_ORIGINS_KEY])
       ? (stored[TASK_ORIGINS_KEY] as string[])
       : [];
-    const origins = [...new Set([...attachmentOrigins, ...taskOrigins])];
+    const origins = [...new Set([...attachmentOrigins, ...taskOrigins, ...FULL_ACCESS_HOST_PATTERNS])];
     if (origins.length > 0) await chrome.permissions.remove({ origins }).catch(() => false);
     await chrome.storage.local.remove(STORAGE_KEY);
     await chrome.storage.local.remove(BROWSER_PERMISSION_MODE_KEY);
+    await chrome.storage.local.remove(FULL_ACCESS_HOST_GRANT_KEY);
     await chrome.storage.local.remove(BROWSER_TASK_ACTION_LIMIT_KEY);
     await chrome.storage.local.remove(PAGE_ORIGINS_KEY);
     await chrome.storage.local.remove(TASK_ORIGINS_KEY);
@@ -693,6 +732,7 @@ export default function App() {
     setTheme("system");
     setSelectedModel("");
     setBrowserPermissionMode(DEFAULT_BROWSER_PERMISSION_MODE);
+    setFullSiteAccessGranted(false);
     setBrowserTaskActionLimit(DEFAULT_BROWSER_TASK_ACTION_LIMIT);
     setBrowserTaskActionLimitDraft(String(DEFAULT_BROWSER_TASK_ACTION_LIMIT));
     setCompletionSoundEnabled(false);
@@ -720,11 +760,11 @@ export default function App() {
     const pending = toolPermission;
     setToolPermission(null);
     try {
-      const alreadyGranted = approved
-        ? await chrome.permissions.contains({ origins: [pending.originPattern] })
-        : false;
       const granted = approved
-        ? alreadyGranted || await chrome.permissions.request({ origins: [pending.originPattern] })
+        ? browserPermissionMode === "full"
+          ? await requestFullSiteAccess()
+          : await chrome.permissions.contains({ origins: [pending.originPattern] }) ||
+            await chrome.permissions.request({ origins: [pending.originPattern] })
         : false;
       await sendRequest({
         type: "PAGE_CONTROL_PERMISSION_RESULT",
@@ -869,7 +909,8 @@ export default function App() {
               Agent permission
               <select
                 value={browserPermissionMode}
-                onChange={(event) => setBrowserPermissionMode(normalizeBrowserPermissionMode(event.target.value))}
+                disabled={streaming}
+                onChange={(event) => void changeBrowserPermissionMode(normalizeBrowserPermissionMode(event.target.value))}
               >
                 <option value="full">Full access · Default</option>
                 <option value="ask">Ask every time</option>
@@ -877,10 +918,17 @@ export default function App() {
             </label>
             <p className="menu-hint">
               {browserPermissionMode === "full"
-                ? "Runs supported actions without approval cards. Site access and hard safety blocks still apply."
+                ? fullSiteAccessGranted
+                  ? "All-sites access enabled. Supported actions run without site or approval cards; hard safety blocks still apply."
+                  : "Full access needs one Chrome all-sites grant before tasks can run without site prompts."
                 : "Pauses before form submission, consequential controls, Enter submissions, and tab closing."}
               {" "}Applies to the next browser task.
             </p>
+            {browserPermissionMode === "full" && !fullSiteAccessGranted && (
+              <button className="settings-grant-button" disabled={streaming} onClick={() => void requestFullSiteAccess()}>
+                Enable full browser access
+              </button>
+            )}
             <label>
               Browser actions per request
               <input
@@ -916,7 +964,14 @@ export default function App() {
               />
             </label>
             <button onClick={() => void clearLocalData()}>Clear local data</button>
-            <button onClick={() => void signOut()}>Sign out</button>
+            <button
+              className="settings-logout-button"
+              disabled={streaming}
+              onClick={() => void signOut()}
+            >
+              <span>Log out of ChatGPT</span>
+              {account?.email && <small>{account.email}</small>}
+            </button>
           </section>
         )}
       </header>
@@ -927,6 +982,12 @@ export default function App() {
             <div className="orb" aria-hidden="true"><span /></div>
             <h1>{emptyTitle}</h1>
             <p>Ask about what you’re reading, attach the page, or navigate the current site with supervised browser actions.</p>
+            {browserPermissionMode === "full" && !fullSiteAccessGranted && (
+              <button className="full-access-setup" onClick={() => void requestFullSiteAccess()}>
+                <strong>Enable Full access</strong>
+                <span>Approve Chrome once so browser tasks do not pause site by site.</span>
+              </button>
+            )}
             <div className="prompt-grid">
               <button onClick={() => setDraft("Summarize the page I attach in five bullets.")}>Summarize a page</button>
               <button onClick={() => setDraft("List my open tabs and group them by topic.")}>Organize my tabs</button>
@@ -974,13 +1035,21 @@ export default function App() {
 
         {toolPermission && (
           <section className="approval-card permission-card" role="alertdialog" aria-labelledby="permission-title">
-            <p className="eyebrow">Site access required</p>
-            <h2 id="permission-title">Allow browser actions here?</h2>
-            <p>{toolPermission.origin}</p>
-            <small>Access is limited to this exact site and remembered until you clear it in settings or Chrome.</small>
+            <p className="eyebrow">{browserPermissionMode === "full" ? "Finish Full access setup" : "Site access required"}</p>
+            <h2 id="permission-title">
+              {browserPermissionMode === "full" ? "Allow Browser Control on all sites?" : "Allow browser actions here?"}
+            </h2>
+            <p>{browserPermissionMode === "full" ? "One Chrome permission, then no site-by-site prompts." : toolPermission.origin}</p>
+            <small>
+              {browserPermissionMode === "full"
+                ? "This grants optional access to normal http and https pages. Clear local data or Chrome site controls can revoke it."
+                : "Access is limited to this exact site and remembered until you clear it in settings or Chrome."}
+            </small>
             <div className="approval-actions">
               <button className="secondary-button" onClick={() => void decidePagePermission(false)}>Cancel</button>
-              <button className="primary-button" onClick={() => void decidePagePermission(true)}>Allow this site</button>
+              <button className="primary-button" onClick={() => void decidePagePermission(true)}>
+                {browserPermissionMode === "full" ? "Enable Full access" : "Allow this site"}
+              </button>
             </div>
           </section>
         )}

@@ -124,7 +124,7 @@ Exact-origin access is requested once and remembered until the user clears local
 
 The Settings permission level governs supported consequential actions. Full access is the default and may run them without an approval card; Ask every time pauses for a just-in-time confirmation before submission, sending data, creating an appointment, publishing content, changing an account, deleting data, or communicating with another person.
 
-When Ask every time is selected, the confirmation must name the site, action, relevant non-secret values, and expected effect. Approval applies to one exact action only and expires if the page, tab, origin, form, or values change. Both modes retain the activity log, task action budget, Stop, stale-reference checks, exact-origin access, and Level 4 refusals. A mode change is captured when the next browser task starts and cannot alter an in-flight task.
+When Ask every time is selected, broad host access is removed and confirmations must name the site, action, relevant non-secret values, and expected effect. Approval applies to one exact action only and expires if the page, tab, origin, form, or values change. Full access uses one explicitly granted optional all-sites permission instead of repeated site cards. Both modes retain the activity log, task action budget, Stop, stale-reference checks, and Level 4 refusals. A mode change is captured when the next browser task starts and cannot alter an in-flight task.
 
 #### Level 4 — Prohibited in this milestone
 
@@ -144,7 +144,7 @@ Additional restricted categories can be added before implementation, but protect
 
 - Continue using `activeTab` for action access gained from a direct user gesture where possible.
 - If a multi-step task must survive navigation within an origin, request optional permission only for that exact `http` or `https` origin and explain why.
-- Never silently promote optional origin access into required `<all_urls>` access. Full access controls extension approval cards; it does not bypass Chrome's initial exact-origin permission prompt.
+- Never promote host access at install time or without a user gesture. Full access may request the already-declared optional `http://*/*` and `https://*/*` patterns once; Ask every time removes them and returns to exact-origin prompts.
 - Display the currently controlled tab and origin in the side panel throughout an active task.
 - Revoke task-scoped element references when the tab navigates, reloads, changes origin, closes, or the task ends.
 - Do not collect browser history, cookies, saved passwords, autofill data, or unrelated tab contents.

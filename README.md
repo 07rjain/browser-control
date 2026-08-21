@@ -137,7 +137,7 @@ Use a disposable test page or test account when an action could send, publish, d
 
 ### Browser-action checklist
 
-- On a fresh origin, request a page action and verify both **Allow this site** and Chrome's exact-origin permission prompt appear once. Repeat an action and verify the remembered grant is reused.
+- From a clean profile, enable Full access and approve Chrome's all-sites prompt once. Verify page actions on two different normal origins run without extension site cards. Switch to Ask every time, verify the broad grant is removed, and confirm a fresh origin shows **Allow this site** plus Chrome's exact-origin prompt.
 - Start a task on tab A, immediately switch to tab B before its first tool call, and verify all page activity remains on A. Continue in a second message and verify the thread still targets A.
 - Pause on an exact-origin permission prompt, switch tabs, grant access, and verify the action resumes only on the tab named by the original prompt.
 - Inspect and click an ordinary link, button, menu item, and SPA control. Verify the action result instead of trusting only the click event.
@@ -167,11 +167,11 @@ For every manual pass, record Chrome version, macOS version, extension commit, t
 
 ## Supervised browser actions
 
-Ask Codex to inspect or navigate the active `http` or `https` page. The first page action for a site pauses until you select **Allow this site** in the sidebar and approve Chrome's exact-origin permission prompt. That exact-origin grant is remembered until you choose **Clear local data** or revoke it in Chrome.
+Ask Codex to inspect or navigate a normal `http` or `https` page. Full access asks for Chrome's optional all-sites permission once when enabled; after that, supported tasks proceed across sites without extension approval cards. Ask every time uses an **Allow this site** card and Chrome's exact-origin prompt for fresh origins.
 
 - Inspection returns at most 80 visible interactive controls using opaque references that expire after 30 seconds or any meaningful page change.
 - After that grant, routine navigation (including external/new-tab links), ordinary buttons, field edits, scrolling, and drag-and-drop run automatically and remain visible in the activity log.
-- Full access is the default and runs supported consequential controls such as Save, Send, Publish, Delete, Book, Schedule, form submission, form-associated Enter, and tab closing without an approval card. Ask every time requires a fresh one-action confirmation. Both modes keep exact-origin access, activity previews, Stop, action limits, and hard refusals.
+- Full access is the default and, after its one-time Chrome permission, runs supported actions across normal sites without site or consequential-action cards. Ask every time removes broad host access, requests exact origins as needed, and requires a fresh one-action confirmation for consequential actions. Both modes keep activity previews, Stop, action limits, and hard refusals.
 - **Settings → Browser actions per request** controls the shared `tabs.*` and `page.*` execution budget for one Codex request. It defaults to 40, accepts 5–100, and a change applies to the next request.
 - Browser tasks snapshot a thread working tab before the request begins and retain it across follow-up requests. Opening or selecting another work tab updates that pin in the background, so changing the tab you are viewing does not pull focus back or retarget the task. An explicit user request to show or switch to a tab may foreground it.
 - After a response begins browser-tool activity, **View working tab** focuses the pinned tab and its browser window. Chat-only replies do not show the control. On an authorized normal page, a pointer-transparent illuminated frame identifies that Browser Control is operating the page; it clears when the task finishes, is stopped, or moves to another tab.
@@ -189,12 +189,12 @@ Unsupported surfaces such as protected Chrome pages, cross-origin frames, canvas
 - `sidePanel`: primary extension UI.
 - `storage`: non-secret theme, up to 30 local conversation transcripts with matching browser activity, and active-thread references.
 - `activeTab` and `scripting`: explicit current-page attachment and injection of the packaged page executor.
-- Optional `http`/`https` host access: requested through a sidebar user gesture for the exact current origin; required for supervised page actions and never granted automatically.
+- Optional `http`/`https` host access: never granted at installation. Full access requests normal-web all-sites access once through a sidebar user gesture; Ask every time removes it and requests only the exact current origin.
 - `tabs`: list and perform the seven approved tab actions, including grouping and ungrouping without closing tabs.
 - `tabGroups`: name, color, and collapse a group created from explicitly selected same-window tabs.
 - `nativeMessaging`: communicate with the local Codex companion.
 
-No broad host permission, cookies, history, bookmarks, downloads, `webRequest`, or debugger access is requested.
+No host access is granted at installation. Full access can request the manifest's optional normal-web all-sites patterns from an explicit user gesture; Ask every time removes them. Cookies, history, bookmarks, downloads, `webRequest`, and debugger access are never requested.
 
 ## Troubleshooting
 

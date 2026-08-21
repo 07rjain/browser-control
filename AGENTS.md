@@ -56,14 +56,14 @@ The repository contains the Chromium **Browser Control** extension, built on the
 - Preserve the implemented MVP: Manifest V3 side-panel chat, supported ChatGPT/Codex authentication, explicit current-page attachment, and the seven allowlisted tab tools.
 - The approved tab-tool surface is `tabs.list`, `tabs.activate`, `tabs.open`, `tabs.reload`, `tabs.group`, `tabs.ungroup`, and permission-mode-governed `tabs.close`. Grouping is limited to existing, unpinned tabs in one browser window and uses the typed Chrome Tabs/Tab Groups APIs. Ungrouping must keep every tab open.
 - One Codex request shares a persisted, user-configurable browser-action budget across `tabs.*` and `page.*`: default 40, minimum 5, maximum 100. Capture the value at the request's first executed action so changing Settings cannot alter an in-flight task.
-- Exact-origin browser-control approval is remembered and reused. Keep it distinct from attachment-only page access. Full access is the default and runs supported actions without approval cards; Ask every time requires fresh confirmation only for consequential actions identified by policy, not routine navigation or interaction.
+- Full access is the default and, after one explicit settings or permission-card gesture, requests the manifest's optional `http://*/*` and `https://*/*` host access so later tasks do not pause site by site. Ask every time removes that broad grant and uses remembered exact-origin access plus fresh confirmation for consequential actions. Keep browser-control consent distinct from attachment-only page sharing.
 - Keep user-started browser work pinned to its task working tab. `tabs.open` and `tabs.activate` must not foreground a tab unless the user explicitly asked to view or switch to it. Moving to another tab must not retarget an in-flight page task.
 - Keep the sidebar working-tab focus control an explicit user gesture. The authorized-page working frame must be pointer-transparent, lifecycle-bound to the active task, and must not justify broader host permissions.
 - Snapshot the thread working tab before `CHAT_SEND`, retain it across turns in session storage, and bind permission resumes and opaque references to its exact tab ID. Never fall back to the newly visible tab after the request starts.
 - Retain short-lived finished/canceled turn tombstones and pending prompt metadata across MV3 service-worker suspension so late calls fail closed and approval cards can recover.
 - Completion notices remain local to the sidebar. The optional completion tone is off by default and must not require network, notification, or additional Chrome permissions.
 - The approved next milestone adds only the typed, user-supervised `page.*` tools in `next_set_off_feature.md`: inspect, click, fill, select, check, allowlisted keypress, scroll, history navigation, bounded wait, and permission-mode-governed form submission.
-- Page actions require an exact-origin user grant, opaque short-lived element references, code-side policy, activity visibility, cancellation, and the task-captured Full access or Ask every time confirmation mode.
+- Page actions require either the explicit optional all-sites grant in Full access or an exact-origin user grant in Ask every time, plus opaque short-lived element references, code-side policy, activity visibility, cancellation, and the task-captured confirmation mode.
 - Do not implement remote agents, Agent Bus product integration, remote browser control, arbitrary JavaScript/selectors/coordinates, `debugger`/CDP access, remotely initiated unattended automation, purchases, secret entry, store publication, telemetry, or connectors.
 - Connectors are a later, separately approved phase after supervised browser-control validation. A new idea is not in scope without an explicit user decision and PRD update.
 
@@ -105,7 +105,7 @@ The page executor must remain packaged extension code in an isolated content-scr
 
 1. Preserve the supported authentication, streaming, attachment, and tab-tool baseline recorded in ADR 0001.
 2. Keep strict page-tool schemas, origin/risk policy, task cancellation, idempotency, and generic confirmations ahead of DOM execution.
-3. Inject only the packaged `page-executor.js` after an exact-origin permission grant; use fresh opaque references and fail stale actions closed.
+3. Inject only the packaged `page-executor.js` after the selected permission mode's logical grant and matching Chrome host permission; use fresh opaque references and fail stale actions closed.
 4. Validate inspect/click/scroll/navigation before fields and permission-mode-governed form submission.
 5. Run focused automated checks, then validate permissions, activity, Stop, stale references, and submissions in current stable Chrome.
 6. Review the manifest, CSP, bundle, storage, logs, and credential exposure before private-beta handoff.
@@ -154,7 +154,7 @@ Run `npm run test:installed-host` after host installation to verify the Chrome-s
 - Test the changed flow plus its nearest failure path. At minimum, verify expected UI state, activity state, resulting tab/page state, cancellation, and relevant service-worker/side-panel console output.
 - Use a disposable page or test account for consequential actions. Never use real passwords, authentication codes, payment data, private keys, or other sensitive values in test fields or evidence.
 - Require a fresh, specific confirmation before a manual test submits, sends, publishes, books, deletes, uploads, or modifies external state. Confirmation is for one exact action and does not authorize later repetitions.
-- Verify exact-origin permission from a clean or revoked state when permission behavior changes. Confirm the first request prompts, remembered access is reused, revocation fails closed, and protected URLs remain unsupported.
+- Verify permissions from a clean or revoked state when permission behavior changes. Full access should request all normal web origins once from a user gesture and then avoid per-site prompts; Ask every time should remove that broad grant and retain exact-origin behavior. Revocation must fail closed, and protected URLs remain unsupported.
 - For dynamic-page changes, test a reactive DOM update between inspect and action, a stale or ambiguous target, and a dense page with more than 80 controls. Google Calendar is the current representative dense dynamic application.
 - When testing Calendar, confirm the intended tab and week are active and fully loaded. Record `truncated`, `stale`, and retry outcomes; do not describe a target omitted by the 80-control cap as a click-execution failure.
 - Exercise the activity UI across at least two user requests. Each request must own its chronological tool history, collapse after completion, expand on demand, and remain aligned with the correct message.

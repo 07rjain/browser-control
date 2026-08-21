@@ -199,14 +199,14 @@ Chrome documents that `chrome.tabs` can create, modify, and rearrange tabs, whil
 - Do not store raw authentication credentials in extension storage.
 - Include settings for theme (`system`, `light`, `dark`) and whether page attachments include readable body text by default; the safe default is off.
 - Load the models available to the signed-in Codex account and let the user choose a model. The selection is stored locally and applies to the next message without requiring a new conversation.
-- Include a locally persisted agent-permission setting. Full access is the default and skips per-action approval cards for supported actions; Ask every time restores confirmations for consequential actions and tab closing. The selected value is captured when the next browser task begins.
+- Include a locally persisted agent-permission setting. Full access is the default, requests optional all-sites access once, and skips site-by-site and per-action approval cards for supported actions. Ask every time removes broad host access and restores exact-site permission plus confirmations for consequential actions and tab closing. The selected value is captured when the next browser task begins.
 - Do not add analytics or telemetry in the MVP.
 
 ### Epic G — Supervised page control (post-MVP, approved P0)
 
 #### User stories
 
-- As a user, I can explicitly allow browser actions on the current site once and keep that exact-origin grant until I clear local data or revoke it in Chrome.
+- As a user choosing Full access, I can approve Chrome's optional all-sites host permission once and let later supported tasks proceed without site-by-site cards. In Ask every time, I can grant only the current exact origin.
 - As a user, I can ask Codex to inspect visible controls, follow an ordinary same-origin link, scroll, navigate backward or forward, and wait for a page to load.
 - As a user, I can ask Codex to fill non-sensitive fields, choose options, check controls, and submit a reviewed form.
 - As a user, I can see every requested and executed action, stop the task, and choose whether consequential supported actions require approval.
@@ -221,8 +221,8 @@ Chrome documents that `chrome.tabs` can create, modify, and rearrange tabs, whil
 
 #### Permission and confirmation policy
 
-- A page tool cannot execute until the user grants optional host access for the exact active `http` or `https` origin.
-- An approved browser-control grant is remembered only for the exact origin. Attachment-only permission does not silently become browser-control consent. The user can revoke remembered grants through Clear local data or Chrome site-access controls.
+- A page tool cannot execute until Chrome host access and the extension's logical browser-control grant both cover the task page.
+- Full access requests the already-declared optional `http://*/*` and `https://*/*` host patterns once from an explicit user gesture and remembers that logical choice. Ask every time removes the broad grant and remembers only explicitly allowed exact origins. Attachment-only permission does not silently become browser-control consent. Clear local data and Chrome site-access controls revoke access.
 - Routine navigation (including external/new-tab links), menu buttons, field edits, scrolling, and drag-and-drop may run automatically under the remembered origin grant and remain visible in activity. Downloads remain unsupported.
 - Full access is the default permission mode and may automatically run supported form submission, Enter that may submit, tab closing, and recognized Save/Send/Publish/Delete/Book/Schedule actions. Ask every time requires a fresh one-action confirmation for those actions. Hard refusals apply in both modes.
 - Purchases, financial transactions, passwords, authentication codes, payment data, private keys, CAPTCHAs, security bypasses, arbitrary downloads, and browser-setting changes are refused.
@@ -314,7 +314,7 @@ Chrome documents that `chrome.tabs` can create, modify, and rearrange tabs, whil
 - `scripting`: user-initiated extraction from the active page.
 - `tabs`: title/URL visibility across tabs for the explicitly requested tab-listing capability.
 - `nativeMessaging`: exact-origin connection to the selected local Codex companion.
-- Optional `http://*/*` and `https://*/*`: declares the sites that may be requested later, but grants nothing at installation. If `activeTab` is unavailable, the user can grant only the current origin from the attachment UI and can revoke retained grants with Clear local data.
+- Optional `http://*/*` and `https://*/*`: grants nothing at installation. Full access requests these patterns once from a user gesture so tasks do not pause per site; Ask every time removes them and requests only the current origin. Clear local data revokes retained grants.
 
 Do not request persistent required `<all_urls>`, `history`, `bookmarks`, `downloads`, `cookies`, `webRequest`, or debugger access in the MVP.
 
