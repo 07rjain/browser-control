@@ -32,7 +32,7 @@ Manifest V3 service worker -----> Chrome tabs, permissions, storage, scripting
 Local Codex companion -----> Codex App Server / ChatGPT authentication
 ```
 
-- `src/sidepanel/` renders chat, settings, confirmations, attachments, and grouped activity.
+- `src/sidepanel/` renders chat, local conversation history, settings, confirmations, attachments, and grouped activity.
 - `src/background/` owns privileged Chrome APIs, policy enforcement, and message routing.
 - `src/content/page-executor.ts` performs allowlisted DOM actions using short-lived opaque references.
 - `src/shared/` contains runtime-validated protocol and tool schemas.
@@ -129,6 +129,7 @@ Use a disposable test page or test account when an action could send, publish, d
 - Open, close, and reopen the side panel from the toolbar; verify the current chat remains usable and the composer stays pinned correctly.
 - Sign in with ChatGPT, return to the panel, and verify the account state. Then sign out and verify credentials are not exposed in extension storage or logs.
 - Open Settings, change the model, send a message, start a new chat, and verify the selected model and thread behavior.
+- Send messages in two chats, open **History**, switch between them, and verify both transcripts and their matching browser-activity dropdowns are restored after closing and reopening the side panel.
 - Stream a response, press **Stop**, retry, and verify reconnecting does not duplicate a message or tool action.
 - Attach a normal `http` or `https` page, inspect the preview, remove it, and verify no page content is shared before attachment.
 - Attempt attachment on `chrome://extensions` and verify the extension reports the protected-page limitation cleanly.
@@ -185,7 +186,7 @@ Unsupported surfaces such as protected Chrome pages, cross-origin frames, canvas
 ## Permissions
 
 - `sidePanel`: primary extension UI.
-- `storage`: non-secret theme, transcript, and active-thread reference.
+- `storage`: non-secret theme, up to 30 local conversation transcripts with matching browser activity, and active-thread references.
 - `activeTab` and `scripting`: explicit current-page attachment and injection of the packaged page executor.
 - Optional `http`/`https` host access: requested through a sidebar user gesture for the exact current origin; required for supervised page actions and never granted automatically.
 - `tabs`: list and perform the seven approved tab actions, including grouping and ungrouping without closing tabs.

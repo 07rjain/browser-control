@@ -11,6 +11,12 @@ import {
 } from "../shared/page-tools";
 import { groupToolStatuses, summarizeToolStatuses, type ToolStatus } from "./activity";
 import { settleCanceledMessages, type ChatMessage } from "./chat-state";
+import {
+  createConversationRecord,
+  readConversationHistory,
+  upsertConversation,
+  type ConversationRecord,
+} from "./conversation-history";
 
 type AuthState = "checking" | "signed-out" | "authenticating" | "ready" | "offline" | "error";
 type Theme = "system" | "light" | "dark";
@@ -54,6 +60,8 @@ interface PersistedState {
   theme: Theme;
   selectedModel: string;
   completionSoundEnabled?: boolean;
+  currentConversationId?: string;
+  conversationHistory?: ConversationRecord[];
 }
 
 interface ModelOption {
@@ -188,6 +196,9 @@ export default function App() {
   const [toolPermission, setToolPermission] = useState<ToolPermission | null>(null);
   const [toolStatuses, setToolStatuses] = useState<ToolStatus[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [currentConversationId, setCurrentConversationId] = useState<string>(() => crypto.randomUUID());
+  const [conversationHistory, setConversationHistory] = useState<ConversationRecord[]>([]);
   const [hydrated, setHydrated] = useState(false);
   const [retryPayload, setRetryPayload] = useState<RetryPayload | null>(null);
   const [pendingPageOrigin, setPendingPageOrigin] = useState<string | null>(null);
@@ -217,8 +228,19 @@ export default function App() {
       .get([STORAGE_KEY, BROWSER_TASK_ACTION_LIMIT_KEY])
       .then((stored) => {
         const state = (stored[STORAGE_KEY] as PersistedState | undefined) ?? INITIAL_STATE;
+        const restoredMessages = Array.isArray(state.messages)
+          ? state.messages.map((message) => ({ ...message, streaming: false }))
+          : [];
+        const restoredConversationId = typeof state.currentConversationId === "string"
+          ? state.currentConversationId
+          : crypto.randomUUID();
         setThreadId(state.threadId);
-        setMessages(Array.isArray(state.messages) ? state.messages.map((message) => ({ ...message, streaming: false })) : []);
+        setMessages(restoredMessages);
+        setCurrentConversationId(restoredConversationId);
+        setConversationHistory(upsertConversation(
+          readConversationHistory(state.conversationHistory),
+          createConversationRecord(restoredConversationId, state.threadId, restoredMessages, [], Date.now()),
+        ));
         setTheme(state.theme ?? "system");
         setSelectedModel(state.selectedModel ?? "");
         setCompletionSoundEnabled(Boolean(state.completionSoundEnabled));
@@ -255,14 +277,25 @@ export default function App() {
 
   useEffect(() => {
     if (!hydrated) return;
-    const retainedMessages = messages.slice(-100).map((message) => ({
-      ...message,
-      text: message.text.slice(0, 100_000),
-    }));
+    const currentConversation = createConversationRecord(
+      currentConversationId,
+      threadId,
+      messages,
+      toolStatuses,
+    );
+    const retainedHistory = upsertConversation(conversationHistory, currentConversation);
     void chrome.storage.local.set({
-      [STORAGE_KEY]: { threadId, messages: retainedMessages, theme, selectedModel, completionSoundEnabled } satisfies PersistedState,
+      [STORAGE_KEY]: {
+        threadId,
+        messages: currentConversation.messages,
+        theme,
+        selectedModel,
+        completionSoundEnabled,
+        currentConversationId,
+        conversationHistory: retainedHistory,
+      } satisfies PersistedState,
     });
-  }, [completionSoundEnabled, hydrated, messages, selectedModel, theme, threadId]);
+  }, [completionSoundEnabled, conversationHistory, currentConversationId, hydrated, messages, selectedModel, theme, threadId, toolStatuses]);
 
   useEffect(() => {
     completionSoundEnabledRef.current = completionSoundEnabled;
@@ -560,9 +593,14 @@ export default function App() {
 
   const newChat = () => {
     if (streaming) void stop();
+    setConversationHistory((current) => upsertConversation(
+      current,
+      createConversationRecord(currentConversationId, threadId, settleCanceledMessages(messages), toolStatuses),
+    ));
     setCompletionNotice(null);
     void sendRequest({ type: "COMPLETION_NOTICE_DISMISS" }).catch(() => undefined);
     setThreadId(null);
+    setCurrentConversationId(crypto.randomUUID());
     threadReadyRef.current = false;
     setMessages([]);
     setToolStatuses([]);
@@ -570,6 +608,28 @@ export default function App() {
     setToolPermission(null);
     setRetryPayload(null);
     setAttachment(null);
+    setMenuOpen(false);
+    setHistoryOpen(false);
+  };
+
+  const openConversation = (conversation: ConversationRecord) => {
+    if (streaming) return;
+    setConversationHistory((current) => upsertConversation(
+      current,
+      createConversationRecord(currentConversationId, threadId, messages, toolStatuses),
+    ));
+    setCurrentConversationId(conversation.id);
+    setThreadId(conversation.threadId);
+    threadReadyRef.current = false;
+    setMessages(conversation.messages.map((message) => ({ ...message, streaming: false })));
+    setToolStatuses(conversation.toolStatuses);
+    setToolApproval(null);
+    setToolPermission(null);
+    setRetryPayload(null);
+    setAttachment(null);
+    setError(null);
+    setCompletionNotice(null);
+    setHistoryOpen(false);
     setMenuOpen(false);
   };
 
@@ -591,6 +651,8 @@ export default function App() {
     await chrome.storage.local.remove(TASK_ORIGINS_KEY);
     await chrome.storage.session.clear();
     setThreadId(null);
+    setCurrentConversationId(crypto.randomUUID());
+    setConversationHistory([]);
     setMessages([]);
     setTheme("system");
     setSelectedModel("");
@@ -600,6 +662,7 @@ export default function App() {
     completionSoundEnabledRef.current = false;
     setCompletionNotice(null);
     setMenuOpen(false);
+    setHistoryOpen(false);
     setPendingPageOrigin(null);
     setToolStatuses([]);
     setToolApproval(null);
@@ -650,6 +713,10 @@ export default function App() {
     [account],
   );
   const activitiesByTurn = useMemo(() => groupToolStatuses(toolStatuses), [toolStatuses]);
+  const visibleConversationHistory = useMemo(() => upsertConversation(
+    conversationHistory,
+    createConversationRecord(currentConversationId, threadId, messages, toolStatuses),
+  ), [conversationHistory, currentConversationId, messages, threadId, toolStatuses]);
 
   if (authState !== "ready") {
     return (
@@ -699,9 +766,48 @@ export default function App() {
           </div>
         </div>
         <div className="header-actions">
+          <button
+            className="icon-button"
+            aria-label="Open conversation history"
+            aria-expanded={historyOpen}
+            title="History"
+            disabled={streaming}
+            onClick={() => {
+              setHistoryOpen(!historyOpen);
+              setMenuOpen(false);
+            }}
+          >◷</button>
           <button className="icon-button" aria-label="Start a new chat" title="New chat" onClick={newChat}>＋</button>
-          <button className="icon-button" aria-label="Open settings" aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}>•••</button>
+          <button className="icon-button" aria-label="Open settings" aria-expanded={menuOpen} onClick={() => {
+            setMenuOpen(!menuOpen);
+            setHistoryOpen(false);
+          }}>•••</button>
         </div>
+        {historyOpen && (
+          <section className="history-card" aria-label="Conversation history">
+            <div className="history-heading">
+              <strong>History</strong>
+              <span>{visibleConversationHistory.length} saved</span>
+            </div>
+            {visibleConversationHistory.length === 0 ? (
+              <p className="history-empty">Your conversations will appear here after you send a message.</p>
+            ) : (
+              <ol className="history-list">
+                {visibleConversationHistory.map((conversation) => (
+                  <li key={conversation.id}>
+                    <button
+                      aria-current={conversation.id === currentConversationId ? "page" : undefined}
+                      onClick={() => openConversation(conversation)}
+                    >
+                      <strong>{conversation.title}</strong>
+                      <span>{new Date(conversation.updatedAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}</span>
+                    </button>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </section>
+        )}
         {menuOpen && (
           <section className="menu-card" aria-label="Settings">
             <label>
