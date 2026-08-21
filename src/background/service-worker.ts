@@ -77,6 +77,7 @@ interface BrowserTaskState {
   threadId: string;
   turnId: string;
   actionCount: number;
+  successfulActionCount?: number;
   actionLimit?: number;
   canceled: boolean;
   finished?: boolean;
@@ -141,7 +142,7 @@ function connectNative(): chrome.runtime.Port {
       broadcast("bridge.error", { message: "The native companion sent an invalid message." });
       return;
     }
-    handleNativeEnvelope(parsed.data);
+    void handleNativeEnvelope(parsed.data);
   });
   port.onDisconnect.addListener(() => {
     const detail = chrome.runtime.lastError?.message ?? "Native companion disconnected.";
@@ -153,7 +154,7 @@ function connectNative(): chrome.runtime.Port {
   return port;
 }
 
-function handleNativeEnvelope(message: NativeEnvelope): void {
+async function handleNativeEnvelope(message: NativeEnvelope): Promise<void> {
   if (message.type === "response") {
     const pending = pendingNative.get(message.id);
     if (!pending) return;
@@ -173,7 +174,7 @@ function handleNativeEnvelope(message: NativeEnvelope): void {
     if (typeof turnId === "string") {
       finishedTurns.add(turnId);
       setTimeout(() => finishedTurns.delete(turnId), TASK_TOMBSTONE_TTL_MS);
-      void finishBrowserTurn(turnId);
+      await finishBrowserTurn(turnId);
     }
   }
   broadcast(message.event, message.data);
@@ -323,6 +324,13 @@ async function recordAction(call: BrowserToolCall): Promise<void> {
   await saveTask(task);
 }
 
+async function activeTask(call: BrowserToolCall): Promise<BrowserTaskState> {
+  const task = await getTask(call);
+  if (finishedTurns.has(call.turnId) || task.finished) throw new Error("This browser turn already finished.");
+  if (task.canceled) throw new Error("The user stopped this browser task.");
+  return task;
+}
+
 async function respondToTool(call: BrowserToolCall, success: boolean, result: unknown): Promise<void> {
   await requestNative("tool.respond", { requestId: call.requestId, success, result });
 }
@@ -330,6 +338,12 @@ async function respondToTool(call: BrowserToolCall, success: boolean, result: un
 async function finishTool(call: BrowserToolCall, success: boolean, result: unknown, status: string): Promise<void> {
   pendingPrompts.delete(call.callId);
   await removePendingPrompt(call.callId);
+  if (success) {
+    const task = await getTask(call);
+    task.successfulActionCount = (task.successfulActionCount ?? 0) + 1;
+    task.updatedAt = Date.now();
+    await saveTask(task);
+  }
   await storeCompleted(call, success, result);
   await respondToTool(call, success, result);
   const error = typeof result === "object" && result && "error" in result ? (result as { error: unknown }).error : "Browser action failed.";
@@ -344,10 +358,10 @@ function parseBrowserToolCall(input: unknown): BrowserToolCall | null {
 }
 
 async function handleTabCall(call: DynamicToolCall, announce: boolean): Promise<void> {
+  await activeTask(call);
   if (announce) await storeActivity(call, "requested");
   if (call.tool === "close") {
     const target = await describeCloseTarget(call);
-    pendingApprovals.set(call.callId, { call });
     await storeActivity(call, "awaiting confirmation", { target: { title: target.title, url: target.url } });
     const prompt = {
       callId: call.callId,
@@ -360,6 +374,8 @@ async function handleTabCall(call: DynamicToolCall, announce: boolean): Promise<
       rejectLabel: "Keep tab",
       danger: true,
     };
+    await activeTask(call);
+    pendingApprovals.set(call.callId, { call });
     pendingPrompts.set(call.callId, { type: "approval", data: prompt });
     await persistPendingPrompt({ callId: call.callId, type: "approval", data: prompt, approval: { call } });
     broadcast("tool.approval", prompt);
@@ -377,12 +393,12 @@ async function handleTabCall(call: DynamicToolCall, announce: boolean): Promise<
   if ((call.tool === "activate" || call.tool === "open") && result && typeof result === "object" && "id" in result) {
     const tabId = (result as { id?: unknown }).id;
     if (typeof tabId === "number") {
-      const task = await getTask(call);
-      task.authorizedTabId = tabId;
-      task.authorizedOrigin = undefined;
-      task.authorizedOriginPattern = undefined;
-      task.updatedAt = Date.now();
-      await saveTask(task);
+      const updatedTask = await getTask(call);
+      updatedTask.authorizedTabId = tabId;
+      updatedTask.authorizedOrigin = undefined;
+      updatedTask.authorizedOriginPattern = undefined;
+      updatedTask.updatedAt = Date.now();
+      await saveTask(updatedTask);
       await setThreadWorkingTab(call.threadId, tabId);
     }
   }
@@ -413,13 +429,56 @@ async function executePageCallForTask(
       selectedForTask: true,
     };
   }
-  return executePageTool(call, task.authorizedTabId);
+  const result = await executePageTool(call, task.authorizedTabId);
+  if (call.tool !== "click" || !result || typeof result !== "object") return result;
+
+  const clickResult = result as Record<string, unknown>;
+  const popupAttempts = typeof clickResult.popupAttempts === "number" ? clickResult.popupAttempts : 0;
+  const popupCollectionFailed = clickResult.popupCollectionFailed === true;
+  const popupUrls = Array.isArray(clickResult.popupUrls)
+    ? clickResult.popupUrls.filter((url): url is string => typeof url === "string" && isSafeHttpUrl(url))
+    : [];
+  if (popupCollectionFailed) {
+    return {
+      ...clickResult,
+      popupBlocked: true,
+      popupReason: "The popup was blocked, but its destination could not be collected safely.",
+    };
+  }
+  if (popupAttempts === 0) return result;
+  if (popupUrls.length === 0) {
+    return {
+      ...clickResult,
+      popupBlocked: true,
+      popupReason: "The page tried to open a popup without a safe http or https URL.",
+    };
+  }
+
+  if (task.authorizedTabId === undefined) throw new Error("This browser task has no working tab.");
+  const source = await chrome.tabs.get(task.authorizedTabId);
+  const created = await chrome.tabs.create({ url: popupUrls[0], active: false, windowId: source.windowId });
+  if (created.id === undefined) throw new Error("Chrome did not return the opened background tab.");
+  task.authorizedTabId = created.id;
+  task.authorizedOrigin = undefined;
+  task.authorizedOriginPattern = undefined;
+  task.updatedAt = Date.now();
+  await saveTask(task);
+  await setThreadWorkingTab(call.threadId, created.id);
+  return {
+    ...clickResult,
+    popupBlocked: popupAttempts > 1,
+    blockedPopupCount: Math.max(0, popupAttempts - 1),
+    openedPopupUrl: popupUrls[0],
+    openedPopupTabId: created.id,
+    openedInBackground: true,
+    selectedForTask: true,
+  };
 }
 
 async function handlePageCall(call: PageToolCall, announce: boolean): Promise<void> {
   parsePageToolArguments(call);
+  const task = await activeTask(call);
   if (announce) await storeActivity(call, "requested");
-  const task = await getTask(call);
   if (task.authorizedTabId === undefined) {
     task.authorizedTabId = await ensureThreadWorkingTab(call.threadId);
     task.updatedAt = Date.now();
@@ -453,7 +512,6 @@ async function handlePageCall(call: PageToolCall, announce: boolean): Promise<vo
     return;
   }
   if (policy.decision === "confirm") {
-    pendingApprovals.set(call.callId, { call, target });
     await storeActivity(call, "awaiting confirmation", { origin: target?.form?.action ?? target?.href });
     const prompt = {
       callId: call.callId,
@@ -470,6 +528,8 @@ async function handlePageCall(call: PageToolCall, announce: boolean): Promise<vo
       rejectLabel: "Cancel",
       danger: call.tool === "submit",
     };
+    await activeTask(call);
+    pendingApprovals.set(call.callId, { call, target });
     pendingPrompts.set(call.callId, { type: "approval", data: prompt });
     await persistPendingPrompt({ callId: call.callId, type: "approval", data: prompt, approval: { call, target } });
     broadcast("tool.approval", prompt);
@@ -497,7 +557,12 @@ async function handleDynamicToolCall(input: unknown): Promise<void> {
     else await handlePageCall(call, true);
   } catch (error) {
     if (error instanceof PageControlPermissionRequiredError && call.namespace === "page") {
-      const permissionTask = await getTask(call);
+      const permissionTask = await activeTask(call).catch(async (cause) => {
+        const message = cause instanceof Error ? cause.message : "This browser task is no longer active.";
+        await finishTool(call, false, { error: message }, "canceled").catch(() => undefined);
+        return undefined;
+      });
+      if (!permissionTask) return;
       if (permissionTask.authorizedTabId === undefined) {
         await finishTool(call, false, { error: "This browser task has no working tab." }, "failed").catch(() => undefined);
         return;
@@ -581,30 +646,35 @@ async function continueAfterPermission(callId: string, originPattern: string, gr
   pendingPermissions.delete(callId);
   pendingPrompts.delete(callId);
   await removePendingPrompt(callId);
-  const expected = await currentControlOrigin(tabId);
-  if (expected.originPattern !== originPattern || expectedOriginPattern !== originPattern) {
-    await finishTool(call, false, { error: "The task's working page changed before permission was granted." }, "failed");
-    throw new Error("The task's working page changed before permission was granted.");
+  try {
+    const expected = await currentControlOrigin(tabId);
+    if (expected.originPattern !== originPattern || expectedOriginPattern !== originPattern) {
+      throw new Error("The task's working page changed before permission was granted.");
+    }
+    if (!granted) {
+      await finishTool(call, false, { error: "The user denied site access." }, "rejected");
+      return { rejected: true };
+    }
+    const allowed = await chrome.permissions.contains({ origins: [originPattern] });
+    if (!allowed) throw new Error("Chrome did not grant the requested site access.");
+    const task = await activeTask(call);
+    task.authorizedOrigin = expected.origin;
+    task.authorizedOriginPattern = originPattern;
+    task.authorizedTabId = expected.tabId;
+    task.updatedAt = Date.now();
+    await saveTask(task);
+    const storedOrigins = await chrome.storage.local.get(TASK_ORIGINS_KEY);
+    const currentOrigins = Array.isArray(storedOrigins[TASK_ORIGINS_KEY])
+      ? (storedOrigins[TASK_ORIGINS_KEY] as string[])
+      : [];
+    await chrome.storage.local.set({ [TASK_ORIGINS_KEY]: [...new Set([...currentOrigins, originPattern])] });
+    await handlePageCall(call, false);
+    return { continued: true };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "The browser permission could not be resumed.";
+    await finishTool(call, false, { error: message }, /changed|closed|available/i.test(message) ? "stale" : "failed").catch(() => undefined);
+    throw error;
   }
-  if (!granted) {
-    await finishTool(call, false, { error: "The user denied site access." }, "rejected");
-    return { rejected: true };
-  }
-  const allowed = await chrome.permissions.contains({ origins: [originPattern] });
-  if (!allowed) throw new Error("Chrome did not grant the requested site access.");
-  const task = await getTask(call);
-  task.authorizedOrigin = expected.origin;
-  task.authorizedOriginPattern = originPattern;
-  task.authorizedTabId = expected.tabId;
-  task.updatedAt = Date.now();
-  await saveTask(task);
-  const storedOrigins = await chrome.storage.local.get(TASK_ORIGINS_KEY);
-  const currentOrigins = Array.isArray(storedOrigins[TASK_ORIGINS_KEY])
-    ? (storedOrigins[TASK_ORIGINS_KEY] as string[])
-    : [];
-  await chrome.storage.local.set({ [TASK_ORIGINS_KEY]: [...new Set([...currentOrigins, originPattern])] });
-  await handlePageCall(call, false);
-  return { continued: true };
 }
 
 async function finishBrowserTurn(turnId: string): Promise<void> {
@@ -619,7 +689,7 @@ async function finishBrowserTurn(turnId: string): Promise<void> {
     }
   }
   await chrome.storage.session.set({ [TASK_KEY]: tasks.slice(-40) });
-  if (completedTask && completedTask.actionCount > 0 && !completedTask.canceled) {
+  if (completedTask && (completedTask.successfulActionCount ?? 0) > 0 && !completedTask.canceled) {
     await chrome.storage.session.set({
       [COMPLETION_NOTICE_KEY]: {
         turnId,
@@ -763,3 +833,11 @@ chrome.runtime.onStartup.addListener(() => {
   void enableSidePanel();
 });
 void enableSidePanel();
+
+export const serviceWorkerTestHooks = {
+  routeRequest,
+  handleDynamicToolCall,
+  finishBrowserTurn,
+  getTask,
+  getThreadWorkingTab,
+};

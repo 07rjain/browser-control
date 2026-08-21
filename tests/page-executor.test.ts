@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { installPopupGuardInPage, releasePopupGuardInPage } from "../src/background/page-executor-host";
 
 type Listener = (message: unknown, sender: chrome.runtime.MessageSender, sendResponse: (response: unknown) => void) => boolean;
 
@@ -120,6 +121,37 @@ describe("packaged page executor", () => {
 
     const result = command<{ clicked: boolean }>({ action: "CLICK", snapshotId: inspection.snapshotId, refId: save?.refId });
     expect(result.clicked).toBe(true);
+  });
+
+  it("blocks a JavaScript-created popup during a real button click and records its URL", () => {
+    document.body.innerHTML = `<button id="launch">Open workspace</button>`;
+    const button = document.getElementById("launch") as HTMLButtonElement;
+    const originalOpen = window.open;
+    button.addEventListener("click", () => window.open("/workspace", "_blank"));
+    const inspection = command<{ snapshotId: string; elements: Array<{ refId: string; label: string }> }>({ action: "INSPECT" });
+    const launch = inspection.elements.find((item) => item.label === "Open workspace");
+
+    installPopupGuardInPage("popup-test");
+    expect(command({ action: "CLICK", snapshotId: inspection.snapshotId, refId: launch?.refId })).toEqual(
+      expect.objectContaining({ clicked: true }),
+    );
+    expect(releasePopupGuardInPage("popup-test")).toEqual({
+      attempted: 1,
+      urls: ["http://localhost:3000/workspace"],
+    });
+    expect(window.open).toBe(originalOpen);
+  });
+
+  it("blocks a JavaScript-created popup with no URL instead of duplicating the current page", () => {
+    document.body.innerHTML = `<button id="launch-blank">Open blank popup</button>`;
+    const button = document.getElementById("launch-blank") as HTMLButtonElement;
+    button.addEventListener("click", () => window.open());
+    const inspection = command<{ snapshotId: string; elements: Array<{ refId: string; label: string }> }>({ action: "INSPECT" });
+    const launch = inspection.elements.find((item) => item.label === "Open blank popup");
+
+    installPopupGuardInPage("blank-popup-test");
+    command({ action: "CLICK", snapshotId: inspection.snapshotId, refId: launch?.refId });
+    expect(releasePopupGuardInPage("blank-popup-test")).toEqual({ attempted: 1, urls: [] });
   });
 
   it("fails closed when a changed target cannot be rebound unambiguously", () => {

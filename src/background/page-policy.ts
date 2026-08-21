@@ -71,6 +71,9 @@ export function decidePageAction(call: PageToolCall, target?: PageTargetDescript
 
   if (call.tool === "click") {
     if (target.download) return { decision: "refuse", reason: "File downloads are not supported." };
+    if (target.newTab && !target.href) {
+      return { decision: "refuse", reason: "This popup has no safe URL that can be opened in the background." };
+    }
     if (target.tag === "a" && !target.href) {
       return { decision: "refuse", reason: "This link does not have a safe http or https destination." };
     }

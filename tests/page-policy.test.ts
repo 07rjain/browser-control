@@ -42,6 +42,7 @@ describe("page action policy", () => {
     expect(decidePageAction(call("click", {}), target())).toEqual({ decision: "allow" });
     expect(decidePageAction(call("click", {}), target({ sameOrigin: false }))).toEqual({ decision: "allow" });
     expect(decidePageAction(call("click", {}), target({ newTab: true }))).toEqual({ decision: "allow" });
+    expect(decidePageAction(call("click", {}), target({ tag: "a", role: "link", href: undefined, newTab: true }))).toMatchObject({ decision: "refuse" });
     expect(decidePageAction(call("click", {}), target({ tag: "button", role: "button", href: undefined }))).toEqual({ decision: "allow" });
     expect(decidePageAction(call("click", {}), target({ tag: "button", role: "button", label: "Save event", href: undefined }))).toMatchObject({ decision: "confirm" });
     expect(decidePageAction(call("click", {}), target({ tag: "button", role: "button", label: "Remove filter", href: undefined }))).toEqual({ decision: "allow" });

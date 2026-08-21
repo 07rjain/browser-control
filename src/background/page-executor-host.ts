@@ -54,6 +54,99 @@ interface RawInspection {
   elements: Array<Record<string, unknown> & { refId: string }>;
 }
 
+interface PopupGuardState {
+  id: string;
+  originalOpen: typeof window.open;
+  attempts: Array<string | null>;
+  timeoutId: number;
+}
+
+interface PopupGuardReport {
+  attempted: number;
+  urls: string[];
+  collectionFailed?: boolean;
+}
+
+interface PopupGuardWindow extends Window {
+  __codexSidebarPopupGuardV1?: PopupGuardState;
+}
+
+export function installPopupGuardInPage(guardId: string): void {
+  const guardedWindow = window as PopupGuardWindow;
+  const previous = guardedWindow.__codexSidebarPopupGuardV1;
+  if (previous) {
+    window.clearTimeout(previous.timeoutId);
+    window.open = previous.originalOpen;
+  }
+
+  const originalOpen = window.open;
+  const attempts: Array<string | null> = [];
+  const guardedOpen = (url?: string | URL): WindowProxy | null => {
+    let safeUrl: string | null = null;
+    const rawUrl = url === undefined ? "" : String(url).trim();
+    if (rawUrl) {
+      try {
+        const resolved = new URL(rawUrl, location.href);
+        if (resolved.protocol === "http:" || resolved.protocol === "https:") safeUrl = resolved.href;
+      } catch {
+        safeUrl = null;
+      }
+    }
+    attempts.push(safeUrl);
+    return null;
+  };
+  window.open = guardedOpen as typeof window.open;
+
+  const timeoutId = window.setTimeout(() => {
+    const current = guardedWindow.__codexSidebarPopupGuardV1;
+    if (current?.id !== guardId) return;
+    window.open = current.originalOpen;
+    delete guardedWindow.__codexSidebarPopupGuardV1;
+  }, 1_000);
+  Object.defineProperty(guardedWindow, "__codexSidebarPopupGuardV1", {
+    configurable: true,
+    enumerable: false,
+    writable: true,
+    value: { id: guardId, originalOpen, attempts, timeoutId },
+  });
+}
+
+export function releasePopupGuardInPage(guardId: string): { attempted: number; urls: string[] } {
+  const guardedWindow = window as PopupGuardWindow;
+  const current = guardedWindow.__codexSidebarPopupGuardV1;
+  if (current?.id !== guardId) return { attempted: 0, urls: [] };
+  window.clearTimeout(current.timeoutId);
+  window.open = current.originalOpen;
+  delete guardedWindow.__codexSidebarPopupGuardV1;
+  return {
+    attempted: current.attempts.length,
+    urls: current.attempts.filter((url): url is string => url !== null),
+  };
+}
+
+async function installPopupGuard(tabId: number, guardId: string): Promise<void> {
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    world: "MAIN",
+    func: installPopupGuardInPage,
+    args: [guardId],
+  });
+}
+
+async function releasePopupGuard(tabId: number, guardId: string): Promise<PopupGuardReport> {
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      world: "MAIN",
+      func: releasePopupGuardInPage,
+      args: [guardId],
+    });
+    return results[0]?.result ?? { attempted: 0, urls: [], collectionFailed: true };
+  } catch {
+    return { attempted: 0, urls: [], collectionFailed: true };
+  }
+}
+
 async function activeTarget(tabId?: number): Promise<PageTarget> {
   let tab = tabId === undefined
     ? (await chrome.tabs.query({ active: true, currentWindow: true }))[0]
@@ -155,10 +248,32 @@ export async function executePageTool(call: PageToolCall, taskTabId?: number): P
       return inspectActivePage(call, taskTabId);
     case "click": {
       const args = clickArgumentsSchema.parse(call.arguments);
-      const result = await withRef<Record<string, unknown>>(args.ref, "CLICK", undefined, taskTabId);
-      await new Promise((resolve) => setTimeout(resolve, 150));
+      if (taskTabId !== undefined && args.ref.tabId !== taskTabId) {
+        throw new Error("The page element does not belong to this task's working tab. Inspect the working tab again.");
+      }
+      const guardId = crypto.randomUUID();
+      await installPopupGuard(args.ref.tabId, guardId);
+      let result: Record<string, unknown>;
+      let popup: PopupGuardReport;
+      try {
+        result = await withRef<Record<string, unknown>>(args.ref, "CLICK", undefined, taskTabId);
+      } finally {
+        // Keep the MAIN-world guard installed while microtasks, animation
+        // callbacks, and short deferred handlers spawned by the click settle.
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        popup = await releasePopupGuard(args.ref.tabId, guardId);
+      }
       const tab = await chrome.tabs.get(args.ref.tabId);
-      return { ...result, url: tab.url ?? "", title: tab.title ?? "", status: tab.status ?? "unknown" };
+      return {
+        ...result,
+        url: tab.url ?? "",
+        title: tab.title ?? "",
+        status: tab.status ?? "unknown",
+        popupAttempts: popup.attempted,
+        popupUrls: popup.urls,
+        popupBlocked: popup.collectionFailed === true || popup.attempted > popup.urls.length,
+        popupCollectionFailed: popup.collectionFailed === true,
+      };
     }
     case "fill": {
       const args = fillArgumentsSchema.parse(call.arguments);
