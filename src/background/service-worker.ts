@@ -430,6 +430,14 @@ async function executePageCallForTask(
     };
   }
   const result = await executePageTool(call, task.authorizedTabId);
+  return processCapturedPopup(call, task, result);
+}
+
+async function processCapturedPopup(
+  call: PageToolCall,
+  task: BrowserTaskState,
+  result: unknown,
+): Promise<unknown> {
   if (call.tool !== "click" || !result || typeof result !== "object") return result;
 
   const clickResult = result as Record<string, unknown>;
@@ -538,7 +546,8 @@ async function handlePageCall(call: PageToolCall, announce: boolean): Promise<vo
   await recordAction(call);
   await storeActivity(call, "running");
   const result = await executePageCallForTask(call, task, target);
-  await finishTool(call, true, result, "succeeded");
+  const actionFailed = Boolean(result && typeof result === "object" && "actionError" in result);
+  await finishTool(call, !actionFailed, result, actionFailed ? "failed" : "succeeded");
 }
 
 async function handleDynamicToolCall(input: unknown): Promise<void> {
@@ -840,4 +849,5 @@ export const serviceWorkerTestHooks = {
   finishBrowserTurn,
   getTask,
   getThreadWorkingTab,
+  processCapturedPopup,
 };

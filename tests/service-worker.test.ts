@@ -232,18 +232,40 @@ describe("service-worker browser orchestration", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     await expect(serviceWorkerTestHooks.getThreadWorkingTab("thread-1")).resolves.toBeUndefined();
 
-    visibleTabId = 12;
-    await expect(serviceWorkerTestHooks.routeRequest({
-      type: "CHAT_SEND",
-      requestId: requestId(),
-      threadId: "thread-popup",
-      clientMessageId: requestId(),
-      text: "Open the workspace popup",
-    })).resolves.toEqual({ turnId: "turn-3" });
-    await serviceWorkerTestHooks.handleDynamicToolCall({
+  });
+
+  it("opens a captured popup in the background even when the click reports an error", async () => {
+    const sessionData: Record<string, unknown> = {};
+    const localData: Record<string, unknown> = {};
+    const create = vi.fn(async (properties: chrome.tabs.CreateProperties) => ({
+      id: 77,
+      windowId: properties.windowId ?? 1,
+      url: properties.url,
+      title: "Deferred workspace",
+      active: properties.active ?? true,
+    }));
+    vi.stubGlobal("chrome", {
+      runtime: {
+        id: "extension-id",
+        sendMessage: vi.fn(async () => undefined),
+        onMessage: { addListener: vi.fn() },
+        onInstalled: { addListener: vi.fn() },
+        onStartup: { addListener: vi.fn() },
+      },
+      storage: { session: storageArea(sessionData), local: storageArea(localData) },
+      tabs: {
+        get: vi.fn(async () => ({ id: 12, windowId: 1, url: "https://calendar.google.com/calendar" })),
+        create,
+        onRemoved: { addListener: vi.fn() },
+      },
+      sidePanel: { setPanelBehavior: vi.fn(async () => undefined) },
+    });
+
+    const { serviceWorkerTestHooks } = await import("../src/background/service-worker");
+    const result = await serviceWorkerTestHooks.processCapturedPopup({
       requestId: 13,
       threadId: "thread-popup",
-      turnId: "turn-3",
+      turnId: "turn-popup",
       callId: "call-popup",
       namespace: "page",
       tool: "click",
@@ -251,12 +273,31 @@ describe("service-worker browser orchestration", () => {
         idempotencyKey: "click-popup-00001",
         ref: { id: "e1", snapshotId: "snapshot-popup", tabId: 12, origin: "https://calendar.google.com" },
       },
+    }, {
+      key: "thread-popup:turn-popup",
+      threadId: "thread-popup",
+      turnId: "turn-popup",
+      actionCount: 0,
+      canceled: false,
+      authorizedTabId: 12,
+      updatedAt: Date.now(),
+    }, {
+      clicked: false,
+      actionError: "Executor response failed after dispatch.",
+      popupAttempts: 1,
+      popupUrls: ["https://example.com/deferred-workspace"],
     });
+
     expect(create).toHaveBeenCalledWith({
       url: "https://example.com/deferred-workspace",
       active: false,
       windowId: 1,
     });
+    expect(result).toEqual(expect.objectContaining({
+      actionError: "Executor response failed after dispatch.",
+      openedPopupTabId: 77,
+      openedInBackground: true,
+    }));
     await expect(serviceWorkerTestHooks.getThreadWorkingTab("thread-popup")).resolves.toBe(77);
   });
 });

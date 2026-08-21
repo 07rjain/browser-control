@@ -11,6 +11,7 @@ type Listener = (message: unknown, sender: chrome.runtime.MessageSender, sendRes
 
 let listener: Listener;
 let guardWasEnumerable = false;
+let failClickAfterDispatch = false;
 
 beforeAll(async () => {
   vi.stubGlobal("chrome", {
@@ -36,6 +37,9 @@ beforeAll(async () => {
         listener(message, { id: "extension-id" }, (value) => {
           response = value;
         });
+        if (failClickAfterDispatch && (message as { action?: unknown }).action === "CLICK") {
+          return { ok: false, error: "Executor response failed after dispatch." };
+        }
         return response;
       }),
       reload: vi.fn(async () => undefined),
@@ -46,7 +50,7 @@ beforeAll(async () => {
         if (!injection.func) return [];
         const result = injection.func(...(injection.args ?? []));
         if (injection.func === installPopupGuardInPage) {
-          guardWasEnumerable = Object.prototype.propertyIsEnumerable.call(window, "__codexSidebarPopupGuardV1");
+          guardWasEnumerable = Object.prototype.propertyIsEnumerable.call(window.open, "__codexSidebarPopupGuardControlV2");
         }
         return [{ frameId: 0, result }];
       }),
@@ -66,6 +70,7 @@ beforeAll(async () => {
 beforeEach(() => {
   document.body.innerHTML = "";
   guardWasEnumerable = false;
+  failClickAfterDispatch = false;
 });
 
 describe("page executor host popup guard", () => {
@@ -74,8 +79,10 @@ describe("page executor host popup guard", () => {
     const button = document.getElementById("launch") as HTMLButtonElement;
     button.addEventListener("click", () => {
       setTimeout(() => window.open("/deferred-workspace", "_blank"), 20);
+      setTimeout(() => window.open("/late-workspace", "_blank"), 300);
     });
-    const originalOpen = window.open;
+    const originalOpen = vi.fn(() => null);
+    window.open = originalOpen;
     const inspection = await executePageTool(pageToolCallSchema.parse({
       requestId: 1,
       threadId: "thread-1",
@@ -104,6 +111,44 @@ describe("page executor host popup guard", () => {
       popupCollectionFailed: false,
     }));
     expect(guardWasEnumerable).toBe(false);
+    expect(window.open).not.toBe(originalOpen);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(originalOpen).not.toHaveBeenCalled();
+    await new Promise((resolve) => setTimeout(resolve, 700));
     expect(window.open).toBe(originalOpen);
+  });
+
+  it("returns a captured popup when the click response fails after dispatch", async () => {
+    document.body.innerHTML = `<button id="launch-error">Open before error</button>`;
+    const button = document.getElementById("launch-error") as HTMLButtonElement;
+    button.addEventListener("click", () => window.open("/captured-before-error", "_blank"));
+    const inspection = await executePageTool(pageToolCallSchema.parse({
+      requestId: 3,
+      threadId: "thread-2",
+      turnId: "turn-2",
+      callId: "inspect-error-popup",
+      namespace: "page",
+      tool: "inspect",
+      arguments: { idempotencyKey: "inspect-error-popup-0001" },
+    }), 1) as { elements: Array<{ label: string; ref: Record<string, unknown> }> };
+    const launch = inspection.elements.find((element) => element.label === "Open before error");
+    failClickAfterDispatch = true;
+
+    const result = await executePageTool(pageToolCallSchema.parse({
+      requestId: 4,
+      threadId: "thread-2",
+      turnId: "turn-2",
+      callId: "click-error-popup",
+      namespace: "page",
+      tool: "click",
+      arguments: { idempotencyKey: "click-error-popup-00001", ref: launch?.ref },
+    }), 1) as Record<string, unknown>;
+
+    expect(result).toEqual(expect.objectContaining({
+      clicked: false,
+      actionError: "Executor response failed after dispatch.",
+      popupAttempts: 1,
+      popupUrls: ["http://localhost:3000/captured-before-error"],
+    }));
   });
 });

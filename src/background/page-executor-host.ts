@@ -54,33 +54,39 @@ interface RawInspection {
   elements: Array<Record<string, unknown> & { refId: string }>;
 }
 
-interface PopupGuardState {
-  id: string;
-  originalOpen: typeof window.open;
-  attempts: Array<string | null>;
-  timeoutId: number;
-}
-
 interface PopupGuardReport {
   attempted: number;
   urls: string[];
   collectionFailed?: boolean;
 }
 
-interface PopupGuardWindow extends Window {
-  __codexSidebarPopupGuardV1?: PopupGuardState;
-}
+type GuardedWindowOpen = typeof window.open & {
+  __codexSidebarPopupGuardControlV2?: (
+    action: "snapshot" | "release" | "replace",
+    requestedGuardId: string,
+  ) => { attempted: number; urls: string[] } | null;
+};
 
 export function installPopupGuardInPage(guardId: string): void {
-  const guardedWindow = window as PopupGuardWindow;
-  const previous = guardedWindow.__codexSidebarPopupGuardV1;
-  if (previous) {
-    window.clearTimeout(previous.timeoutId);
-    window.open = previous.originalOpen;
-  }
+  const previousControl = (window.open as GuardedWindowOpen).__codexSidebarPopupGuardControlV2;
+  previousControl?.("replace", "");
 
   const originalOpen = window.open;
   const attempts: Array<string | null> = [];
+  let timeoutId = 0;
+  const report = () => ({
+    attempted: attempts.length,
+    urls: attempts.filter((url): url is string => url !== null),
+  });
+  const control = (action: "snapshot" | "release" | "replace", requestedGuardId: string) => {
+    if (action !== "replace" && requestedGuardId !== guardId) return null;
+    const currentReport = report();
+    if (action === "release" || action === "replace") {
+      window.clearTimeout(timeoutId);
+      if (window.open === guardedOpen) window.open = originalOpen;
+    }
+    return currentReport;
+  };
   const guardedOpen = (url?: string | URL): WindowProxy | null => {
     let safeUrl: string | null = null;
     const rawUrl = url === undefined ? "" : String(url).trim();
@@ -95,33 +101,26 @@ export function installPopupGuardInPage(guardId: string): void {
     attempts.push(safeUrl);
     return null;
   };
-  window.open = guardedOpen as typeof window.open;
-
-  const timeoutId = window.setTimeout(() => {
-    const current = guardedWindow.__codexSidebarPopupGuardV1;
-    if (current?.id !== guardId) return;
-    window.open = current.originalOpen;
-    delete guardedWindow.__codexSidebarPopupGuardV1;
-  }, 1_000);
-  Object.defineProperty(guardedWindow, "__codexSidebarPopupGuardV1", {
-    configurable: true,
+  Object.defineProperty(guardedOpen, "__codexSidebarPopupGuardControlV2", {
+    configurable: false,
     enumerable: false,
-    writable: true,
-    value: { id: guardId, originalOpen, attempts, timeoutId },
+    writable: false,
+    value: control,
   });
+  window.open = guardedOpen as typeof window.open;
+  // Keep blocking late popup attempts after the host takes its initial
+  // snapshot. The closure owns originalOpen; no page-visible state exposes it.
+  timeoutId = window.setTimeout(() => control("release", guardId), 1_000);
 }
 
-export function releasePopupGuardInPage(guardId: string): { attempted: number; urls: string[] } {
-  const guardedWindow = window as PopupGuardWindow;
-  const current = guardedWindow.__codexSidebarPopupGuardV1;
-  if (current?.id !== guardId) return { attempted: 0, urls: [] };
-  window.clearTimeout(current.timeoutId);
-  window.open = current.originalOpen;
-  delete guardedWindow.__codexSidebarPopupGuardV1;
-  return {
-    attempted: current.attempts.length,
-    urls: current.attempts.filter((url): url is string => url !== null),
-  };
+export function snapshotPopupGuardInPage(guardId: string): { attempted: number; urls: string[] } | null {
+  const control = (window.open as GuardedWindowOpen).__codexSidebarPopupGuardControlV2;
+  return control?.("snapshot", guardId) ?? null;
+}
+
+export function releasePopupGuardInPage(guardId: string): { attempted: number; urls: string[] } | null {
+  const control = (window.open as GuardedWindowOpen).__codexSidebarPopupGuardControlV2;
+  return control?.("release", guardId) ?? null;
 }
 
 async function installPopupGuard(tabId: number, guardId: string): Promise<void> {
@@ -133,12 +132,12 @@ async function installPopupGuard(tabId: number, guardId: string): Promise<void> 
   });
 }
 
-async function releasePopupGuard(tabId: number, guardId: string): Promise<PopupGuardReport> {
+async function snapshotPopupGuard(tabId: number, guardId: string): Promise<PopupGuardReport> {
   try {
     const results = await chrome.scripting.executeScript({
       target: { tabId },
       world: "MAIN",
-      func: releasePopupGuardInPage,
+      func: snapshotPopupGuardInPage,
       args: [guardId],
     });
     return results[0]?.result ?? { attempted: 0, urls: [], collectionFailed: true };
@@ -255,14 +254,22 @@ export async function executePageTool(call: PageToolCall, taskTabId?: number): P
       await installPopupGuard(args.ref.tabId, guardId);
       let result: Record<string, unknown>;
       let popup: PopupGuardReport;
+      let clickError: unknown;
       try {
         result = await withRef<Record<string, unknown>>(args.ref, "CLICK", undefined, taskTabId);
+      } catch (error) {
+        clickError = error;
+        result = {
+          clicked: false,
+          actionError: error instanceof Error ? error.message : "The page click failed.",
+        };
       } finally {
         // Keep the MAIN-world guard installed while microtasks, animation
         // callbacks, and short deferred handlers spawned by the click settle.
         await new Promise((resolve) => setTimeout(resolve, 150));
-        popup = await releasePopupGuard(args.ref.tabId, guardId);
+        popup = await snapshotPopupGuard(args.ref.tabId, guardId);
       }
+      if (clickError && popup.attempted === 0 && !popup.collectionFailed) throw clickError;
       const tab = await chrome.tabs.get(args.ref.tabId);
       return {
         ...result,
