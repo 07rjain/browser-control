@@ -54,16 +54,29 @@ interface RawInspection {
   elements: Array<Record<string, unknown> & { refId: string }>;
 }
 
-async function activeTarget(): Promise<PageTarget> {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab?.id || !tab.url) throw new Error("No active browser tab is available.");
+async function activeTarget(tabId?: number): Promise<PageTarget> {
+  let tab = tabId === undefined
+    ? (await chrome.tabs.query({ active: true, currentWindow: true }))[0]
+    : await chrome.tabs.get(tabId);
+  if (!tab?.id) throw new Error("The task's working tab is no longer available.");
+  const resolvedTabId = tab.id;
+  if (tab.discarded) {
+    await chrome.tabs.reload(resolvedTabId);
+    tab = await chrome.tabs.get(resolvedTabId);
+  }
+  const started = Date.now();
+  while (!tab.url && Date.now() - started < 2_000) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    tab = await chrome.tabs.get(resolvedTabId);
+  }
+  if (!tab.url) throw new Error("The task's working tab is still loading. Try again shortly.");
   const url = new URL(tab.url);
   const originPattern = originPatternForUrl(url.href);
-  return { tabId: tab.id, origin: url.origin, originPattern, title: tab.title ?? "Untitled tab", url: url.href };
+  return { tabId: resolvedTabId, origin: url.origin, originPattern, title: tab.title ?? "Untitled tab", url: url.href };
 }
 
-async function authorizedTarget(): Promise<PageTarget> {
-  const target = await activeTarget();
+async function authorizedTarget(tabId?: number): Promise<PageTarget> {
+  const target = await activeTarget(tabId);
   const allowed = await chrome.permissions.contains({ origins: [target.originPattern] });
   if (!allowed) throw new PageControlPermissionRequiredError(target.origin, target.originPattern);
   return target;
@@ -92,12 +105,15 @@ async function ensureExecutor(target: PageTarget): Promise<void> {
 
 function assertRefTarget(ref: ElementRef, target: PageTarget): void {
   if (ref.tabId !== target.tabId || ref.origin !== target.origin) {
-    throw new Error("The page element belongs to a different tab or origin. Inspect the active page again.");
+    throw new Error("The page element belongs to a different tab or origin. Inspect the task's working tab again.");
   }
 }
 
-async function withRef<T>(ref: ElementRef, action: string, params?: Record<string, unknown>): Promise<T> {
-  const target = await authorizedTarget();
+async function withRef<T>(ref: ElementRef, action: string, params?: Record<string, unknown>, taskTabId?: number): Promise<T> {
+  if (taskTabId !== undefined && ref.tabId !== taskTabId) {
+    throw new Error("The page element does not belong to this task's working tab. Inspect the working tab again.");
+  }
+  const target = await authorizedTarget(ref.tabId);
   assertRefTarget(ref, target);
   await ensureExecutor(target);
   return sendExecutor<T>(target.tabId, {
@@ -108,9 +124,9 @@ async function withRef<T>(ref: ElementRef, action: string, params?: Record<strin
   });
 }
 
-export async function inspectActivePage(call: PageToolCall): Promise<unknown> {
+export async function inspectActivePage(call: PageToolCall, tabId?: number): Promise<unknown> {
   inspectArgumentsSchema.parse(call.arguments);
-  const target = await authorizedTarget();
+  const target = await authorizedTarget(tabId);
   await ensureExecutor(target);
   const inspection = await sendExecutor<RawInspection>(target.tabId, { action: "INSPECT" });
   if (inspection.origin !== target.origin) throw new Error("The page origin changed during inspection.");
@@ -124,41 +140,44 @@ export async function inspectActivePage(call: PageToolCall): Promise<unknown> {
   };
 }
 
-export async function describePageTarget(call: PageToolCall, refreshExpired = false): Promise<PageTargetDescription> {
+export async function describePageTarget(call: PageToolCall, refreshExpired = false, taskTabId?: number): Promise<PageTargetDescription> {
   const args = call.tool === "click"
     ? clickArgumentsSchema.parse(call.arguments)
     : call.tool === "keypress"
       ? keypressArgumentsSchema.parse(call.arguments)
       : submitArgumentsSchema.parse(call.arguments);
-  return withRef<PageTargetDescription>(args.ref, refreshExpired ? "REVALIDATE" : "DESCRIBE");
+  return withRef<PageTargetDescription>(args.ref, refreshExpired ? "REVALIDATE" : "DESCRIBE", undefined, taskTabId);
 }
 
-export async function executePageTool(call: PageToolCall): Promise<unknown> {
+export async function executePageTool(call: PageToolCall, taskTabId?: number): Promise<unknown> {
   switch (call.tool) {
     case "inspect":
-      return inspectActivePage(call);
+      return inspectActivePage(call, taskTabId);
     case "click": {
       const args = clickArgumentsSchema.parse(call.arguments);
-      const result = await withRef<Record<string, unknown>>(args.ref, "CLICK");
+      const result = await withRef<Record<string, unknown>>(args.ref, "CLICK", undefined, taskTabId);
       await new Promise((resolve) => setTimeout(resolve, 150));
       const tab = await chrome.tabs.get(args.ref.tabId);
       return { ...result, url: tab.url ?? "", title: tab.title ?? "", status: tab.status ?? "unknown" };
     }
     case "fill": {
       const args = fillArgumentsSchema.parse(call.arguments);
-      return withRef(args.ref, "FILL", { value: args.value, mode: args.mode });
+      return withRef(args.ref, "FILL", { value: args.value, mode: args.mode }, taskTabId);
     }
     case "select": {
       const args = selectArgumentsSchema.parse(call.arguments);
-      return withRef(args.ref, "SELECT", { value: args.value });
+      return withRef(args.ref, "SELECT", { value: args.value }, taskTabId);
     }
     case "check": {
       const args = checkArgumentsSchema.parse(call.arguments);
-      return withRef(args.ref, "CHECK", { checked: args.checked });
+      return withRef(args.ref, "CHECK", { checked: args.checked }, taskTabId);
     }
     case "drag": {
       const args = dragArgumentsSchema.parse(call.arguments);
-      const target = await authorizedTarget();
+      if (taskTabId !== undefined && (args.sourceRef.tabId !== taskTabId || args.targetRef.tabId !== taskTabId)) {
+        throw new Error("The drag controls do not belong to this task's working tab. Inspect the working tab again.");
+      }
+      const target = await authorizedTarget(args.sourceRef.tabId);
       assertRefTarget(args.sourceRef, target);
       assertRefTarget(args.targetRef, target);
       await ensureExecutor(target);
@@ -171,18 +190,18 @@ export async function executePageTool(call: PageToolCall): Promise<unknown> {
     }
     case "keypress": {
       const args = keypressArgumentsSchema.parse(call.arguments);
-      return withRef(args.ref, "KEYPRESS", { key: args.key });
+      return withRef(args.ref, "KEYPRESS", { key: args.key }, taskTabId);
     }
     case "scroll": {
       const args = scrollArgumentsSchema.parse(call.arguments);
-      if (args.direction === "element") return withRef(elementRefSchema.parse(args.ref), "SCROLL_ELEMENT");
-      const target = await authorizedTarget();
+      if (args.direction === "element") return withRef(elementRefSchema.parse(args.ref), "SCROLL_ELEMENT", undefined, taskTabId);
+      const target = await authorizedTarget(taskTabId);
       await ensureExecutor(target);
       return sendExecutor(target.tabId, { action: "SCROLL", direction: args.direction, amount: args.amount });
     }
     case "history": {
       const args = historyArgumentsSchema.parse(call.arguments);
-      const target = await authorizedTarget();
+      const target = await authorizedTarget(taskTabId);
       if (args.direction === "back") await chrome.tabs.goBack(target.tabId);
       else await chrome.tabs.goForward(target.tabId);
       await new Promise((resolve) => setTimeout(resolve, 150));
@@ -191,7 +210,7 @@ export async function executePageTool(call: PageToolCall): Promise<unknown> {
     }
     case "wait": {
       const args = waitArgumentsSchema.parse(call.arguments);
-      const target = await authorizedTarget();
+      const target = await authorizedTarget(taskTabId);
       const started = Date.now();
       while (Date.now() - started < args.timeoutMs) {
         const tab = await chrome.tabs.get(target.tabId);
@@ -202,7 +221,7 @@ export async function executePageTool(call: PageToolCall): Promise<unknown> {
     }
     case "submit": {
       const args = submitArgumentsSchema.parse(call.arguments);
-      const result = await withRef<Record<string, unknown>>(args.ref, "SUBMIT");
+      const result = await withRef<Record<string, unknown>>(args.ref, "SUBMIT", undefined, taskTabId);
       await new Promise((resolve) => setTimeout(resolve, 150));
       const tab = await chrome.tabs.get(args.ref.tabId);
       return { ...result, url: tab.url ?? "", title: tab.title ?? "", status: tab.status ?? "unknown" };
@@ -210,7 +229,7 @@ export async function executePageTool(call: PageToolCall): Promise<unknown> {
   }
 }
 
-export async function currentControlOrigin(): Promise<{ tabId: number; origin: string; originPattern: string }> {
-  const target = await activeTarget();
+export async function currentControlOrigin(tabId?: number): Promise<{ tabId: number; origin: string; originPattern: string }> {
+  const target = await activeTarget(tabId);
   return { tabId: target.tabId, origin: target.origin, originPattern: target.originPattern };
 }

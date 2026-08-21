@@ -3,7 +3,7 @@
 - Status: MVP implementation complete locally; approved supervised browser control implemented, Chrome validation pending
 - Product requirements: `PRD.md`
 - Owner: `codex-chrome-extension-manager`
-- Updated: 2026-08-20
+- Updated: 2026-08-21
 
 ## 1. Outcome
 
@@ -21,8 +21,9 @@ The MVP must include:
 - Streaming text chat with safe Markdown, stop, retry, new chat, and active-chat continuity.
 - Explicit “Attach current page” control with preview and removal before sending.
 - Current-page title, URL, selected text, and size-limited readable text extraction.
-- Five validated tab tools: list, activate, open, reload, and confirmed close.
-- Ten validated page tools with exact-origin permission, opaque references, activity visibility, Stop, and confirmation for consequential actions.
+- Seven validated tab tools: list, activate, open, reload, group, ungroup, and confirmed close.
+- Eleven validated page tools with exact-origin permission, opaque references, activity visibility, Stop, and confirmation for consequential actions.
+- Task-scoped background working tabs that do not steal focus, plus an optional local completion tone and sidebar completion notice.
 - Local settings, active-conversation state, logout, and clear-local-data controls.
 - Automated checks plus real-browser validation of the unpacked extension.
 
@@ -48,9 +49,9 @@ Any request to add one of these items requires explicit user approval and an upd
 3. Select “Sign in with ChatGPT” and finish the supported browser flow.
 4. Send a message and receive a streamed response.
 5. Optionally attach the current page after reviewing what will be shared.
-6. Ask about open tabs or request one of the five allowed tab actions.
+6. Ask about open tabs or request one of the seven allowed tab actions.
 7. Ask Codex to navigate the current site; grant exact-origin access when Chrome prompts.
-8. Review the activity log and explicitly confirm buttons, external/new-tab links, Enter, closing, or form submission.
+8. Review the activity log and explicitly confirm only consequential controls, form submission or form-associated Enter, and tab closing.
 9. Stop any active browser task or close/reopen the panel without silently repeating actions.
 10. Sign out or clear locally retained chat data.
 
@@ -177,7 +178,9 @@ Exit gate:
 
 Deliverables:
 
-- Add runtime schemas for `tabs.list`, `tabs.activate`, `tabs.open`, `tabs.reload`, and `tabs.close`.
+- Add runtime schemas for `tabs.list`, `tabs.activate`, `tabs.open`, `tabs.reload`, `tabs.group`, `tabs.ungroup`, and `tabs.close`.
+- Let `tabs.group` create a titled, optionally colored/collapsed group from validated unpinned tab IDs in one window.
+- Let `tabs.ungroup` remove groups from validated tab IDs without closing their tabs.
 - Validate tab IDs and allow only `http`/`https` destinations for model-proposed opens.
 - Show requested, awaiting approval, rejected, running, succeeded, and failed states.
 - Require explicit confirmation for `tabs.close` with the target title and origin.
@@ -222,7 +225,7 @@ Exit gate:
 Deliverables:
 
 - Implement bounded semantic inspection, ordinary same-origin link clicking, scrolling, history navigation, and load waits.
-- Use no more than 80 elements per snapshot, 30-second references, eight-second waits, and 20 page actions per turn.
+- Use no more than 80 elements per snapshot, 30-second references, eight-second waits, and the user-selected 5–100 browser-action budget per request (default 40).
 
 Exit gate:
 
@@ -266,7 +269,7 @@ Do not create empty popup, options, remote-control, telemetry, or automation mod
 | Chat | Stream, stop, retry, new chat, link safety, Markdown injection, reconnect. |
 | Page context | Attach, preview, remove, truncate, protected page, form/password exclusion. |
 | Tab tools | Success, rejection, stale ID, bad URL scheme, close confirmation, duplicate prevention. |
-| Page tools | Exact-origin grant, inspect bounds, link click, button confirmation, scroll, history, wait timeout, stale ref, Stop. |
+| Page tools | Exact-origin grant reuse, inspect bounds, routine link/button click, consequential-button confirmation, configurable task limit, scroll, history, wait timeout, stale ref, Stop. |
 | Forms | Fill/select/check, controlled inputs, sensitive refusal, preview, approval expiry, validation failure, confirmed submit. |
 | Persistence | Browser restart, service-worker suspension, clear data, logout. |
 | Accessibility | Keyboard flow, focus, labels, contrast, reduced motion, streaming announcements. |
@@ -297,6 +300,6 @@ The MVP is complete only when:
 - `PRD.md`, this file, `AGENTS.md`, and `README.md` agree on scope and commands.
 - Authentication uses a supported Codex mechanism and exposes no reusable credential to the extension.
 - Page content is attached only through an explicit user action.
-- Only the five approved tab tools and ten approved supervised page tools exist; consequential actions require confirmation.
+- Only the seven approved tab tools and eleven approved supervised page tools exist; consequential actions require confirmation.
 - Remote control, external agents, arbitrary scripting/automation, connectors, telemetry, and store submission remain absent.
 - The manager reviews the final diff and browser evidence and signs off the private development beta.

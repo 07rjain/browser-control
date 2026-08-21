@@ -3,7 +3,19 @@ import { z } from "zod";
 export const MAX_PAGE_ELEMENTS = 80;
 export const PAGE_REF_TTL_MS = 30_000;
 export const MAX_PAGE_WAIT_MS = 8_000;
-export const MAX_PAGE_ACTIONS = 20;
+export const DEFAULT_BROWSER_TASK_ACTION_LIMIT = 40;
+export const MIN_BROWSER_TASK_ACTION_LIMIT = 5;
+export const MAX_BROWSER_TASK_ACTION_LIMIT = 100;
+export const BROWSER_TASK_ACTION_LIMIT_KEY = "codexSidebarBrowserTaskActionLimit";
+export const browserTaskActionLimitSchema = z.number().int()
+  .min(MIN_BROWSER_TASK_ACTION_LIMIT)
+  .max(MAX_BROWSER_TASK_ACTION_LIMIT);
+
+export function normalizeBrowserTaskActionLimit(value: unknown): number {
+  const numeric = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(numeric)) return DEFAULT_BROWSER_TASK_ACTION_LIMIT;
+  return Math.min(MAX_BROWSER_TASK_ACTION_LIMIT, Math.max(MIN_BROWSER_TASK_ACTION_LIMIT, Math.round(numeric)));
+}
 
 export const elementRefSchema = z
   .object({

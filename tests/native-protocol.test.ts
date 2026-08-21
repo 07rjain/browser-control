@@ -34,6 +34,8 @@ describe("native bridge framing", () => {
 
   it("allows only declared tabs and page tools", () => {
     expect(isAllowedDynamicTool("tabs", "list")).toBe(true);
+    expect(isAllowedDynamicTool("tabs", "group")).toBe(true);
+    expect(isAllowedDynamicTool("tabs", "ungroup")).toBe(true);
     expect(isAllowedDynamicTool("page", "inspect")).toBe(true);
     expect(isAllowedDynamicTool("page", "drag")).toBe(true);
     expect(isAllowedDynamicTool("page", "submit")).toBe(true);

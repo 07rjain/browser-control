@@ -27,7 +27,7 @@ export type PageActionDecision =
   | { decision: "confirm"; title: string; description: string }
   | { decision: "refuse"; reason: string };
 
-const consequentialClickPattern = /\b(save|send|publish|post|delete|remove|book|schedule|invite|confirm|create account|sign up)\b/i;
+const consequentialClickPattern = /^(save|send|publish|delete|book|schedule|invite)\b|\b(create account|sign up)\b/i;
 
 export function decidePageAction(call: PageToolCall, target?: PageTargetDescription): PageActionDecision {
   if (["inspect", "fill", "select", "check", "drag", "scroll", "history", "wait"].includes(call.tool)) {
@@ -58,6 +58,9 @@ export function decidePageAction(call: PageToolCall, target?: PageTargetDescript
   }
 
   if (call.tool === "keypress" && call.arguments && typeof call.arguments === "object" && "key" in call.arguments && call.arguments.key === "Enter") {
+    if (!target.formAssociated && !target.submitter && !consequentialClickPattern.test(target.label)) {
+      return { decision: "allow" };
+    }
     return {
       decision: "confirm",
       title: "Press Enter here?",
@@ -71,19 +74,14 @@ export function decidePageAction(call: PageToolCall, target?: PageTargetDescript
     if (target.tag === "a" && !target.href) {
       return { decision: "refuse", reason: "This link does not have a safe http or https destination." };
     }
-    if (target.tag === "a" && target.sameOrigin && !target.newTab && !target.download && !target.formAssociated) {
-      return { decision: "allow" };
+    if (target.submitter || consequentialClickPattern.test(target.label)) {
+      return {
+        decision: "confirm",
+        title: "Confirm this page action?",
+        description: "This control may send, save, publish, book, invite, delete, or otherwise change external data.",
+      };
     }
-    if (!target.formAssociated && !target.href && !target.newTab && !target.download && !consequentialClickPattern.test(target.label)) {
-      return { decision: "allow" };
-    }
-    return {
-      decision: "confirm",
-      title: "Click this page control?",
-      description: target.newTab
-        ? "This control may open a new tab. Codex will not follow it automatically."
-        : "Buttons and external links can change data or trigger an external action.",
-    };
+    return { decision: "allow" };
   }
 
   return { decision: "refuse", reason: "This page action is not supported by policy." };

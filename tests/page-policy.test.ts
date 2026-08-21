@@ -40,15 +40,21 @@ function target(overrides: Partial<PageTargetDescription> = {}): PageTargetDescr
 describe("page action policy", () => {
   it("allows ordinary navigation and non-form controls without confirmation", () => {
     expect(decidePageAction(call("click", {}), target())).toEqual({ decision: "allow" });
-    expect(decidePageAction(call("click", {}), target({ sameOrigin: false }))).toMatchObject({ decision: "confirm" });
+    expect(decidePageAction(call("click", {}), target({ sameOrigin: false }))).toEqual({ decision: "allow" });
+    expect(decidePageAction(call("click", {}), target({ newTab: true }))).toEqual({ decision: "allow" });
     expect(decidePageAction(call("click", {}), target({ tag: "button", role: "button", href: undefined }))).toEqual({ decision: "allow" });
     expect(decidePageAction(call("click", {}), target({ tag: "button", role: "button", label: "Save event", href: undefined }))).toMatchObject({ decision: "confirm" });
+    expect(decidePageAction(call("click", {}), target({ tag: "button", role: "button", label: "Remove filter", href: undefined }))).toEqual({ decision: "allow" });
+    expect(decidePageAction(call("click", {}), target({ tag: "button", role: "button", label: "Confirm time slot", href: undefined }))).toEqual({ decision: "allow" });
+    expect(decidePageAction(call("click", {}), target({ tag: "button", role: "button", label: "Today", href: undefined }))).toEqual({ decision: "allow" });
+    expect(decidePageAction(call("click", {}), target({ tag: "button", role: "button", href: undefined, formAssociated: true, submitter: false }))).toEqual({ decision: "allow" });
     expect(decidePageAction(call("click", {}), target({ tag: "button", role: "button", href: undefined, formAssociated: true, submitter: true }))).toMatchObject({ decision: "confirm" });
   });
 
-  it("always confirms form submission and Enter", () => {
+  it("confirms form submission and form-associated Enter", () => {
     expect(decidePageAction(call("submit", {}), target({ formAssociated: true }))).toMatchObject({ decision: "confirm" });
-    expect(decidePageAction(call("keypress", { key: "Enter" }), target({ tag: "input", role: "textbox" }))).toMatchObject({ decision: "confirm" });
+    expect(decidePageAction(call("keypress", { key: "Enter" }), target({ tag: "input", role: "textbox", formAssociated: true }))).toMatchObject({ decision: "confirm" });
+    expect(decidePageAction(call("keypress", { key: "Enter" }), target({ tag: "button", role: "button", formAssociated: false }))).toEqual({ decision: "allow" });
     expect(decidePageAction(call("keypress", { key: "Tab" }), target({ tag: "input", role: "textbox" }))).toEqual({ decision: "allow" });
   });
 

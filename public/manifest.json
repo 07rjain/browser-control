@@ -11,6 +11,7 @@
     "scripting",
     "sidePanel",
     "storage",
+    "tabGroups",
     "tabs"
   ],
   "optional_host_permissions": [

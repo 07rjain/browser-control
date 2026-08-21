@@ -1,9 +1,24 @@
 import { describe, expect, it } from "vitest";
 import { isSafeHttpUrl, uiRequestSchema } from "../src/shared/protocol";
 import { dynamicToolCallSchema, parseToolArguments } from "../src/background/tab-tools";
-import { pageToolCallSchema, parsePageToolArguments } from "../src/shared/page-tools";
+import {
+  browserTaskActionLimitSchema,
+  DEFAULT_BROWSER_TASK_ACTION_LIMIT,
+  normalizeBrowserTaskActionLimit,
+  pageToolCallSchema,
+  parsePageToolArguments,
+} from "../src/shared/page-tools";
 
 describe("extension boundary validation", () => {
+  it("bounds the configurable browser task action limit", () => {
+    expect(browserTaskActionLimitSchema.safeParse(20).success).toBe(true);
+    expect(browserTaskActionLimitSchema.safeParse(4).success).toBe(false);
+    expect(browserTaskActionLimitSchema.safeParse(101).success).toBe(false);
+    expect(normalizeBrowserTaskActionLimit("50")).toBe(50);
+    expect(normalizeBrowserTaskActionLimit("20.5")).toBe(21);
+    expect(normalizeBrowserTaskActionLimit(500)).toBe(100);
+    expect(normalizeBrowserTaskActionLimit("not-a-number")).toBe(DEFAULT_BROWSER_TASK_ACTION_LIMIT);
+  });
   it("accepts only http and https destinations", () => {
     expect(isSafeHttpUrl("https://example.com/path")).toBe(true);
     expect(isSafeHttpUrl("http://localhost:3000")).toBe(true);
@@ -46,6 +61,55 @@ describe("extension boundary validation", () => {
       arguments: { url: "file:///etc/passwd" },
     });
     expect(() => parseToolArguments(call)).toThrow(/http\/https/);
+  });
+
+  it("accepts background-by-default tab selection with explicit foreground opt-in", () => {
+    const open = dynamicToolCallSchema.parse({
+      requestId: 4, threadId: "thread-1", turnId: "turn-1", callId: "call-open",
+      namespace: "tabs", tool: "open", arguments: { url: "https://example.com", foreground: true },
+    });
+    expect(parseToolArguments(open)).toEqual({ url: "https://example.com", foreground: true });
+
+    const activate = dynamicToolCallSchema.parse({ ...open, tool: "activate", arguments: { tabId: 12 } });
+    expect(parseToolArguments(activate)).toEqual({ tabId: 12 });
+
+    const reload = dynamicToolCallSchema.parse({ ...open, tool: "reload", arguments: { tabId: 12, foreground: true } });
+    expect(() => parseToolArguments(reload)).toThrow();
+  });
+
+  it("accepts strict tab groups and rejects duplicate tab IDs", () => {
+    const call = dynamicToolCallSchema.parse({
+      requestId: 5,
+      threadId: "thread-1",
+      turnId: "turn-1",
+      callId: "call-group",
+      namespace: "tabs",
+      tool: "group",
+      arguments: { tabIds: [12, 13], title: "Research", color: "blue", collapsed: false },
+    });
+    expect(parseToolArguments(call)).toEqual({
+      tabIds: [12, 13],
+      title: "Research",
+      color: "blue",
+      collapsed: false,
+    });
+
+    expect(() => parseToolArguments({ ...call, arguments: { tabIds: [12, 12], title: "Duplicate" } })).toThrow(/unique/i);
+    expect(() => parseToolArguments({ ...call, arguments: { tabIds: [12], title: "Research", color: "black" } })).toThrow();
+  });
+
+  it("accepts strict tab ungrouping and rejects duplicate tab IDs", () => {
+    const call = dynamicToolCallSchema.parse({
+      requestId: 6,
+      threadId: "thread-1",
+      turnId: "turn-1",
+      callId: "call-ungroup",
+      namespace: "tabs",
+      tool: "ungroup",
+      arguments: { tabIds: [12, 13] },
+    });
+    expect(parseToolArguments(call)).toEqual({ tabIds: [12, 13] });
+    expect(() => parseToolArguments({ ...call, arguments: { tabIds: [12, 12] } })).toThrow(/unique/i);
   });
 
   it("accepts strict page inspection and rejects arbitrary selector arguments", () => {

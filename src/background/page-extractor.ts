@@ -13,7 +13,7 @@ export class PagePermissionRequiredError extends Error {
 }
 
 export async function captureCurrentPage(): Promise<PageAttachment> {
-  const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id || !tab.url) throw new Error("No active page is available.");
 
   const url = new URL(tab.url);

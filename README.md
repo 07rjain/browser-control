@@ -2,7 +2,7 @@
 
 A private-development Chrome side-panel extension powered by the user's ChatGPT Codex subscription through the official Codex App Server interface.
 
-The repository contains the private-development MVP plus the approved supervised browser-control milestone: sidebar chat, managed ChatGPT sign-in, model selection, explicit current-page attachment, five tab tools, and eleven typed page tools. It does not contain remote control, unattended automation, arbitrary JavaScript/selectors, connectors, analytics, or ChatGPT cookie scraping.
+The repository contains the private-development MVP plus the approved supervised browser-control milestone: sidebar chat, managed ChatGPT sign-in, model selection, explicit current-page attachment, seven tab tools, and eleven typed page tools. It does not contain remote control, unattended automation, arbitrary JavaScript/selectors, connectors, analytics, or ChatGPT cookie scraping.
 
 ## Project status
 
@@ -132,11 +132,13 @@ Use a disposable test page or test account when an action could send, publish, d
 - Stream a response, press **Stop**, retry, and verify reconnecting does not duplicate a message or tool action.
 - Attach a normal `http` or `https` page, inspect the preview, remove it, and verify no page content is shared before attachment.
 - Attempt attachment on `chrome://extensions` and verify the extension reports the protected-page limitation cleanly.
-- Exercise tab list, activate, open, reload, and confirmed close. Verify the active tab and result are correct.
+- Exercise tab list, activate, open, reload, group, ungroup, and confirmed close. For grouping, verify the tabs share one window, pinned tabs are refused, the requested title/color are applied, and unrelated tabs are unchanged. Verify ungrouping removes group labels without closing tabs.
 
 ### Browser-action checklist
 
 - On a fresh origin, request a page action and verify both **Allow this site** and Chrome's exact-origin permission prompt appear once. Repeat an action and verify the remembered grant is reused.
+- Start a task on tab A, immediately switch to tab B before its first tool call, and verify all page activity remains on A. Continue in a second message and verify the thread still targets A.
+- Pause on an exact-origin permission prompt, switch tabs, grant access, and verify the action resumes only on the tab named by the original prompt.
 - Inspect and click an ordinary link, button, menu item, and SPA control. Verify the action result instead of trusting only the click event.
 - Fill and clear text fields; select an option; toggle a checkbox/radio; and send an allowlisted key. Confirm sensitive inputs are refused and their values never appear in activity logs.
 - Scroll up, down, top, bottom, to an element, and within a scrollable container. Verify bounded movement and honest no-progress results.
@@ -167,7 +169,12 @@ For every manual pass, record Chrome version, macOS version, extension commit, t
 Ask Codex to inspect or navigate the active `http` or `https` page. The first page action for a site pauses until you select **Allow this site** in the sidebar and approve Chrome's exact-origin permission prompt. That exact-origin grant is remembered until you choose **Clear local data** or revoke it in Chrome.
 
 - Inspection returns at most 80 visible interactive controls using opaque references that expire after 30 seconds or any meaningful page change.
-- Ordinary same-origin links may run automatically. Buttons, external/new-tab links, Enter, tab closing, and form submission require confirmation.
+- After that grant, routine navigation (including external/new-tab links), ordinary buttons, field edits, scrolling, and drag-and-drop run automatically and remain visible in the activity log.
+- A fresh one-action confirmation is reserved for consequential controls such as Save, Send, Publish, Delete, Book, Schedule, form submission or form-associated Enter, and tab closing.
+- **Settings → Browser actions per request** controls the shared `tabs.*` and `page.*` execution budget for one Codex request. It defaults to 40, accepts 5–100, and a change applies to the next request.
+- Browser tasks snapshot a thread working tab before the request begins and retain it across follow-up requests. Opening or selecting another work tab updates that pin in the background, so changing the tab you are viewing does not pull focus back or retarget the task. An explicit user request to show or switch to a tab may foreground it.
+- New-tab links opened by page actions are created in the background and become the thread working tab. Closed or discarded working tabs fail closed or reload without falling back to the currently visible tab.
+- Completed browser work shows a dismissible sidebar message that survives side-panel recreation. **Settings → Task completion sound** optionally plays a quiet, primed local tone; it is off by default and suppressed when reduced motion is requested.
 - Fill/select/check tools refuse passwords, payment fields, authentication codes, private keys, and similar sensitive controls.
 - Stop cancels the model turn and pending browser task without silently revoking remembered site choices.
 - Activity is grouped beneath the request that caused it and collapses into a dropdown when the request completes.
@@ -181,7 +188,8 @@ Unsupported surfaces such as protected Chrome pages, cross-origin frames, canvas
 - `storage`: non-secret theme, transcript, and active-thread reference.
 - `activeTab` and `scripting`: explicit current-page attachment and injection of the packaged page executor.
 - Optional `http`/`https` host access: requested through a sidebar user gesture for the exact current origin; required for supervised page actions and never granted automatically.
-- `tabs`: list and perform the five approved tab actions.
+- `tabs`: list and perform the seven approved tab actions, including grouping and ungrouping without closing tabs.
+- `tabGroups`: name, color, and collapse a group created from explicitly selected same-window tabs.
 - `nativeMessaging`: communicate with the local Codex companion.
 
 No broad host permission, cookies, history, bookmarks, downloads, `webRequest`, or debugger access is requested.

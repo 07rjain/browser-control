@@ -2,7 +2,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { PageAttachment, SidebarEvent, UiResponse } from "../shared/protocol";
+import {
+  BROWSER_TASK_ACTION_LIMIT_KEY,
+  DEFAULT_BROWSER_TASK_ACTION_LIMIT,
+  MAX_BROWSER_TASK_ACTION_LIMIT,
+  MIN_BROWSER_TASK_ACTION_LIMIT,
+  normalizeBrowserTaskActionLimit,
+} from "../shared/page-tools";
 import { groupToolStatuses, summarizeToolStatuses, type ToolStatus } from "./activity";
+import { settleCanceledMessages, type ChatMessage } from "./chat-state";
 
 type AuthState = "checking" | "signed-out" | "authenticating" | "ready" | "offline" | "error";
 type Theme = "system" | "light" | "dark";
@@ -11,14 +19,6 @@ interface Account {
   type: "chatgpt";
   email: string | null;
   planType: string | null;
-}
-
-interface ChatMessage {
-  id: string;
-  role: "user" | "assistant";
-  text: string;
-  streaming?: boolean;
-  failed?: boolean;
 }
 
 interface LoginDetails {
@@ -53,6 +53,7 @@ interface PersistedState {
   messages: ChatMessage[];
   theme: Theme;
   selectedModel: string;
+  completionSoundEnabled?: boolean;
 }
 
 interface ModelOption {
@@ -67,7 +68,7 @@ interface RetryPayload {
   outboundText: string;
 }
 
-const INITIAL_STATE: PersistedState = { threadId: null, messages: [], theme: "system", selectedModel: "" };
+const INITIAL_STATE: PersistedState = { threadId: null, messages: [], theme: "system", selectedModel: "", completionSoundEnabled: false };
 const STORAGE_KEY = "codexSidebarState";
 const PAGE_ORIGINS_KEY = "codexSidebarGrantedPageOrigins";
 const TASK_ORIGINS_KEY = "codexSidebarTaskControlOrigins";
@@ -113,6 +114,33 @@ function compactPlan(plan: string | null): string {
   return plan.charAt(0).toUpperCase() + plan.slice(1);
 }
 
+let completionAudioContext: AudioContext | null = null;
+
+async function playCompletionSound(): Promise<void> {
+  try {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const context = completionAudioContext?.state === "closed"
+      ? new AudioContext()
+      : completionAudioContext ?? new AudioContext();
+    completionAudioContext = context;
+    if (context.state === "suspended") await context.resume();
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    const now = context.currentTime;
+    oscillator.type = "sine";
+    oscillator.frequency.setValueAtTime(523.25, now);
+    oscillator.frequency.setValueAtTime(659.25, now + 0.11);
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.055, now + 0.015);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.28);
+    oscillator.connect(gain).connect(context.destination);
+    oscillator.start(now);
+    oscillator.stop(now + 0.3);
+  } catch {
+    // Audio can be unavailable under browser autoplay or accessibility policies.
+  }
+}
+
 function ToolActivity({ statuses, complete }: { statuses: ToolStatus[]; complete: boolean }) {
   const [open, setOpen] = useState(!complete);
   const summary = summarizeToolStatuses(statuses);
@@ -151,6 +179,10 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [theme, setTheme] = useState<Theme>("system");
   const [selectedModel, setSelectedModel] = useState("");
+  const [browserTaskActionLimit, setBrowserTaskActionLimit] = useState(DEFAULT_BROWSER_TASK_ACTION_LIMIT);
+  const [browserTaskActionLimitDraft, setBrowserTaskActionLimitDraft] = useState(String(DEFAULT_BROWSER_TASK_ACTION_LIMIT));
+  const [completionSoundEnabled, setCompletionSoundEnabled] = useState(false);
+  const [completionNotice, setCompletionNotice] = useState<string | null>(null);
   const [models, setModels] = useState<ModelOption[]>([]);
   const [toolApproval, setToolApproval] = useState<ToolApproval | null>(null);
   const [toolPermission, setToolPermission] = useState<ToolPermission | null>(null);
@@ -164,6 +196,7 @@ export default function App() {
   const inFlightPayloadRef = useRef<RetryPayload | null>(null);
   const turnExecutedToolRef = useRef(false);
   const stopRequestedRef = useRef(false);
+  const completionSoundEnabledRef = useRef(false);
 
   const streaming = activeTurnId !== null || isSending;
 
@@ -181,13 +214,18 @@ export default function App() {
 
   useEffect(() => {
     void chrome.storage.local
-      .get(STORAGE_KEY)
+      .get([STORAGE_KEY, BROWSER_TASK_ACTION_LIMIT_KEY])
       .then((stored) => {
         const state = (stored[STORAGE_KEY] as PersistedState | undefined) ?? INITIAL_STATE;
         setThreadId(state.threadId);
         setMessages(Array.isArray(state.messages) ? state.messages.map((message) => ({ ...message, streaming: false })) : []);
         setTheme(state.theme ?? "system");
         setSelectedModel(state.selectedModel ?? "");
+        setCompletionSoundEnabled(Boolean(state.completionSoundEnabled));
+        completionSoundEnabledRef.current = Boolean(state.completionSoundEnabled);
+        const storedActionLimit = normalizeBrowserTaskActionLimit(stored[BROWSER_TASK_ACTION_LIMIT_KEY]);
+        setBrowserTaskActionLimit(storedActionLimit);
+        setBrowserTaskActionLimitDraft(String(storedActionLimit));
         setHydrated(true);
       })
       .finally(() => void refreshAccount());
@@ -197,12 +235,14 @@ export default function App() {
     void sendRequest<{
       activities: ToolStatus[];
       prompts: Array<{ type: "approval" | "permission"; data: ToolApproval | ToolPermission }>;
+      completionNotice?: { message?: string } | null;
     }>({ type: "BROWSER_STATE_READ" }).then((state) => {
       setToolStatuses(Array.isArray(state.activities) ? state.activities.slice(-100) : []);
       const approval = state.prompts.find((prompt) => prompt.type === "approval");
       const permission = state.prompts.find((prompt) => prompt.type === "permission");
       if (approval) setToolApproval(approval.data as ToolApproval);
       if (permission) setToolPermission(permission.data as ToolPermission);
+      if (state.completionNotice?.message) setCompletionNotice(state.completionNotice.message);
     }).catch(() => undefined);
   }, []);
 
@@ -220,9 +260,18 @@ export default function App() {
       text: message.text.slice(0, 100_000),
     }));
     void chrome.storage.local.set({
-      [STORAGE_KEY]: { threadId, messages: retainedMessages, theme, selectedModel } satisfies PersistedState,
+      [STORAGE_KEY]: { threadId, messages: retainedMessages, theme, selectedModel, completionSoundEnabled } satisfies PersistedState,
     });
-  }, [hydrated, messages, selectedModel, theme, threadId]);
+  }, [completionSoundEnabled, hydrated, messages, selectedModel, theme, threadId]);
+
+  useEffect(() => {
+    completionSoundEnabledRef.current = completionSoundEnabled;
+  }, [completionSoundEnabled]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    void chrome.storage.local.set({ [BROWSER_TASK_ACTION_LIMIT_KEY]: browserTaskActionLimit });
+  }, [browserTaskActionLimit, hydrated]);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -244,6 +293,7 @@ export default function App() {
           void refreshAccount();
           break;
         case "chat.delta": {
+          if (stopRequestedRef.current) break;
           const data = message.data as { turnId: string; delta: string };
           setActiveTurnId(data.turnId);
           setMessages((current) => {
@@ -258,6 +308,7 @@ export default function App() {
           break;
         }
         case "chat.messageCompleted": {
+          if (stopRequestedRef.current) break;
           const data = message.data as { turnId: string; item: { text: string } };
           setMessages((current) =>
             current.map((item) =>
@@ -268,18 +319,33 @@ export default function App() {
           );
           break;
         }
-        case "chat.turnCompleted":
+        case "chat.turnCompleted": {
+          const wasStopped = stopRequestedRef.current;
+          const completedBrowserTask = turnExecutedToolRef.current;
           stopRequestedRef.current = false;
+          turnExecutedToolRef.current = false;
           setActiveTurnId(null);
           setIsSending(false);
           setRetryPayload(null);
           inFlightPayloadRef.current = null;
-          setMessages((current) => current.map((item) => ({ ...item, streaming: false })));
+          setMessages(settleCanceledMessages);
+          if (completedBrowserTask && !wasStopped) {
+            setCompletionNotice("Task complete — you can check the result when you’re ready.");
+            if (completionSoundEnabledRef.current) void playCompletionSound();
+          }
           break;
-        case "chat.error":
+        }
+        case "chat.error": {
+          const wasStopped = stopRequestedRef.current;
           stopRequestedRef.current = false;
           setActiveTurnId(null);
           setIsSending(false);
+          if (wasStopped) {
+            setRetryPayload(null);
+            inFlightPayloadRef.current = null;
+            setMessages(settleCanceledMessages);
+            break;
+          }
           setRetryPayload(turnExecutedToolRef.current ? null : inFlightPayloadRef.current);
           setError(
             turnExecutedToolRef.current
@@ -290,6 +356,7 @@ export default function App() {
             current.map((item) => (item.streaming ? { ...item, streaming: false, failed: true } : item)),
           );
           break;
+        }
         case "tool.approval":
           setToolApproval(message.data as ToolApproval);
           break;
@@ -318,6 +385,7 @@ export default function App() {
   const signIn = async () => {
     setAuthState("authenticating");
     setError(null);
+    setCompletionNotice(null);
     try {
       const result = await sendRequest<LoginDetails & { type: string }>({ type: "AUTH_LOGIN" });
       setLogin(result);
@@ -405,6 +473,8 @@ export default function App() {
     if (streaming) return;
     setIsSending(true);
     setError(null);
+    setCompletionNotice(null);
+    void sendRequest({ type: "COMPLETION_NOTICE_DISMISS" }).catch(() => undefined);
     setRetryPayload(null);
     inFlightPayloadRef.current = payload;
     turnExecutedToolRef.current = false;
@@ -433,13 +503,19 @@ export default function App() {
         await sendRequest({ type: "BROWSER_TASK_CANCEL", threadId: activeThreadId, turnId: result.turnId }).catch(() => undefined);
         await sendRequest({ type: "CHAT_INTERRUPT", threadId: activeThreadId, turnId: result.turnId }).catch(() => undefined);
         setIsSending(false);
-        setMessages((current) => current.map((item) => ({ ...item, streaming: false })));
+        setMessages(settleCanceledMessages);
         return;
       }
       setActiveTurnId(result.turnId);
       setIsSending(false);
     } catch (cause) {
       setIsSending(false);
+      if (stopRequestedRef.current) {
+        setRetryPayload(null);
+        inFlightPayloadRef.current = null;
+        setMessages(settleCanceledMessages);
+        return;
+      }
       setMessages((current) =>
         current.map((item) =>
           item.id === `${messageId}-assistant` ? { ...item, streaming: false, failed: true } : item,
@@ -468,7 +544,10 @@ export default function App() {
   const stop = async () => {
     stopRequestedRef.current = true;
     setIsSending(false);
-    setMessages((current) => current.map((item) => ({ ...item, streaming: false })));
+    setError(null);
+    setMessages(settleCanceledMessages);
+    setToolApproval(null);
+    setToolPermission(null);
     if (!threadId) return;
     await sendRequest({ type: "BROWSER_TASK_CANCEL", threadId, turnId: activeTurnId ?? undefined }).catch(() => undefined);
     if (activeTurnId) {
@@ -481,6 +560,8 @@ export default function App() {
 
   const newChat = () => {
     if (streaming) void stop();
+    setCompletionNotice(null);
+    void sendRequest({ type: "COMPLETION_NOTICE_DISMISS" }).catch(() => undefined);
     setThreadId(null);
     threadReadyRef.current = false;
     setMessages([]);
@@ -505,6 +586,7 @@ export default function App() {
     const origins = [...new Set([...attachmentOrigins, ...taskOrigins])];
     if (origins.length > 0) await chrome.permissions.remove({ origins }).catch(() => false);
     await chrome.storage.local.remove(STORAGE_KEY);
+    await chrome.storage.local.remove(BROWSER_TASK_ACTION_LIMIT_KEY);
     await chrome.storage.local.remove(PAGE_ORIGINS_KEY);
     await chrome.storage.local.remove(TASK_ORIGINS_KEY);
     await chrome.storage.session.clear();
@@ -512,6 +594,11 @@ export default function App() {
     setMessages([]);
     setTheme("system");
     setSelectedModel("");
+    setBrowserTaskActionLimit(DEFAULT_BROWSER_TASK_ACTION_LIMIT);
+    setBrowserTaskActionLimitDraft(String(DEFAULT_BROWSER_TASK_ACTION_LIMIT));
+    setCompletionSoundEnabled(false);
+    completionSoundEnabledRef.current = false;
+    setCompletionNotice(null);
     setMenuOpen(false);
     setPendingPageOrigin(null);
     setToolStatuses([]);
@@ -533,8 +620,11 @@ export default function App() {
     const pending = toolPermission;
     setToolPermission(null);
     try {
+      const alreadyGranted = approved
+        ? await chrome.permissions.contains({ origins: [pending.originPattern] })
+        : false;
       const granted = approved
-        ? await chrome.permissions.request({ origins: [pending.originPattern] })
+        ? alreadyGranted || await chrome.permissions.request({ origins: [pending.originPattern] })
         : false;
       await sendRequest({
         type: "PAGE_CONTROL_PERMISSION_RESULT",
@@ -632,6 +722,40 @@ export default function App() {
               </select>
             </label>
             <p className="menu-hint">Model changes apply to your next message.</p>
+            <label>
+              Browser actions per request
+              <input
+                type="number"
+                min={MIN_BROWSER_TASK_ACTION_LIMIT}
+                max={MAX_BROWSER_TASK_ACTION_LIMIT}
+                step={5}
+                value={browserTaskActionLimitDraft}
+                onChange={(event) => setBrowserTaskActionLimitDraft(event.target.value)}
+                onBlur={() => {
+                  const nextLimit = normalizeBrowserTaskActionLimit(browserTaskActionLimitDraft);
+                  setBrowserTaskActionLimit(nextLimit);
+                  setBrowserTaskActionLimitDraft(String(nextLimit));
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") event.currentTarget.blur();
+                }}
+              />
+            </label>
+            <p className="menu-hint">
+              {MIN_BROWSER_TASK_ACTION_LIMIT}–{MAX_BROWSER_TASK_ACTION_LIMIT}; applies to the next request. Consequential actions still require confirmation.
+            </p>
+            <label className="toggle-row">
+              <span>Task completion sound<small>Play a quiet tone after browser work finishes.</small></span>
+              <input
+                type="checkbox"
+                checked={completionSoundEnabled}
+                onChange={(event) => {
+                  const enabled = event.target.checked;
+                  setCompletionSoundEnabled(enabled);
+                  if (enabled) void playCompletionSound();
+                }}
+              />
+            </label>
             <button onClick={() => void clearLocalData()}>Clear local data</button>
             <button onClick={() => void signOut()}>Sign out</button>
           </section>
@@ -656,7 +780,7 @@ export default function App() {
               : undefined;
             return (
               <div key={message.id} className="turn-block">
-                <article className={`message message-${message.role} ${message.failed ? "message-failed" : ""}`}>
+                {(message.role === "user" || message.text || message.streaming) && <article className={`message message-${message.role} ${message.failed ? "message-failed" : ""}`}>
                   <span className="message-role">{message.role === "user" ? "You" : "Codex"}</span>
                   {message.role === "assistant" ? (
                     message.text ? (
@@ -676,7 +800,7 @@ export default function App() {
                   ) : (
                     <p>{message.text}</p>
                   )}
-                </article>
+                </article>}
                 {activity && (
                   <ToolActivity
                     key={`${message.id}-${String(!message.streaming && activeTurnId !== message.id)}`}
@@ -728,6 +852,15 @@ export default function App() {
       </div>
 
       <footer className="composer-wrap">
+        {completionNotice && (
+          <div className="completion-banner" role="status">
+            <span>{completionNotice}</span>
+            <button aria-label="Dismiss completion message" onClick={() => {
+              setCompletionNotice(null);
+              void sendRequest({ type: "COMPLETION_NOTICE_DISMISS" }).catch(() => undefined);
+            }}>×</button>
+          </div>
+        )}
         {error && (
           <div className="error-banner compact" role="alert">
             <span>{error}</span>

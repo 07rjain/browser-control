@@ -9,7 +9,8 @@ import {
   isSafeHttpUrl,
 } from "../shared/protocol";
 import {
-  MAX_PAGE_ACTIONS,
+  BROWSER_TASK_ACTION_LIMIT_KEY,
+  normalizeBrowserTaskActionLimit,
   pageToolCallSchema,
   parsePageToolArguments,
   type PageToolCall,
@@ -34,7 +35,11 @@ const NATIVE_TIMEOUT_MS = 30_000;
 const COMPLETED_KEY = "codexSidebarCompletedToolCalls";
 const ACTIVITY_KEY = "codexSidebarBrowserActivities";
 const TASK_KEY = "codexSidebarBrowserTasks";
+const THREAD_TARGETS_KEY = "codexSidebarThreadWorkingTabs";
+const COMPLETION_NOTICE_KEY = "codexSidebarCompletionNotice";
+const PENDING_PROMPTS_KEY = "codexSidebarPendingBrowserPrompts";
 const TASK_ORIGINS_KEY = "codexSidebarTaskControlOrigins";
+const TASK_TOMBSTONE_TTL_MS = 10 * 60 * 1_000;
 const accountResponseSchema = z.object({ account: accountSchema, requiresOpenaiAuth: z.boolean() });
 const loginResponseSchema = z.object({
   type: z.literal("chatgpt"),
@@ -72,10 +77,18 @@ interface BrowserTaskState {
   threadId: string;
   turnId: string;
   actionCount: number;
+  actionLimit?: number;
   canceled: boolean;
+  finished?: boolean;
   authorizedOrigin?: string;
   authorizedOriginPattern?: string;
   authorizedTabId?: number;
+  updatedAt: number;
+}
+
+interface ThreadWorkingTab {
+  threadId: string;
+  tabId: number;
   updatedAt: number;
 }
 
@@ -84,11 +97,26 @@ interface PendingApproval {
   target?: PageTargetDescription;
 }
 
+interface PendingPermission {
+  call: PageToolCall;
+  tabId: number;
+  originPattern: string;
+}
+
+interface StoredPendingPrompt {
+  callId: string;
+  type: "approval" | "permission";
+  data: Record<string, unknown>;
+  approval?: PendingApproval;
+  permission?: PendingPermission;
+}
+
 let nativePort: chrome.runtime.Port | null = null;
 const pendingNative = new Map<string, PendingNativeRequest>();
 const pendingApprovals = new Map<string, PendingApproval>();
-const pendingPermissions = new Map<string, { call: PageToolCall }>();
+const pendingPermissions = new Map<string, PendingPermission>();
 const pendingPrompts = new Map<string, { type: "approval" | "permission"; data: Record<string, unknown> }>();
+const finishedTurns = new Set<string>();
 
 function broadcast(event: string, data?: unknown): void {
   const message: SidebarEvent = { source: "codex-sidebar-background", event, data };
@@ -142,7 +170,11 @@ function handleNativeEnvelope(message: NativeEnvelope): void {
   if (message.event === "chat.turnCompleted") {
     const data = message.data as { turnId?: unknown; turn?: { id?: unknown } } | undefined;
     const turnId = data?.turnId ?? data?.turn?.id;
-    if (typeof turnId === "string") void finishBrowserTurn(turnId);
+    if (typeof turnId === "string") {
+      finishedTurns.add(turnId);
+      setTimeout(() => finishedTurns.delete(turnId), TASK_TOMBSTONE_TTL_MS);
+      void finishBrowserTurn(turnId);
+    }
   }
   broadcast(message.event, message.data);
 }
@@ -177,6 +209,51 @@ async function storedList<T>(key: string): Promise<T[]> {
   return Array.isArray(result[key]) ? (result[key] as T[]) : [];
 }
 
+async function persistPendingPrompt(prompt: StoredPendingPrompt): Promise<void> {
+  const prompts = (await storedList<StoredPendingPrompt>(PENDING_PROMPTS_KEY))
+    .filter((item) => item.callId !== prompt.callId);
+  prompts.push(prompt);
+  await chrome.storage.session.set({ [PENDING_PROMPTS_KEY]: prompts.slice(-20) });
+}
+
+async function removePendingPrompt(callId: string): Promise<void> {
+  const prompts = await storedList<StoredPendingPrompt>(PENDING_PROMPTS_KEY);
+  await chrome.storage.session.set({
+    [PENDING_PROMPTS_KEY]: prompts.filter((item) => item.callId !== callId),
+  });
+}
+
+async function getThreadWorkingTab(threadId: string): Promise<number | undefined> {
+  const targets = await storedList<ThreadWorkingTab>(THREAD_TARGETS_KEY);
+  const target = targets.find((item) => item.threadId === threadId);
+  if (!target) return undefined;
+  try {
+    await chrome.tabs.get(target.tabId);
+    return target.tabId;
+  } catch {
+    await chrome.storage.session.set({
+      [THREAD_TARGETS_KEY]: targets.filter((item) => item.threadId !== threadId),
+    });
+    return undefined;
+  }
+}
+
+async function setThreadWorkingTab(threadId: string, tabId: number): Promise<void> {
+  await chrome.tabs.get(tabId);
+  const targets = (await storedList<ThreadWorkingTab>(THREAD_TARGETS_KEY)).filter((item) => item.threadId !== threadId);
+  targets.push({ threadId, tabId, updatedAt: Date.now() });
+  await chrome.storage.session.set({ [THREAD_TARGETS_KEY]: targets.slice(-40) });
+}
+
+async function ensureThreadWorkingTab(threadId: string): Promise<number> {
+  const existing = await getThreadWorkingTab(threadId);
+  if (existing !== undefined) return existing;
+  const [active] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (active?.id === undefined) throw new Error("No browser tab is available for this request.");
+  await setThreadWorkingTab(threadId, active.id);
+  return active.id;
+}
+
 async function getCompleted(call: BrowserToolCall): Promise<StoredToolResult | undefined> {
   const key = toolKey(call);
   return (await storedList<StoredToolResult>(COMPLETED_KEY)).find((item) => item.key === key);
@@ -209,12 +286,16 @@ async function storeActivity(call: BrowserToolCall, status: string, extra?: Reco
 async function getTask(call: BrowserToolCall): Promise<BrowserTaskState> {
   const key = taskKey(call);
   const tasks = await storedList<BrowserTaskState>(TASK_KEY);
-  return tasks.find((item) => item.key === key) ?? {
+  const existing = tasks.find((item) => item.key === key);
+  if (existing) return existing;
+  const workingTabId = await getThreadWorkingTab(call.threadId);
+  return {
     key,
     threadId: call.threadId,
     turnId: call.turnId,
     actionCount: 0,
     canceled: false,
+    authorizedTabId: workingTabId,
     updatedAt: Date.now(),
   };
 }
@@ -227,9 +308,15 @@ async function saveTask(task: BrowserTaskState): Promise<void> {
 
 async function recordAction(call: BrowserToolCall): Promise<void> {
   const task = await getTask(call);
+  if (finishedTurns.has(call.turnId)) throw new Error("This browser turn already finished.");
   if (task.canceled) throw new Error("The user stopped this browser task.");
-  if (call.namespace === "page" && task.actionCount >= MAX_PAGE_ACTIONS) {
-    throw new Error(`This browser task reached its ${MAX_PAGE_ACTIONS}-action safety limit.`);
+  if (task.finished) throw new Error("This browser turn already finished.");
+  if (task.actionLimit === undefined) {
+    const stored = await chrome.storage.local.get(BROWSER_TASK_ACTION_LIMIT_KEY);
+    task.actionLimit = normalizeBrowserTaskActionLimit(stored[BROWSER_TASK_ACTION_LIMIT_KEY]);
+  }
+  if (task.actionCount >= task.actionLimit) {
+    throw new Error(`This browser task reached its ${task.actionLimit}-action safety limit.`);
   }
   task.actionCount += 1;
   task.updatedAt = Date.now();
@@ -242,6 +329,7 @@ async function respondToTool(call: BrowserToolCall, success: boolean, result: un
 
 async function finishTool(call: BrowserToolCall, success: boolean, result: unknown, status: string): Promise<void> {
   pendingPrompts.delete(call.callId);
+  await removePendingPrompt(call.callId);
   await storeCompleted(call, success, result);
   await respondToTool(call, success, result);
   const error = typeof result === "object" && result && "error" in result ? (result as { error: unknown }).error : "Browser action failed.";
@@ -273,31 +361,83 @@ async function handleTabCall(call: DynamicToolCall, announce: boolean): Promise<
       danger: true,
     };
     pendingPrompts.set(call.callId, { type: "approval", data: prompt });
+    await persistPendingPrompt({ callId: call.callId, type: "approval", data: prompt, approval: { call } });
     broadcast("tool.approval", prompt);
     return;
   }
   await recordAction(call);
   await storeActivity(call, "running");
-  const result = await executeTabTool(call);
+  let result = await executeTabTool(call);
+  if (call.tool === "list" && Array.isArray(result)) {
+    const workingTabId = await getThreadWorkingTab(call.threadId);
+    result = result.map((tab) => tab && typeof tab === "object"
+      ? { ...tab, selectedForTask: "id" in tab && tab.id === workingTabId }
+      : tab);
+  }
+  if ((call.tool === "activate" || call.tool === "open") && result && typeof result === "object" && "id" in result) {
+    const tabId = (result as { id?: unknown }).id;
+    if (typeof tabId === "number") {
+      const task = await getTask(call);
+      task.authorizedTabId = tabId;
+      task.authorizedOrigin = undefined;
+      task.authorizedOriginPattern = undefined;
+      task.updatedAt = Date.now();
+      await saveTask(task);
+      await setThreadWorkingTab(call.threadId, tabId);
+    }
+  }
   await finishTool(call, true, result, "succeeded");
+}
+
+async function executePageCallForTask(
+  call: PageToolCall,
+  task: BrowserTaskState,
+  target?: PageTargetDescription,
+): Promise<unknown> {
+  if (call.tool === "click" && target?.newTab && target.href && isSafeHttpUrl(target.href)) {
+    if (task.authorizedTabId === undefined) throw new Error("This browser task has no working tab.");
+    const source = await chrome.tabs.get(task.authorizedTabId);
+    const created = await chrome.tabs.create({ url: target.href, active: false, windowId: source.windowId });
+    if (created.id === undefined) throw new Error("Chrome did not return the opened background tab.");
+    task.authorizedTabId = created.id;
+    task.authorizedOrigin = undefined;
+    task.authorizedOriginPattern = undefined;
+    task.updatedAt = Date.now();
+    await saveTask(task);
+    await setThreadWorkingTab(call.threadId, created.id);
+    return {
+      tabId: created.id,
+      url: created.url ?? target.href,
+      title: created.title ?? "Loading…",
+      openedInBackground: true,
+      selectedForTask: true,
+    };
+  }
+  return executePageTool(call, task.authorizedTabId);
 }
 
 async function handlePageCall(call: PageToolCall, announce: boolean): Promise<void> {
   parsePageToolArguments(call);
   if (announce) await storeActivity(call, "requested");
-  const controlOrigin = await currentControlOrigin();
   const task = await getTask(call);
+  if (task.authorizedTabId === undefined) {
+    task.authorizedTabId = await ensureThreadWorkingTab(call.threadId);
+    task.updatedAt = Date.now();
+    await saveTask(task);
+  }
+  const controlOrigin = await currentControlOrigin(task.authorizedTabId);
   if (
     task.authorizedTabId !== controlOrigin.tabId ||
     task.authorizedOrigin !== controlOrigin.origin ||
     task.authorizedOriginPattern !== controlOrigin.originPattern
   ) {
     const storedOrigins = await chrome.storage.local.get(TASK_ORIGINS_KEY);
-    const rememberedOrigins = Array.isArray(storedOrigins[TASK_ORIGINS_KEY])
+    const rememberedControlOrigins = Array.isArray(storedOrigins[TASK_ORIGINS_KEY])
       ? (storedOrigins[TASK_ORIGINS_KEY] as string[])
       : [];
-    const remembered = rememberedOrigins.includes(controlOrigin.originPattern) &&
-      await chrome.permissions.contains({ origins: [controlOrigin.originPattern] });
+    const remembered =
+      rememberedControlOrigins.includes(controlOrigin.originPattern) &&
+      (await chrome.permissions.contains({ origins: [controlOrigin.originPattern] }));
     if (!remembered) throw new PageControlPermissionRequiredError(controlOrigin.origin, controlOrigin.originPattern);
     task.authorizedOrigin = controlOrigin.origin;
     task.authorizedOriginPattern = controlOrigin.originPattern;
@@ -306,7 +446,7 @@ async function handlePageCall(call: PageToolCall, announce: boolean): Promise<vo
     await saveTask(task);
   }
   let target: PageTargetDescription | undefined;
-  if (["click", "keypress", "submit"].includes(call.tool)) target = await describePageTarget(call);
+  if (["click", "keypress", "submit"].includes(call.tool)) target = await describePageTarget(call, false, task.authorizedTabId);
   const policy = decidePageAction(call, target);
   if (policy.decision === "refuse") {
     await finishTool(call, false, { error: policy.reason }, "failed");
@@ -331,12 +471,13 @@ async function handlePageCall(call: PageToolCall, announce: boolean): Promise<vo
       danger: call.tool === "submit",
     };
     pendingPrompts.set(call.callId, { type: "approval", data: prompt });
+    await persistPendingPrompt({ callId: call.callId, type: "approval", data: prompt, approval: { call, target } });
     broadcast("tool.approval", prompt);
     return;
   }
   await recordAction(call);
   await storeActivity(call, "running");
-  const result = await executePageTool(call);
+  const result = await executePageCallForTask(call, task, target);
   await finishTool(call, true, result, "succeeded");
 }
 
@@ -356,10 +497,26 @@ async function handleDynamicToolCall(input: unknown): Promise<void> {
     else await handlePageCall(call, true);
   } catch (error) {
     if (error instanceof PageControlPermissionRequiredError && call.namespace === "page") {
-      pendingPermissions.set(call.callId, { call });
+      const permissionTask = await getTask(call);
+      if (permissionTask.authorizedTabId === undefined) {
+        await finishTool(call, false, { error: "This browser task has no working tab." }, "failed").catch(() => undefined);
+        return;
+      }
+      const pendingPermission: PendingPermission = {
+        call,
+        tabId: permissionTask.authorizedTabId,
+        originPattern: error.originPattern,
+      };
+      pendingPermissions.set(call.callId, pendingPermission);
       await storeActivity(call, "awaiting permission", { origin: error.origin });
       const prompt = { callId: call.callId, origin: error.origin, originPattern: error.originPattern };
       pendingPrompts.set(call.callId, { type: "permission", data: prompt });
+      await persistPendingPrompt({
+        callId: call.callId,
+        type: "permission",
+        data: prompt,
+        permission: pendingPermission,
+      });
       broadcast("tool.permission", prompt);
       return;
     }
@@ -374,10 +531,12 @@ async function handleDynamicToolCall(input: unknown): Promise<void> {
 }
 
 async function decideTool(callId: string, approved: boolean): Promise<unknown> {
-  const pending = pendingApprovals.get(callId);
+  const stored = (await storedList<StoredPendingPrompt>(PENDING_PROMPTS_KEY)).find((item) => item.callId === callId);
+  const pending = pendingApprovals.get(callId) ?? stored?.approval;
   if (!pending) throw new Error("This browser-action request is no longer pending.");
   pendingApprovals.delete(callId);
   pendingPrompts.delete(callId);
+  await removePendingPrompt(callId);
   const { call } = pending;
   if (!approved) {
     await finishTool(call, false, { error: "The user rejected this browser action." }, "rejected");
@@ -385,7 +544,8 @@ async function decideTool(callId: string, approved: boolean): Promise<unknown> {
   }
   try {
     if (call.namespace === "page" && pending.target) {
-      const currentTarget = await describePageTarget(call, true);
+      const approvalTask = await getTask(call);
+      const currentTarget = await describePageTarget(call, true, approvalTask.authorizedTabId);
       const expected = JSON.stringify({
         label: pending.target.label,
         href: pending.target.href,
@@ -402,7 +562,8 @@ async function decideTool(callId: string, approved: boolean): Promise<unknown> {
     }
     await recordAction(call);
     await storeActivity(call, "running");
-    const result = call.namespace === "tabs" ? await executeTabTool(call) : await executePageTool(call);
+    const task = await getTask(call);
+    const result = call.namespace === "tabs" ? await executeTabTool(call) : await executePageCallForTask(call, task, pending.target);
     await finishTool(call, true, result, "succeeded");
     return result;
   } catch (error) {
@@ -413,15 +574,17 @@ async function decideTool(callId: string, approved: boolean): Promise<unknown> {
 }
 
 async function continueAfterPermission(callId: string, originPattern: string, granted: boolean): Promise<unknown> {
-  const pending = pendingPermissions.get(callId);
+  const stored = (await storedList<StoredPendingPrompt>(PENDING_PROMPTS_KEY)).find((item) => item.callId === callId);
+  const pending = pendingPermissions.get(callId) ?? stored?.permission;
   if (!pending) throw new Error("This browser permission request is no longer pending.");
-  const { call } = pending;
+  const { call, tabId, originPattern: expectedOriginPattern } = pending;
   pendingPermissions.delete(callId);
   pendingPrompts.delete(callId);
-  const expected = await currentControlOrigin();
-  if (expected.originPattern !== originPattern) {
-    await finishTool(call, false, { error: "The active page changed before permission was granted." }, "failed");
-    throw new Error("The active page changed before permission was granted.");
+  await removePendingPrompt(callId);
+  const expected = await currentControlOrigin(tabId);
+  if (expected.originPattern !== originPattern || expectedOriginPattern !== originPattern) {
+    await finishTool(call, false, { error: "The task's working page changed before permission was granted." }, "failed");
+    throw new Error("The task's working page changed before permission was granted.");
   }
   if (!granted) {
     await finishTool(call, false, { error: "The user denied site access." }, "rejected");
@@ -445,8 +608,26 @@ async function continueAfterPermission(callId: string, originPattern: string, gr
 }
 
 async function finishBrowserTurn(turnId: string): Promise<void> {
-  const tasks = await storedList<BrowserTaskState>(TASK_KEY);
-  await chrome.storage.session.set({ [TASK_KEY]: tasks.filter((task) => task.turnId !== turnId) });
+  const now = Date.now();
+  const tasks = (await storedList<BrowserTaskState>(TASK_KEY))
+    .filter((task) => now - task.updatedAt < TASK_TOMBSTONE_TTL_MS);
+  const completedTask = tasks.find((task) => task.turnId === turnId);
+  for (const task of tasks) {
+    if (task.turnId === turnId) {
+      task.finished = true;
+      task.updatedAt = now;
+    }
+  }
+  await chrome.storage.session.set({ [TASK_KEY]: tasks.slice(-40) });
+  if (completedTask && completedTask.actionCount > 0 && !completedTask.canceled) {
+    await chrome.storage.session.set({
+      [COMPLETION_NOTICE_KEY]: {
+        turnId,
+        message: "Task complete — you can check the result when you’re ready.",
+        timestamp: now,
+      },
+    });
+  }
 }
 
 async function cancelBrowserTask(threadId: string, turnId?: string): Promise<void> {
@@ -470,22 +651,46 @@ async function cancelBrowserTask(threadId: string, turnId?: string): Promise<voi
     });
   }
   await chrome.storage.session.set({ [TASK_KEY]: tasks });
-  const pending = [...pendingApprovals.values(), ...[...pendingPermissions.values()].map((item) => ({ call: item.call }))];
-  for (const item of pending) {
+  const pendingByCall = new Map<string, { call: BrowserToolCall }>();
+  for (const item of pendingApprovals.values()) pendingByCall.set(item.call.callId, { call: item.call });
+  for (const item of pendingPermissions.values()) pendingByCall.set(item.call.callId, { call: item.call });
+  const storedPrompts = await storedList<StoredPendingPrompt>(PENDING_PROMPTS_KEY);
+  for (const item of storedPrompts) {
+    const call = item.approval?.call ?? item.permission?.call;
+    if (call) pendingByCall.set(call.callId, { call });
+  }
+  const canceledCallIds = new Set<string>();
+  for (const item of pendingByCall.values()) {
     if (item.call.threadId === threadId && (!turnId || item.call.turnId === turnId)) {
+      canceledCallIds.add(item.call.callId);
       pendingApprovals.delete(item.call.callId);
       pendingPermissions.delete(item.call.callId);
+      pendingPrompts.delete(item.call.callId);
       await finishTool(item.call, false, { error: "The user stopped this browser task." }, "canceled").catch(() => undefined);
     }
   }
+  await chrome.storage.session.set({
+    [PENDING_PROMPTS_KEY]: storedPrompts.filter((item) => !canceledCallIds.has(item.callId)),
+  });
 }
 
 async function routeRequest(input: unknown): Promise<unknown> {
   const request = uiRequestSchema.parse(input);
   switch (request.type) {
     case "BRIDGE_STATUS": return requestNative("bridge.status");
-    case "BROWSER_STATE_READ":
-      return { activities: await storedList<Record<string, unknown>>(ACTIVITY_KEY), prompts: [...pendingPrompts.values()] };
+    case "BROWSER_STATE_READ": {
+      const storedPrompts = await storedList<StoredPendingPrompt>(PENDING_PROMPTS_KEY);
+      const promptByCall = new Map(storedPrompts.map((prompt) => [prompt.callId, { type: prompt.type, data: prompt.data }]));
+      for (const [callId, prompt] of pendingPrompts) promptByCall.set(callId, prompt);
+      return {
+        activities: await storedList<Record<string, unknown>>(ACTIVITY_KEY),
+        prompts: [...promptByCall.values()],
+        completionNotice: (await chrome.storage.session.get(COMPLETION_NOTICE_KEY))[COMPLETION_NOTICE_KEY] ?? null,
+      };
+    }
+    case "COMPLETION_NOTICE_DISMISS":
+      await chrome.storage.session.remove(COMPLETION_NOTICE_KEY);
+      return { dismissed: true };
     case "ACCOUNT_READ": return accountResponseSchema.parse(await requestNative("account.read"));
     case "AUTH_LOGIN": return loginResponseSchema.parse(await requestNative("auth.login"));
     case "AUTH_CANCEL": return requestNative("auth.cancel", { loginId: request.loginId });
@@ -493,8 +698,10 @@ async function routeRequest(input: unknown): Promise<unknown> {
     case "MODELS_READ": return modelsResponseSchema.parse(await requestNative("models.list"));
     case "CHAT_START": return threadResponseSchema.parse(await requestNative("chat.start", { model: request.model }));
     case "CHAT_RESUME": return threadResponseSchema.parse(await requestNative("chat.resume", { threadId: request.threadId, model: request.model }));
-    case "CHAT_SEND":
+    case "CHAT_SEND": {
+      await ensureThreadWorkingTab(request.threadId);
       return turnResponseSchema.parse(await requestNative("chat.send", { threadId: request.threadId, text: request.text, clientMessageId: request.clientMessageId, model: request.model }));
+    }
     case "CHAT_INTERRUPT": return requestNative("chat.interrupt", { threadId: request.threadId, turnId: request.turnId });
     case "BROWSER_TASK_CANCEL": return cancelBrowserTask(request.threadId, request.turnId);
     case "PAGE_ATTACH": return captureCurrentPage();
@@ -526,6 +733,23 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
       } satisfies UiResponse);
     });
   return true;
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  void (async () => {
+    const targets = await storedList<ThreadWorkingTab>(THREAD_TARGETS_KEY);
+    await chrome.storage.session.set({
+      [THREAD_TARGETS_KEY]: targets.filter((target) => target.tabId !== tabId),
+    });
+    const tasks = await storedList<BrowserTaskState>(TASK_KEY);
+    for (const task of tasks) {
+      if (task.authorizedTabId === tabId && !task.finished) {
+        task.canceled = true;
+        task.updatedAt = Date.now();
+      }
+    }
+    await chrome.storage.session.set({ [TASK_KEY]: tasks });
+  })();
 });
 
 async function enableSidePanel(): Promise<void> {

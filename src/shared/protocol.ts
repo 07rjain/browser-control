@@ -25,6 +25,7 @@ const requestBase = z.object({ requestId: z.string().uuid() });
 export const uiRequestSchema = z.discriminatedUnion("type", [
   requestBase.extend({ type: z.literal("BRIDGE_STATUS") }),
   requestBase.extend({ type: z.literal("BROWSER_STATE_READ") }),
+  requestBase.extend({ type: z.literal("COMPLETION_NOTICE_DISMISS") }),
   requestBase.extend({ type: z.literal("ACCOUNT_READ") }),
   requestBase.extend({ type: z.literal("AUTH_LOGIN") }),
   requestBase.extend({ type: z.literal("AUTH_CANCEL"), loginId: z.string().min(1) }),

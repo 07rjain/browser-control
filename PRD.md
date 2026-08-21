@@ -2,7 +2,7 @@
 
 - Status: MVP implemented locally; supervised browser-control milestone approved and implemented, Chrome validation pending
 - Owner: `codex-chrome-extension-manager`
-- Last updated: 2026-08-20
+- Last updated: 2026-08-21
 - Target platform: Chromium browsers supporting Manifest V3 and `chrome.sidePanel`
 
 ## 1. Executive summary
@@ -19,7 +19,7 @@ Using an AI assistant while browsing usually requires switching applications, ma
 
 Build a Manifest V3 extension whose toolbar action toggles a chat UI in Chrome's side panel. A user authenticates with their ChatGPT account for Codex subscription access, starts or resumes a local chat, optionally attaches current-page context, and can ask the assistant to perform a tightly limited set of tab actions with clear confirmation for destructive actions.
 
-The original MVP is a local, user-driven chat, attachment, and tab-tool experience. The approved next milestone adds a narrow set of supervised page controls while remote agents, remote control, arbitrary scripting, unattended background automation, and general-purpose computer control remain deferred.
+The original MVP is a local, user-driven chat, attachment, and tab-tool experience. The approved next milestone adds a narrow set of supervised page controls while remote agents, remote control, arbitrary scripting, remotely initiated automation, and general-purpose computer control remain deferred. A user-started task may continue in its own background working tab while the user views another tab.
 
 ### Target users
 
@@ -49,7 +49,7 @@ The original MVP is a local, user-driven chat, attachment, and tab-tool experien
 
 - Remote control from other agents, devices, or users.
 - Agent Bus integration in the shipped extension.
-- Unattended or background browser automation.
+- Remotely initiated or unattended browser automation that was not started in the sidebar.
 - Arbitrary clicking, typing, form submission, purchasing, or account changes.
 - General DOM automation or arbitrary JavaScript execution.
 - Full-page crawling, cross-site browsing history analysis, or continuous capture of every tab.
@@ -164,15 +164,18 @@ Chrome documents `activeTab` as temporary access granted after a user gesture an
 #### User stories
 
 - As a user, I can ask the assistant what tabs are open.
-- As a user, I can ask it to activate a tab, open a URL, reload the active tab, or close a tab.
+- As a user, I can ask it to select a working tab, open a URL, reload a tab, or close a tab without losing the tab I am currently viewing.
+- As a user, I can explicitly ask to foreground a selected or newly opened tab when I do want to view it.
 - As a user, I approve a destructive tab action before it runs.
 
 #### Allowed MVP tools
 
 - `tabs.list`: return tab ID, window ID, active state, title, and URL when permission permits.
-- `tabs.activate`: focus an existing tab.
-- `tabs.open`: create a new tab for an `http` or `https` URL.
+- `tabs.activate`: select an existing task working tab in the background by default; foreground only with explicit user intent.
+- `tabs.open`: create a task working tab for an `http` or `https` URL in the background by default; foreground only with explicit user intent.
 - `tabs.reload`: reload a specified tab.
+- `tabs.group`: organize one or more existing unpinned tabs from the same window into a named, optionally colored/collapsed Chrome tab group.
+- `tabs.ungroup`: remove grouping from selected tabs while keeping every tab open.
 - `tabs.close`: close a specified tab only after explicit confirmation.
 
 #### Acceptance criteria
@@ -210,14 +213,14 @@ Chrome documents that `chrome.tabs` can create, modify, and rearrange tabs, whil
 #### Allowed page tools
 
 - `page.inspect`, `page.click`, `page.fill`, `page.select`, `page.check`, `page.drag`, `page.keypress`, `page.scroll`, `page.history`, `page.wait`, and `page.submit`.
-- Tools use strict runtime schemas, opaque short-lived element references, bounded inputs, exact-origin matching, idempotency keys, and a maximum of 20 page actions per turn.
+- Tools use strict runtime schemas, opaque short-lived element references, bounded inputs, exact-origin matching, and idempotency keys. One Codex request shares a configurable 5–100 action budget across `tabs.*` and `page.*`; the default is 40 and the selected value is captured when the request first executes.
 - The packaged isolated-world page executor is the only component that touches the DOM. Model output cannot provide JavaScript, selectors, XPath, coordinates, or unsafe URLs.
 
 #### Permission and confirmation policy
 
 - A page tool cannot execute until the user grants optional host access for the exact active `http` or `https` origin.
 - An approved browser-control grant is remembered only for the exact origin. Attachment-only permission does not silently become browser-control consent. The user can revoke remembered grants through Clear local data or Chrome site-access controls.
-- Ordinary same-origin navigation, menu buttons, field edits, scrolling, and drag-and-drop may run automatically under the remembered origin grant. External/new-tab links and actions recognized as consequential require confirmation. Downloads remain unsupported.
+- Routine navigation (including external/new-tab links), menu buttons, field edits, scrolling, and drag-and-drop may run automatically under the remembered origin grant and remain visible in activity. Actions recognized as consequential require confirmation. Downloads remain unsupported.
 - Form submission, Enter that may submit, tab closing, and recognized Save/Send/Publish/Delete/Book/Schedule actions require a fresh one-action confirmation.
 - Purchases, financial transactions, passwords, authentication codes, payment data, private keys, CAPTCHAs, security bypasses, arbitrary downloads, and browser-setting changes are refused.
 - Form confirmation shows the destination and non-sensitive visible values. Approval expires when the tab, origin, form, values, or element reference changes.
@@ -229,8 +232,11 @@ Chrome documents that `chrome.tabs` can create, modify, and rearrange tabs, whil
 - Waits time out within eight seconds and unsupported frames or protected pages return honest errors.
 - The activity log records requested, awaiting permission/confirmation, running, succeeded, failed, rejected, canceled, and stale states.
 - Tool activity is grouped with the request that caused it, expands while running, and collapses to a summary dropdown after completion.
+- A completed browser task produces a dismissible sidebar notice. An off-by-default local completion tone can be enabled in Settings.
 - Stop cancels the Codex turn, pending page action, and pending confirmation. It does not revoke an exact-origin grant the user chose to remember.
 - Service-worker suspension, reconnect, or retry cannot silently repeat a completed action.
+- The visible tab is snapshotted as the thread working tab before a turn begins. Page tools and permission resumes remain bound to that tab even when the user changes tabs, and the pin persists across follow-up turns until explicitly replaced or closed.
+- Pending permission/confirmation metadata, completion notices, and finished/canceled turn tombstones survive MV3 service-worker suspension in session storage.
 - Page tools are redeclared when a Codex thread resumes; authentication remains the ADR 0001 ChatGPT browser flow.
 - The Chrome validation matrix in `next_set_off_feature.md` passes before private-beta sign-off.
 
@@ -356,7 +362,7 @@ Do not request persistent required `<all_urls>`, `history`, `bookmarks`, `downlo
 
 ### Phase 3 — Narrow browser tools and hardening
 
-- Add the five allowlisted tab tools and approval/result UI.
+- Add the seven allowlisted tab tools and approval/result UI.
 - Test permission denials, protected pages, stale tabs, reconnection, cancellation, and duplicate-action prevention.
 - Review manifest permissions, bundle contents, logs, CSP, and local bridge exposure.
 - Run end-to-end acceptance testing in an unpacked Chrome profile.

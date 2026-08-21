@@ -72,7 +72,7 @@ The assistant must never claim an action succeeded until it has inspected the re
 - Scroll to the top or bottom of the page.
 - Scroll a referenced element into view.
 - Scroll a referenced inner container when the page uses a scrollable panel.
-- Navigate backward and forward in the active tab.
+- Navigate backward and forward in the task's working tab.
 - Wait briefly for a page, route transition, or interactive element to become ready, with a strict timeout.
 - Stop immediately when the user presses Stop or closes the active task.
 
@@ -98,7 +98,7 @@ The first implementation should expose a small typed tool namespace rather than 
 | `page.drag` | Drag one visible referenced control onto another referenced control from the same inspection. | Automatic, visibly logged. |
 | `page.keypress` | Send one allowlisted navigation key to a referenced element. | Automatic, visibly logged. |
 | `page.scroll` | Scroll viewport, container, or referenced element. | Automatic. |
-| `page.history` | Move backward or forward in the active tab. | Automatic. |
+| `page.history` | Move backward or forward in the task's working tab. | Automatic. |
 | `page.wait` | Wait for bounded navigation or element readiness. | Automatic with timeout. |
 | `page.submit` | Submit a reviewed form through normal page behavior. | Explicit confirmation required. |
 
@@ -133,7 +133,7 @@ The extension must refuse:
 - CAPTCHA solving or attempts to evade anti-bot, rate-limit, access-control, or security systems.
 - Download execution, browser-setting changes, extension installation, permission escalation outside the approved flow, or arbitrary code execution.
 - Dragging files, dragging across frames or tabs, coordinate-only dragging, and native operating-system drag surfaces.
-- Unattended background automation, cross-origin crawling, or actions initiated remotely by other agents or devices.
+- Unattended automation not started in the sidebar, cross-origin crawling, or actions initiated remotely by other agents or devices. A user-started task may continue in its pinned background working tab while the user views another tab.
 - Deceptive actions, impersonation, spam, mass messaging, or bulk account creation.
 
 Additional restricted categories can be added before implementation, but protections in this section cannot be weakened without an explicit product and security review.
@@ -163,7 +163,7 @@ Native bridge validates tool envelope
 Service worker policy + approval gate
                 |
                 v
-Authorized content executor in active tab
+Authorized content executor in task working tab
                 |
                 v
 DOM action + bounded result inspection
@@ -196,7 +196,7 @@ References are scoped to the tab, frame, document, origin, and snapshot generati
 ## 7. Interaction lifecycle
 
 1. The user asks for a browser task in the sidebar.
-2. The extension identifies the active tab and confirms that its origin is authorized.
+2. The extension identifies or creates the task's working tab and confirms that its origin is authorized without foregrounding it by default.
 3. `page.inspect` returns a fresh semantic snapshot.
 4. Codex proposes one typed action using a valid element reference.
 5. The service worker validates the request and assigns its risk level.
@@ -205,7 +205,7 @@ References are scoped to the tab, frame, document, origin, and snapshot generati
 8. The extension inspects the resulting state and records the result in the activity log.
 9. The loop continues until the requested outcome is verified, the user stops it, a safety rule refuses it, or a bounded step/time limit is reached.
 
-A task must have configurable hard limits for maximum actions, elapsed time, repeated failures, and unchanged-state loops. Reaching a limit stops safely and asks the user how to continue.
+A task must have configurable hard limits for maximum actions, elapsed time, repeated failures, and unchanged-state loops. The implemented browser-action setting applies one shared 5–100 action budget to `tabs.*` and `page.*` calls in a Codex request, defaults to 40, and is captured on the request's first executed action. Reaching a limit stops safely and asks the user how to continue.
 
 ## 8. Delivery phases
 

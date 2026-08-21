@@ -28,9 +28,9 @@ The extension may request only:
 - turn start/interrupt; and
 - a response to an App Server dynamic browser-tool request.
 
-The host forwards only normalized authentication, assistant-text delta, turn-completion, tool, warning, and error events. It rejects every App Server-initiated request except the five declared browser-tab dynamic tools.
+The host forwards only normalized authentication, assistant-text delta, turn-completion, tool, warning, and error events. It rejects every App Server-initiated request except the seven declared browser-tab dynamic tools.
 
-Browser tools are independently schema-validated and executed by the service worker. `tabs.close` always pauses for an explicit side-panel confirmation. Only `http` and `https` URLs can be opened.
+Browser tools are independently schema-validated and executed by the service worker. `tabs.group` accepts only existing unpinned tab IDs from one window and uses the typed Chrome Tabs/Tab Groups APIs. `tabs.ungroup` removes grouping without closing tabs. `tabs.close` always pauses for an explicit side-panel confirmation. Only `http` and `https` URLs can be opened.
 
 Current-page attachment first uses temporary `activeTab` access. If that grant is unavailable after a reload or tab change, the side panel offers a separate user-activated permission request for only the current origin. Granted attachment origins are tracked locally and revoked by Clear local data.
 

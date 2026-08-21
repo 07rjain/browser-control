@@ -53,10 +53,17 @@ The repository contains the Chromium **Codex Sidebar**, built on the completed M
 
 ### Approved scope directive
 
-- Preserve the implemented MVP: Manifest V3 side-panel chat, supported ChatGPT/Codex authentication, explicit current-page attachment, and the five allowlisted tab tools.
+- Preserve the implemented MVP: Manifest V3 side-panel chat, supported ChatGPT/Codex authentication, explicit current-page attachment, and the seven allowlisted tab tools.
+- The approved tab-tool surface is `tabs.list`, `tabs.activate`, `tabs.open`, `tabs.reload`, `tabs.group`, `tabs.ungroup`, and confirmed `tabs.close`. Grouping is limited to existing, unpinned tabs in one browser window and uses the typed Chrome Tabs/Tab Groups APIs. Ungrouping must keep every tab open.
+- One Codex request shares a persisted, user-configurable browser-action budget across `tabs.*` and `page.*`: default 40, minimum 5, maximum 100. Capture the value at the request's first executed action so changing Settings cannot alter an in-flight task.
+- Exact-origin browser-control approval is remembered and reused. Keep it distinct from attachment-only page access; require fresh confirmation only for consequential actions identified by policy, not routine navigation or interaction.
+- Keep user-started browser work pinned to its task working tab. `tabs.open` and `tabs.activate` must not foreground a tab unless the user explicitly asked to view or switch to it. Moving to another tab must not retarget an in-flight page task.
+- Snapshot the thread working tab before `CHAT_SEND`, retain it across turns in session storage, and bind permission resumes and opaque references to its exact tab ID. Never fall back to the newly visible tab after the request starts.
+- Retain short-lived finished/canceled turn tombstones and pending prompt metadata across MV3 service-worker suspension so late calls fail closed and approval cards can recover.
+- Completion notices remain local to the sidebar. The optional completion tone is off by default and must not require network, notification, or additional Chrome permissions.
 - The approved next milestone adds only the typed, user-supervised `page.*` tools in `next_set_off_feature.md`: inspect, click, fill, select, check, allowlisted keypress, scroll, history navigation, bounded wait, and confirmed form submission.
 - Page actions require an exact-origin user grant, opaque short-lived element references, code-side policy, activity visibility, cancellation, and confirmation for consequential actions.
-- Do not implement remote agents, Agent Bus product integration, remote browser control, arbitrary JavaScript/selectors/coordinates, `debugger`/CDP access, unattended background automation, purchases, secret entry, store publication, telemetry, or connectors.
+- Do not implement remote agents, Agent Bus product integration, remote browser control, arbitrary JavaScript/selectors/coordinates, `debugger`/CDP access, remotely initiated unattended automation, purchases, secret entry, store publication, telemetry, or connectors.
 - Connectors are a later, separately approved phase after supervised browser-control validation. A new idea is not in scope without an explicit user decision and PRD update.
 
 ### PRD status
@@ -152,6 +159,17 @@ Run `npm run test:installed-host` after host installation to verify the Chrome-s
 - Exercise the activity UI across at least two user requests. Each request must own its chronological tool history, collapse after completion, expand on demand, and remain aligned with the correct message.
 - Record Chrome version, OS version, commit, URL/origin, preconditions, exact steps, expected and observed results, pass/fail/blocked status, console errors, and screenshots for visual defects.
 - Do not claim a browser-visible change is complete without reporting the manual scenarios actually run. If browser testing was unavailable, say so explicitly and identify the remaining checklist from `README.md`.
+
+### How Codex tests the extension
+
+Keep these two browser-testing paths distinct in reports:
+
+1. **Direct Codex Chrome control** uses the Codex session's connected-browser capability to inspect and operate the user's Chrome UI. This is useful for establishing expected site behavior and reproducing browser conditions, but it bypasses this repository's native bridge, dynamic-tool schemas, service-worker policy, activity UI, and page executor. The August 22 Calendar create-and-reschedule check was performed this way and therefore validated Google Calendar behavior, not the extension's end-to-end tool path.
+2. **Codex Sidebar end-to-end testing** loads `dist/` unpacked, opens the repository's side panel, and sends the test request through its chat composer. The resulting Codex App Server dynamic calls must pass through `bridge/native-host.mjs`, the service worker, and the allowlisted `tabs.*` or `page.*` executor. Only this path validates the actual agent product.
+
+For an end-to-end agent test, record the user prompt, selected model, emitted tool names and arguments with sensitive values redacted, approval/permission prompts, activity states, browser result, final assistant summary, and both extension consoles. Use direct Chrome control afterward only to independently verify the resulting browser state, and label that verification separately.
+
+For tab grouping, open several disposable tabs in one window, include at least two clear topics, and ask the sidebar to organize them. Verify it calls `tabs.list` before one or more `tabs.group` calls, creates correctly titled/color-coded groups, leaves pinned or unrelated-window tabs unchanged, and reports invalid mixed-window input honestly. Then ask it to remove the groups while keeping the tabs open; verify `tabs.ungroup` runs and no tab is closed.
 
 ## Security and quality gates
 
