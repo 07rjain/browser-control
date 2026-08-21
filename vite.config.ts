@@ -5,6 +5,9 @@ import { resolve } from "node:path";
 export default defineConfig({
   plugins: [react()],
   build: {
+    // Chrome extension pages can reject Vite's generated modulepreload links as
+    // cross-world resources. Static module imports still load the shared chunks.
+    modulePreload: false,
     outDir: "dist",
     emptyOutDir: true,
     rollupOptions: {
