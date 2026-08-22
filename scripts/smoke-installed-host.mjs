@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { encodeNativeMessage, LengthPrefixedJsonDecoder } from "../bridge/protocol.mjs";
 
-const launcher = join(homedir(), ".codex-sidebar", "bin", "native-host");
+const launcher = join(homedir(), "Library", "Application Support", "Browser Control", "bin", "native-host");
 const host = spawn(launcher, [], {
   env: {
     HOME: homedir(),

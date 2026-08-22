@@ -1,11 +1,13 @@
 {
   "name": "browser-control",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:release": "npm run build && node scripts/build-release.mjs",
+    "build:release:bootstrap": "npm run build && node scripts/build-release.mjs --bootstrap",
     "typecheck": "tsc -b --pretty false",
     "lint": "eslint .",
     "test": "vitest run",

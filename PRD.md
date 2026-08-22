@@ -1,8 +1,8 @@
 # Product Requirements Document: Browser Control MVP
 
-- Status: MVP implemented locally; supervised browser-control milestone approved and implemented, Chrome validation pending
+- Status: MVP and supervised browser control implemented; first public Chrome Web Store release approved and in preparation, Chrome validation pending
 - Owner: `codex-chrome-extension-manager`
-- Last updated: 2026-08-21
+- Last updated: 2026-08-22
 - Target platform: Chromium browsers supporting Manifest V3 and `chrome.sidePanel`
 
 ## 1. Executive summary
@@ -24,7 +24,7 @@ The original MVP is a local, user-driven chat, attachment, and tab-tool experien
 ### Target users
 
 - Primary: existing Codex/ChatGPT users who want assistance while researching or working in Chromium.
-- Secondary: technical early adopters willing to install a development build and, if required, a local Codex companion during MVP validation.
+- Secondary: technical macOS early adopters willing to install the separately distributed local Codex companion required by the first public release.
 
 ### MVP success metrics
 
@@ -54,7 +54,7 @@ The original MVP is a local, user-driven chat, attachment, and tab-tool experien
 - General DOM automation or arbitrary JavaScript execution.
 - Full-page crawling, cross-site browsing history analysis, or continuous capture of every tab.
 - Multi-browser parity beyond Chromium.
-- Chrome Web Store publication, billing, team administration, telemetry, or analytics.
+- Billing, team administration, telemetry, or analytics.
 - Recreating every feature of an existing OpenAI/Codex extension.
 
 ## 3. Product principles
@@ -408,14 +408,19 @@ Chrome Web Store submission is a separate, explicitly authorized post-MVP activi
 
 ## 11. Open questions
 
-These questions do not block Phase 0 but must be answered before private beta:
+The public-release decisions approved on 2026-08-22 are: publish a public Chrome
+Web Store listing, publish privacy and support material through GitHub Pages,
+distribute a separate macOS native companion, and accept the new extension ID
+assigned by the Store. Store submission remains gated on companion packaging,
+complete data deletion, public disclosures/assets, Store-ID migration, and the
+automated and manual Chrome validation matrix.
 
-1. Is requiring a locally installed Codex CLI/companion acceptable for the MVP audience?
-2. Should the first private beta support ChatGPT subscription login only, or also an explicit developer API-key mode?
-3. Is macOS-only acceptable for the first private beta if the local bridge is platform-specific?
-4. What is the final product name and visual identity?
-5. How many local conversations should be retained, and for how long?
-6. Should all-tab URL/title access be requested at install time, or offered later as an optional permission after the basic chat flow works?
+These remaining questions do not block Phase 0 but must be answered before the
+public release is submitted:
+
+1. What final publisher display name and visual identity should accompany the approved Browser Control product name?
+2. Is a reviewer-owned eligible ChatGPT/Codex account sufficient for Store review, or is a dedicated policy-compliant reviewer credential required?
+3. Which public regions should be excluded, if any, based on account availability or legal requirements?
 
 ## 12. Post-MVP roadmap
 
@@ -427,6 +432,6 @@ The following require a new or revised PRD and separate security review:
 - Remote or unattended browser plans initiated outside the active user task.
 - Cross-device conversation sync.
 - Additional Chromium platforms and other browser engines.
-- Store publication, telemetry, billing, organization controls, and managed deployment.
+- Telemetry, billing, organization controls, and managed deployment.
 
 Long-term, the product may become a user-governed bridge between Codex and the browser. That direction must preserve least privilege, explicit approvals, and clear visibility into what context and actions are available.

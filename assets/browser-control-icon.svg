@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">Browser Control</title>
+  <defs>
+    <linearGradient id="surface" x1="70" y1="54" x2="438" y2="458" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#292A2E"/>
+      <stop offset="1" stop-color="#101114"/>
+    </linearGradient>
+    <linearGradient id="ring" x1="84" y1="90" x2="424" y2="420" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#73D8F0"/>
+      <stop offset="0.36" stop-color="#829CF4"/>
+      <stop offset="0.7" stop-color="#B885E8"/>
+      <stop offset="1" stop-color="#75DDBD"/>
+    </linearGradient>
+  </defs>
+  <rect x="24" y="24" width="464" height="464" rx="116" fill="url(#surface)"/>
+  <path d="M153 112C199 83 271 81 324 106C374 130 408 178 410 232C412 287 380 339 330 365C278 393 206 390 157 360" fill="none" stroke="url(#ring)" stroke-width="18" stroke-linecap="round"/>
+  <path d="M160 119V393H276C355 393 394 355 394 295C394 252 370 223 331 213C357 201 373 177 373 146C373 91 334 64 258 64H160V119ZM218 116H255C294 116 313 128 313 153C313 181 293 194 252 194H218V116ZM218 244H270C312 244 333 259 333 290C333 324 311 341 267 341H218V244Z" fill="#F8F8F5"/>
+</svg>

@@ -86,6 +86,7 @@ const INITIAL_STATE: PersistedState = { threadId: null, messages: [], theme: "sy
 const STORAGE_KEY = "codexSidebarState";
 const PAGE_ORIGINS_KEY = "codexSidebarGrantedPageOrigins";
 const TASK_ORIGINS_KEY = "codexSidebarTaskControlOrigins";
+const COMPANION_SUPPORT_URL = "https://07rjain.github.io/browser-control-support/support.html";
 
 class ExtensionRequestError extends Error {
   readonly code?: string;
@@ -706,9 +707,8 @@ export default function App() {
     setMenuOpen(false);
   };
 
-  const clearLocalData = async () => {
-    if (!confirm("Clear the local transcript and preferences on this browser?")) return;
-    if (threadId) await sendRequest({ type: "BROWSER_TASK_CANCEL", threadId }).catch(() => undefined);
+  const clearBrowserStorage = async (cancelTask = true) => {
+    if (cancelTask && threadId) await sendRequest({ type: "BROWSER_TASK_CANCEL", threadId }).catch(() => undefined);
     const stored = await chrome.storage.local.get([PAGE_ORIGINS_KEY, TASK_ORIGINS_KEY]);
     const attachmentOrigins = Array.isArray(stored[PAGE_ORIGINS_KEY])
       ? (stored[PAGE_ORIGINS_KEY] as string[])
@@ -725,10 +725,16 @@ export default function App() {
     await chrome.storage.local.remove(PAGE_ORIGINS_KEY);
     await chrome.storage.local.remove(TASK_ORIGINS_KEY);
     await chrome.storage.session.clear();
+  };
+
+  const resetBrowserState = () => {
     setThreadId(null);
+    threadReadyRef.current = false;
     setCurrentConversationId(crypto.randomUUID());
     setConversationHistory([]);
     setMessages([]);
+    setDraft("");
+    setAttachment(null);
     setTheme("system");
     setSelectedModel("");
     setBrowserPermissionMode(DEFAULT_BROWSER_PERMISSION_MODE);
@@ -744,6 +750,31 @@ export default function App() {
     setToolStatuses([]);
     setToolApproval(null);
     setToolPermission(null);
+    setRetryPayload(null);
+    setActiveTurnId(null);
+    setIsSending(false);
+  };
+
+  const clearLocalData = async () => {
+    if (!confirm("Clear browser transcripts, preferences, activity, and site permissions? Your ChatGPT sign-in and local Codex data on this Mac will be kept.")) return;
+    await clearBrowserStorage();
+    resetBrowserState();
+  };
+
+  const deleteAllLocalData = async () => {
+    if (!confirm("Delete all Browser Control data from this browser and Mac, including local conversations and the Browser Control ChatGPT sign-in? The installed companion will be kept.")) return;
+    setError(null);
+    try {
+      if (threadId) await sendRequest({ type: "BROWSER_TASK_CANCEL", threadId }).catch(() => undefined);
+      await sendRequest({ type: "DELETE_ALL_LOCAL_DATA" });
+      await clearBrowserStorage(false);
+      resetBrowserState();
+      setAccount(null);
+      setLogin(null);
+      setAuthState("signed-out");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to delete all Browser Control data.");
+    }
   };
 
   const decideTool = async (approved: boolean) => {
@@ -785,10 +816,7 @@ export default function App() {
   };
 
   const canSend = draft.trim().length > 0 && !streaming && authState === "ready";
-  const emptyTitle = useMemo(
-    () => (account?.email ? `Ready for ${account.email}` : "Ready when you are"),
-    [account],
-  );
+  const emptyTitle = "Ready when you are";
   const activitiesByTurn = useMemo(() => groupToolStatuses(toolStatuses), [toolStatuses]);
   const visibleConversationHistory = useMemo(() => upsertConversation(
     conversationHistory,
@@ -825,7 +853,12 @@ export default function App() {
 
         {error && <div className="error-banner" role="alert">{error}</div>}
         {(authState === "offline" || authState === "error") && (
-          <button className="secondary-button" onClick={() => void refreshAccount()}>Retry connection</button>
+          <div className="connection-actions">
+            <button className="secondary-button" onClick={() => void refreshAccount()}>Retry connection</button>
+            <button className="text-button" onClick={() => void sendRequest({ type: "OPEN_EXTERNAL", url: COMPANION_SUPPORT_URL })}>
+              Install or update companion
+            </button>
+          </div>
         )}
         <p className="privacy-note">No page content is shared until you choose Attach page.</p>
       </main>
@@ -963,7 +996,10 @@ export default function App() {
                 }}
               />
             </label>
-            <button onClick={() => void clearLocalData()}>Clear local data</button>
+            <button onClick={() => void clearLocalData()}>Clear browser data and permissions</button>
+            <button className="settings-delete-button" onClick={() => void deleteAllLocalData()}>
+              Delete all Browser Control data and sign out
+            </button>
             <button
               className="settings-logout-button"
               disabled={streaming}

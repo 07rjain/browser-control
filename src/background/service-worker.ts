@@ -920,6 +920,7 @@ async function routeRequest(input: unknown): Promise<unknown> {
     case "AUTH_LOGIN": return loginResponseSchema.parse(await requestNative("auth.login"));
     case "AUTH_CANCEL": return requestNative("auth.cancel", { loginId: request.loginId });
     case "AUTH_LOGOUT": return requestNative("auth.logout");
+    case "DELETE_ALL_LOCAL_DATA": return requestNative("data.deleteAll");
     case "MODELS_READ": return modelsResponseSchema.parse(await requestNative("models.list"));
     case "CHAT_START": return threadResponseSchema.parse(await requestNative("chat.start", { model: request.model }));
     case "CHAT_RESUME": return threadResponseSchema.parse(await requestNative("chat.resume", { threadId: request.threadId, model: request.model }));

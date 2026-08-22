@@ -131,6 +131,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .login-label { font-size: 12px; }
 .text-button { justify-self: start; padding: 0; border: 0; background: none; color: var(--muted); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
 .login-cancel { grid-column: 2; margin-top: 4px; }
+.connection-actions { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
 
 .app-shell { height: 100%; min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; overflow: hidden; }
 .app-header { position: relative; z-index: 20; display: flex; align-items: center; justify-content: space-between; min-height: 62px; padding: 12px 14px; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--bg) 86%, transparent); backdrop-filter: blur(18px); }
@@ -151,6 +152,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .menu-card .settings-grant-button { margin: 0 8px 7px; width: calc(100% - 16px); border: 1px solid color-mix(in srgb, #5d8cff 45%, var(--border)); background: color-mix(in srgb, #5d8cff 12%, var(--panel-solid)); color: var(--text); font-weight: 700; text-align: center; }
 .menu-card .settings-grant-button:disabled { opacity: 0.5; cursor: default; }
 .menu-card .settings-logout-button { display: grid; gap: 2px; color: var(--danger); }
+.menu-card .settings-delete-button { color: var(--danger); }
 .menu-card .settings-logout-button small { overflow: hidden; color: var(--muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .menu-card .settings-logout-button:disabled { opacity: 0.5; cursor: default; }
 .menu-hint { margin: 0 8px 7px; color: var(--muted); font-size: 10px; line-height: 1.4; }

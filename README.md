@@ -1,12 +1,12 @@
 # Browser Control
 
-A private-development Chrome side-panel extension powered by the user's ChatGPT Codex subscription through the official Codex App Server interface.
+A Chrome side-panel extension powered by the user's ChatGPT Codex subscription through the official Codex App Server interface.
 
-The repository contains the private-development MVP plus the approved supervised browser-control milestone: sidebar chat, managed ChatGPT sign-in, model selection, explicit current-page attachment, seven tab tools, and eleven typed page tools. It does not contain remote control, unattended automation, arbitrary JavaScript/selectors, connectors, analytics, or ChatGPT cookie scraping.
+The repository contains the implemented MVP plus the approved supervised browser-control milestone: sidebar chat, managed ChatGPT sign-in, model selection, explicit current-page attachment, seven tab tools, and eleven typed page tools. It does not contain remote control, unattended automation, arbitrary JavaScript/selectors, connectors, analytics, or ChatGPT cookie scraping.
 
 ## Project status
 
-The MVP and supervised browser controls are implemented locally. The current focus is manual Chrome testing and reliability hardening on dynamic applications such as Google Calendar. This is a private development build, not a Chrome Web Store release.
+The MVP and supervised browser controls are implemented locally. A first public Chrome Web Store release is approved and in release preparation, with a public privacy/support site and separately distributed macOS native companion. It is not yet published. Manual Chrome validation and reliability hardening on dynamic applications such as Google Calendar remain release gates.
 
 Known limitation: `page.inspect` currently returns the first 80 visible interactive controls in document order. Dense pages can place the requested control beyond that limit, so Codex may report that it cannot see or click a control that is visibly present. Active-dialog and viewport prioritization are not implemented yet.
 
@@ -17,6 +17,7 @@ Product scope and delivery decisions live in:
 - [`next_set_off_feature.md`](next_set_off_feature.md) — supervised page-control requirements.
 - [`docs/decisions/0001-native-codex-bridge.md`](docs/decisions/0001-native-codex-bridge.md) — authentication and native bridge architecture.
 - [`docs/decisions/0002-supervised-page-control.md`](docs/decisions/0002-supervised-page-control.md) — browser-action architecture and safety policy.
+- [`store/README.md`](store/README.md) — public site source, Chrome Web Store copy, privacy disclosures, and release asset checklist.
 
 ## Architecture
 
@@ -42,7 +43,7 @@ Local Codex companion -----> Codex App Server / ChatGPT authentication
 
 ## Requirements
 
-- macOS and current stable Google Chrome
+- macOS and current stable Google Chrome or Brave
 - Node.js 20+
 - Codex CLI `0.148.0` or a compatible release available as `codex`
 

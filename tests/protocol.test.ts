@@ -62,6 +62,13 @@ describe("extension boundary validation", () => {
     }).success).toBe(false);
   });
 
+  it("accepts the explicit full local-data deletion request", () => {
+    expect(uiRequestSchema.safeParse({
+      type: "DELETE_ALL_LOCAL_DATA",
+      requestId: crypto.randomUUID(),
+    }).success).toBe(true);
+  });
+
   it("rejects unlisted browser tools", () => {
     const result = dynamicToolCallSchema.safeParse({
       requestId: 4,

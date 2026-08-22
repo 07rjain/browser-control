@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Privacy policy for the Browser Control Chrome extension.">
+    <title>Privacy Policy — Browser Control</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <header>
+      <a class="brand" href="index.html">Browser Control</a>
+      <nav aria-label="Primary navigation">
+        <a href="index.html">Product</a>
+        <a href="support.html">Support</a>
+        <a href="privacy.html" aria-current="page">Privacy</a>
+      </nav>
+    </header>
+    <main>
+      <p class="eyebrow">Privacy policy</p>
+      <h1>Your browser data stays under your direction.</h1>
+      <p class="lede">This policy explains how Browser Control handles data when providing Codex chat, page attachment, and user-initiated browser actions.</p>
+      <p class="meta"><strong>Effective:</strong> August 22, 2026 · <strong>Publisher:</strong> Rishabh Bothra · <strong>Contact:</strong> <a href="mailto:cu.16bcs2797@gmail.com">cu.16bcs2797@gmail.com</a></p>
+
+      <h2>Scope and single purpose</h2>
+      <p>Browser Control is a Chrome side-panel extension whose single purpose is to let a user chat with Codex and request supervised actions on browser tabs and normal web pages. It uses a separately installed local companion to communicate with Codex CLI and Codex App Server. This policy covers the extension and that companion. The public product, privacy, and support pages do not contain extension telemetry or advertising trackers.</p>
+
+      <h2>Data Browser Control handles</h2>
+      <ul>
+        <li><strong>Account information:</strong> the ChatGPT account email, account type, and plan state returned by Codex for display in the side panel. Reusable authentication credentials are managed by Codex, not stored in Chrome extension storage.</li>
+        <li><strong>Personal communications and user-generated content:</strong> prompts, model responses, local conversation titles and transcripts, and feedback needed to stop or retry a request.</li>
+        <li><strong>Website content:</strong> a page title, URL, origin, selected text, and bounded readable page text only when the user attaches a page; visible control descriptions and non-sensitive visible form values when the user requests page inspection or action.</li>
+        <li><strong>Web browsing activity:</strong> open-tab titles, URLs, tab and window identifiers, active state, and the origins on which the user grants browser-control access.</li>
+        <li><strong>User activity and form data:</strong> requested tab/page operations, their approval and result states, and non-sensitive values needed to fill, select, check, or review a form the user asked Browser Control to operate.</li>
+        <li><strong>Preferences and diagnostics:</strong> theme, selected model, permission mode, action budget, completion-sound choice, short-lived task state, companion version/status, and bounded error messages.</li>
+      </ul>
+      <p>Browser Control does not intentionally collect passwords, payment-card data, authentication codes, private keys, CAPTCHAs, or purchase details. Its action policy refuses those fields and transactions. Content on a page chosen by the user can nevertheless contain personal or sensitive information, so users should review context before attaching a page or requesting an action.</p>
+
+      <h2>How data is used</h2>
+      <p>Data is used only to provide, secure, maintain, or support the user-facing features described above: authenticate through Codex, generate responses, attach chosen page context, carry out allowlisted browser actions, show activity, remember preferences and conversations, prevent duplicate actions, and diagnose failures.</p>
+
+      <h2>Where data is stored</h2>
+      <ul>
+        <li>Chrome local storage retains preferences and up to 30 conversation records, each bounded to its most recent messages and activity.</li>
+        <li>Chrome session storage retains short-lived task, permission, approval, cancellation, and completion state across Manifest V3 service-worker suspension.</li>
+        <li>The local companion gives Codex a dedicated home at <code>~/.codex-sidebar</code>. Codex stores its Browser Control login/session material and persistent thread data there.</li>
+        <li>The companion runtime is installed separately from the Codex data directory so deleting product data does not silently uninstall or damage the companion.</li>
+      </ul>
+      <p>Browser Control has no developer-operated telemetry, analytics, advertising, or conversation-storage server.</p>
+
+      <h2>Data sent to others</h2>
+      <p>To answer requests, prompts and any user-attached or tool-returned browser context are sent by the local companion to OpenAI's Codex service under the user's authenticated account. OpenAI processes that data according to the terms and privacy choices applicable to that account. Browser Control does not send browsing data to the publisher or to advertising companies.</p>
+      <p>Messages between the extension and the native companion stay on the same computer through Chrome Native Messaging. The public documentation site is hosted by GitHub Pages; GitHub may process ordinary web-server information when someone visits these pages under GitHub's own privacy terms. Visiting this site is separate from using the extension, which includes no remote site assets.</p>
+
+      <h2>Permissions and user control</h2>
+      <p>Browser Control requests only Chrome permissions used for its disclosed features. Optional HTTP and HTTPS host access is not granted at installation. The user can choose exact-site grants in Ask every time mode or explicitly enable optional all-sites access in Full access mode. Chrome site controls and Browser Control settings can revoke access.</p>
+      <p>A page attachment is created only after the user asks to attach the page and can be removed before sending. Browser actions start from a user's request, remain visible in activity, are bounded by an action limit, and can be stopped. Hard refusals apply in every permission mode.</p>
+
+      <h2>Retention and deletion</h2>
+      <p><strong>Clear browser data and permissions</strong> removes Chrome-side transcripts, activity, settings, task state, and retained site grants. It does not delete the Codex login or persistent Codex threads on the Mac.</p>
+      <p><strong>Delete all Browser Control data and sign out</strong> stops active work, clears the Chrome-side data and permissions, signs out the dedicated Browser Control Codex session, and deletes the dedicated <code>~/.codex-sidebar</code> data directory. It leaves the installed companion runtime in place. The support page also explains manual removal and companion uninstall.</p>
+
+      <h2>Security</h2>
+      <p>The extension uses packaged code, strict message schemas, fixed allowlisted browser tools, exact native-host origins, short-lived opaque element references, permission checks, action limits, cancellation, and hard refusals. It does not execute model-provided JavaScript, selectors, coordinates, or remotely hosted code. Data sent from Codex to its service uses the secure transport provided by Codex; reusable credentials are not exposed to extension storage.</p>
+
+      <h2>Chrome Web Store Limited Use</h2>
+      <p>Browser Control's use of information received from Chrome APIs adheres to the Chrome Web Store User Data Policy, including the Limited Use requirements. Browser Control does not sell user data, use it for personalized or interest-based advertising, use it for creditworthiness or lending, or transfer it for unrelated purposes. Human access is not permitted except with the user's specific consent for support, when necessary for security, to comply with law, or for aggregated and anonymized internal operations allowed by policy.</p>
+
+      <h2>Changes and contact</h2>
+      <p>This policy will be updated before Browser Control materially changes the data it handles or its purposes. The effective date above will change with each revision. Questions or deletion concerns can be sent to <a href="mailto:cu.16bcs2797@gmail.com">cu.16bcs2797@gmail.com</a>.</p>
+    </main>
+    <footer>
+      <p>Browser Control is an independent extension and is not affiliated with or endorsed by OpenAI.</p>
+      <p><a href="index.html">Product</a> · <a href="support.html">Support</a></p>
+    </footer>
+  </body>
+</html>

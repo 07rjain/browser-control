@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process";
-import { mkdirSync } from "node:fs";
-import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { basename, dirname, join, resolve } from "node:path";
 import {
   encodeNativeMessage,
   JsonLineDecoder,
@@ -13,11 +13,30 @@ import {
 } from "./protocol.mjs";
 
 const MAX_NATIVE_MESSAGE_BYTES = 1024 * 1024;
-const sidebarHome = resolve(process.env.CODEX_SIDEBAR_HOME ?? join(homedir(), ".codex-sidebar"));
+const DATA_ROOT_MARKER = "browser-control-data-v1\n";
+const defaultSidebarHome = resolve(join(homedir(), ".codex-sidebar"));
+const sidebarHome = resolve(process.env.CODEX_SIDEBAR_HOME ?? defaultSidebarHome);
 const workspace = join(sidebarHome, "workspace");
+const dataRootMarker = join(sidebarHome, ".browser-control-data-root");
 const codexBinary = process.env.CODEX_BIN ?? "codex";
 
-mkdirSync(workspace, { recursive: true, mode: 0o700 });
+const allowedTestHome = process.env.BROWSER_CONTROL_TEST_HOME === "1" &&
+  dirname(sidebarHome) === resolve(tmpdir()) &&
+  basename(sidebarHome).startsWith("codex-sidebar-smoke-");
+if (sidebarHome !== defaultSidebarHome && !allowedTestHome) {
+  throw new Error("Refusing an untrusted Browser Control data directory.");
+}
+
+function initializeDataRoot() {
+  mkdirSync(sidebarHome, { recursive: true, mode: 0o700 });
+  if (existsSync(dataRootMarker) && readFileSync(dataRootMarker, "utf8") !== DATA_ROOT_MARKER) {
+    throw new Error("Browser Control data-directory ownership marker is invalid.");
+  }
+  writeFileSync(dataRootMarker, DATA_ROOT_MARKER, { mode: 0o600 });
+  mkdirSync(workspace, { recursive: true, mode: 0o700 });
+}
+
+initializeDataRoot();
 
 const pageRefSchema = {
   type: "object",
@@ -224,6 +243,7 @@ let appServer = null;
 let initialized = null;
 let nextRpcId = 1;
 let lastAppServerError = "";
+let deletingLocalData = false;
 const rpcPending = new Map();
 const chromeDecoder = new LengthPrefixedJsonDecoder(MAX_NATIVE_MESSAGE_BYTES);
 const appDecoder = new JsonLineDecoder();
@@ -294,36 +314,39 @@ function handleAppServerMessage(message) {
 async function ensureAppServer() {
   if (initialized) return initialized;
 
-  appServer = spawn(codexBinary, ["app-server", "--stdio"], {
+  const server = spawn(codexBinary, ["app-server", "--stdio"], {
     env: { ...process.env, CODEX_HOME: sidebarHome },
     stdio: ["pipe", "pipe", "pipe"],
   });
-  appServer.stdout.on("data", (chunk) => {
+  appServer = server;
+  server.stdout.on("data", (chunk) => {
     try {
       for (const message of appDecoder.push(chunk)) handleAppServerMessage(message);
     } catch (error) {
       sendEvent("bridge.error", { message: error instanceof Error ? error.message : "Invalid App Server output." });
     }
   });
-  appServer.stderr.on("data", (chunk) => log(chunk.toString("utf8").trim()));
-  appServer.stderr.on("data", (chunk) => {
+  server.stderr.on("data", (chunk) => log(chunk.toString("utf8").trim()));
+  server.stderr.on("data", (chunk) => {
     lastAppServerError = `${lastAppServerError}\n${chunk.toString("utf8")}`.trim().slice(-2_000);
   });
-  appServer.on("error", (error) => {
+  server.on("error", (error) => {
+    if (appServer !== server) return;
     initialized = null;
     sendEvent("bridge.error", { message: `Unable to start Codex: ${error.message}` });
   });
-  appServer.on("exit", (code, signal) => {
+  server.on("exit", (code, signal) => {
+    if (appServer !== server) return;
     initialized = null;
     appServer = null;
     const detail = lastAppServerError || `Codex App Server stopped (exit ${String(code)}, signal ${String(signal)}).`;
     for (const pending of rpcPending.values()) pending.reject(new Error(detail));
     rpcPending.clear();
-    sendEvent("bridge.status", { connected: false, code, signal, error: detail });
+    if (!deletingLocalData) sendEvent("bridge.status", { connected: false, code, signal, error: detail });
   });
 
   initialized = appRequest("initialize", {
-    clientInfo: { name: "browser-control", title: "Browser Control", version: "0.2.0" },
+    clientInfo: { name: "browser-control", title: "Browser Control", version: "0.3.0" },
     capabilities: { experimentalApi: true, requestAttestation: false },
   }).then((result) => {
     writeAppServer({ method: "initialized", params: {} });
@@ -331,6 +354,45 @@ async function ensureAppServer() {
     return result;
   });
   return initialized;
+}
+
+async function stopAppServer() {
+  const runningServer = appServer;
+  if (!runningServer) {
+    initialized = null;
+    return;
+  }
+  await new Promise((resolveStop, rejectStop) => {
+    const forceTimeout = setTimeout(() => runningServer.kill("SIGKILL"), 3_000);
+    const failureTimeout = setTimeout(() => {
+      rejectStop(new Error("Codex App Server did not stop before local data deletion."));
+    }, 6_000);
+    runningServer.once("exit", () => {
+      clearTimeout(forceTimeout);
+      clearTimeout(failureTimeout);
+      resolveStop(undefined);
+    });
+    runningServer.kill("SIGTERM");
+  });
+  initialized = null;
+  appServer = null;
+}
+
+async function deleteAllLocalData() {
+  await appRequest("account/logout", undefined).catch(() => undefined);
+  deletingLocalData = true;
+  try {
+    await stopAppServer();
+    if (!existsSync(dataRootMarker) || readFileSync(dataRootMarker, "utf8") !== DATA_ROOT_MARKER) {
+      throw new Error("Refusing to delete an unverified Browser Control data directory.");
+    }
+    rmSync(sidebarHome, { recursive: true, force: true });
+    initializeDataRoot();
+    lastAppServerError = "";
+    return { deleted: true };
+  } finally {
+    deletingLocalData = false;
+  }
 }
 
 function safeThreadParams() {
@@ -352,7 +414,7 @@ async function handleRequest(message) {
 
   switch (message.method) {
     case "bridge.status":
-      return { connected: true, version: "0.2.0" };
+      return { connected: true, version: "0.3.0" };
     case "account.read":
       return appRequest("account/read", { refreshToken: false });
     case "auth.login":
@@ -361,6 +423,8 @@ async function handleRequest(message) {
       return appRequest("account/login/cancel", { loginId: message.params?.loginId });
     case "auth.logout":
       return appRequest("account/logout", undefined);
+    case "data.deleteAll":
+      return deleteAllLocalData();
     case "models.list": {
       const result = await appRequest("model/list", { limit: 100, includeHidden: false });
       return {

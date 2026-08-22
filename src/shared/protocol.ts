@@ -30,6 +30,7 @@ export const uiRequestSchema = z.discriminatedUnion("type", [
   requestBase.extend({ type: z.literal("AUTH_LOGIN") }),
   requestBase.extend({ type: z.literal("AUTH_CANCEL"), loginId: z.string().min(1) }),
   requestBase.extend({ type: z.literal("AUTH_LOGOUT") }),
+  requestBase.extend({ type: z.literal("DELETE_ALL_LOCAL_DATA") }),
   requestBase.extend({ type: z.literal("MODELS_READ") }),
   requestBase.extend({ type: z.literal("CHAT_START"), model: z.string().min(1).max(120).optional() }),
   requestBase.extend({ type: z.literal("CHAT_RESUME"), threadId: z.string().min(1), model: z.string().min(1).max(120).optional() }),

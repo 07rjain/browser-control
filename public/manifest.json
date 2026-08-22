@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Browser Control",
   "description": "Chat with Codex and use supervised browser actions beside the current page.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "minimum_chrome_version": "114",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAjtH4mf8P/yTUcTb3iuiW+5LqRzDF4LpnXYD2BA7u2/yGgBLP82+0ejeGz3ckyXJ1Gm9P0D20s2V1bZtQihkRQg43dCr76ll35bL9t7yJ9bOPHgB5s0pR0TNZ6LoNdmSu5lisxUIhHeKlEvT8MxloirMv4HDe2wDsViMpbok3rC2QqXRhJFhZkpmDMiVL8+6pNDaGL7ZjEwow4t9mVPxkmQRkTw1vETeGacChrkb7FlVbqmCWXe/+lalBL4bX3vjUg/T3scgI3cvRmqL+FKfjp/9eTQeruItnYXwjSu2zMqRxxcbBiYZZufMtUQuCgqgLlLSaeMsmQppdpD+Qy/eJ6wIDAQAB",
   "permissions": [
@@ -23,7 +23,17 @@
     "type": "module"
   },
   "action": {
-    "default_title": "Open Browser Control"
+    "default_title": "Open Browser Control",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
   },
   "side_panel": {
     "default_path": "sidepanel.html"

@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Browser Control is a supervised Codex assistant in Chrome's side panel.">
+    <title>Browser Control</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <header>
+      <a class="brand" href="index.html">Browser Control</a>
+      <nav aria-label="Primary navigation">
+        <a href="index.html" aria-current="page">Product</a>
+        <a href="support.html">Support</a>
+        <a href="privacy.html">Privacy</a>
+      </nav>
+    </header>
+    <main>
+      <section class="hero">
+        <p class="eyebrow">Codex beside the page</p>
+        <h1>Supervised browser work from Chrome's side panel.</h1>
+        <p class="lede">Browser Control combines Codex chat with explicit page attachment, tab organization, and a fixed set of visible, user-initiated browser actions.</p>
+        <div class="actions">
+          <a class="button button-primary" href="support.html#install">Install the companion</a>
+          <a class="button" href="privacy.html">Read the privacy policy</a>
+        </div>
+      </section>
+
+      <section aria-labelledby="features-title">
+        <h2 id="features-title">What it does</h2>
+        <div class="grid">
+          <article class="card"><h3>Side-panel chat</h3><p>Sign in through Codex with an eligible ChatGPT account, choose an available model, and keep local conversation history beside your tabs.</p></article>
+          <article class="card"><h3>Explicit context</h3><p>Attach the current page only when you choose. Review its origin and size before its selected or readable text is sent.</p></article>
+          <article class="card"><h3>Visible actions</h3><p>Use typed, allowlisted tab and page actions with activity history, Stop, permission controls, short-lived element references, and hard safety refusals.</p></article>
+        </div>
+      </section>
+
+      <section aria-labelledby="control-title">
+        <h2 id="control-title">You choose the access level</h2>
+        <p><strong>Ask every time</strong> grants exact-site access as needed and confirms supported consequential actions. <strong>Full access</strong> requests optional access to normal HTTP and HTTPS pages once and can perform supported submit, save, send, publish, delete, schedule, and tab-close actions after your request without a separate extension confirmation card. Both modes show activity, enforce action limits, support cancellation, and refuse purchases, credentials, payment data, authentication codes, private keys, CAPTCHAs, and security bypasses.</p>
+      </section>
+
+      <aside class="notice">
+        <p><strong>macOS companion required.</strong> Browser Control communicates with the locally installed Codex CLI through Chrome Native Messaging. It currently requires macOS, Node.js 20 or newer, Codex CLI, Google Chrome or Brave, and an eligible ChatGPT/Codex account. See the <a href="support.html">installation guide</a>.</p>
+      </aside>
+
+      <section aria-labelledby="limits-title">
+        <h2 id="limits-title">Current limitations</h2>
+        <p>Protected Chrome pages, cross-origin frames, browser dialogs, closed shadow roots, and canvas-only controls are unsupported. Page inspection returns at most 80 visible interactive controls, so a control on a dense page may not be available. Browser Control is not remote or unattended automation.</p>
+      </section>
+    </main>
+    <footer>
+      <p>Browser Control is an independent extension and is not affiliated with or endorsed by OpenAI.</p>
+      <p><a href="privacy.html">Privacy</a> · <a href="support.html">Support</a> · <a href="mailto:cu.16bcs2797@gmail.com">Contact</a></p>
+    </footer>
+  </body>
+</html>
