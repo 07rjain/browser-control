@@ -979,7 +979,11 @@ export default function App() {
       <div className="transcript" ref={transcriptRef} aria-live="polite">
         {messages.length === 0 ? (
           <section className="empty-state">
-            <div className="orb" aria-hidden="true"><span /></div>
+            <div className="orb" aria-hidden="true">
+              <span className="orb-wave orb-wave-outer" />
+              <span className="orb-wave orb-wave-inner" />
+              <span className="orb-core" />
+            </div>
             <h1>{emptyTitle}</h1>
             <p>Ask about what you’re reading, attach the page, or navigate the current site with supervised browser actions.</p>
             {browserPermissionMode === "full" && !fullSiteAccessGranted && (
