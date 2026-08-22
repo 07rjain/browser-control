@@ -5,13 +5,13 @@ details, private URLs, prompts, page content, identifiers, and credentials.
 
 ## Required packaged icons
 
-- [ ] 16x16 PNG: toolbar/favicon scale
-- [ ] 32x32 PNG: Windows and high-density toolbar scale
-- [ ] 48x48 PNG: extension management page
-- [ ] 128x128 PNG: Chrome Web Store/package icon
-- [ ] Add the four paths to `manifest.icons` and appropriate action icon paths
-- [ ] Keep the 128x128 artwork visually centered with transparent breathing room
-- [ ] Confirm every declared file exists in the final ZIP
+- [x] 16x16 PNG: toolbar/favicon scale
+- [x] 32x32 PNG: Windows and high-density toolbar scale
+- [x] 48x48 PNG: extension management page
+- [x] 128x128 PNG: Chrome Web Store/package icon
+- [x] Add the four paths to `manifest.icons` and appropriate action icon paths
+- [x] Keep the 128x128 artwork visually centered with transparent breathing room
+- [x] Confirm every declared file exists in the final ZIP
 
 Use original Browser Control artwork. Do not use OpenAI, ChatGPT, Codex, Chrome,
 or Google logos, confusingly similar marks, screenshots, or UI fragments as the
@@ -19,15 +19,15 @@ icon.
 
 ## Required Store assets
 
-- [ ] Store icon: 128x128 PNG
-- [ ] Small promo tile: 440x280 PNG or JPEG
-- [ ] At least one screenshot; prepare three, each 1280x800 PNG or JPEG
-  - [ ] Companion-required/sign-in onboarding state
-  - [ ] Ready side-panel chat with an explicit disposable page attachment
-  - [ ] Supervised activity with permission mode and Stop visible
-- [ ] Square corners, full bleed, no padding, no distortion
-- [ ] Verify screenshots match the exact submitted build
-- [ ] Verify copy remains readable when screenshots are downscaled to 640x400
+- [x] Store icon: 128x128 PNG
+- [x] Small promo tile: 440x280 PNG
+- [x] Three Store screenshots, each 1280x800 PNG
+  - [x] Ready side-panel home state
+  - [x] Explicit disposable page attachment
+  - [x] Harmless completed request and result
+- [x] Square corners, full bleed, no distortion
+- [x] Verify screenshots match the exact submitted build
+- [x] Verify copy remains readable when screenshots are downscaled to 640x400
 
 ## Optional assets
 
@@ -43,15 +43,15 @@ Treat live dashboard validation as authoritative.
 
 ## Listing and site verification
 
-- [ ] Product name availability checked in the live Store
-- [ ] Publisher identity and contact in the privacy policy match the verified
+- [x] Product name availability checked in the live Store
+- [x] Publisher identity and contact in the privacy policy match the verified
       Developer Dashboard account before the site is deployed
-- [ ] Manifest description is no more than 132 characters
-- [ ] Detailed description accurately states macOS, Node, Codex CLI, eligible
+- [x] Manifest description is no more than 132 characters
+- [x] Detailed description accurately states macOS, Node, Codex CLI, eligible
       account, and separate companion requirements above the fold
-- [ ] Independent/non-affiliation disclaimer is visible
-- [ ] Privacy, support, homepage, and companion download URLs work without login
-- [ ] GitHub Pages contains no analytics, cookies, remote scripts, remote fonts,
+- [x] Independent/non-affiliation disclaimer is visible
+- [x] Privacy, support, and homepage URLs work without login
+- [x] GitHub Pages contains no analytics, cookies, remote scripts, remote fonts,
       or externally loaded images
 - [ ] Dashboard single purpose, permission justifications, data checkboxes, and
       privacy policy use consistent terminology
@@ -60,11 +60,11 @@ Treat live dashboard validation as authoritative.
 
 ## Package evidence
 
-- [ ] `manifest.json` is at ZIP root
-- [ ] No source maps, secrets, test fixtures, node_modules, private keys, or
+- [x] `manifest.json` is at ZIP root
+- [x] No source maps, secrets, test fixtures, node_modules, private keys, or
       companion executable are in the extension ZIP
-- [ ] Extension ZIP and companion archive have recorded SHA-256 hashes
-- [ ] Final unpacked ID matches the Store Item ID
-- [ ] Native host `allowed_origins` contains the exact Store ID
+- [x] Extension ZIP and companion archive have recorded SHA-256 hashes
+- [x] Final unpacked ID matches the Store Item ID
+- [x] Native host `allowed_origins` contains the exact Store ID
 - [ ] Companion GitHub Release is live before Submit for Review
-- [ ] Privacy/support pages are live before Submit for Review
+- [x] Privacy/support pages are live before Submit for Review

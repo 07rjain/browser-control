@@ -62,10 +62,14 @@ try {
   }
   zipDirectory(extensionStage, extensionZip);
 
-  const checksums = [companionZip, extensionZip]
-    .map((path) => `${checksum(path)}  ${basename(path)}`)
-    .join("\n");
-  writeFileSync(join(releaseDir, "SHA256SUMS.txt"), `${checksums}\n`);
+  writeFileSync(
+    join(releaseDir, "SHA256SUMS.txt"),
+    `${checksum(companionZip)}  ${basename(companionZip)}\n`,
+  );
+  writeFileSync(
+    join(releaseDir, "EXTENSION_SHA256SUMS.txt"),
+    `${checksum(extensionZip)}  ${basename(extensionZip)}\n`,
+  );
   process.stdout.write(`${extensionZip}\n${companionZip}\n${join(releaseDir, "SHA256SUMS.txt")}\n`);
 } finally {
   rmSync(temporaryRoot, { recursive: true, force: true });
