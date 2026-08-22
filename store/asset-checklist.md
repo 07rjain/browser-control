@@ -53,9 +53,9 @@ Treat live dashboard validation as authoritative.
 - [x] Privacy, support, and homepage URLs work without login
 - [x] GitHub Pages contains no analytics, cookies, remote scripts, remote fonts,
       or externally loaded images
-- [ ] Dashboard single purpose, permission justifications, data checkboxes, and
+- [x] Dashboard single purpose, permission justifications, data checkboxes, and
       privacy policy use consistent terminology
-- [ ] Public distribution, regions, and deferred-publishing choice reviewed
+- [x] Public distribution, regions, and publishing choice reviewed
 - [ ] Reviewer instructions tested from a clean macOS user and Chrome profile
 
 ## Package evidence
@@ -66,5 +66,5 @@ Treat live dashboard validation as authoritative.
 - [x] Extension ZIP and companion archive have recorded SHA-256 hashes
 - [x] Final unpacked ID matches the Store Item ID
 - [x] Native host `allowed_origins` contains the exact Store ID
-- [ ] Companion GitHub Release is live before Submit for Review
+- [x] Companion GitHub Release is live before Submit for Review
 - [x] Privacy/support pages are live before Submit for Review

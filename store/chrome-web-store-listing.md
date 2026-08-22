@@ -219,5 +219,4 @@ or access an eligible test account.
 - Visibility: Public
 - Regions: All regions unless legal/account availability requires exclusions
 - In-app purchases: None sold by Browser Control
-- Deferred publishing: Preferred for the first review, followed by deliberate
-  manual publication after approval
+- Publishing: Publish publicly after approval; deferred publishing is not enabled
