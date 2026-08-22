@@ -136,9 +136,9 @@ The complete extension does not run as an ordinary localhost website. Vite build
 
 1. Install dependencies with `npm install`.
 2. Build the extension with `npm run build`.
-3. Install or refresh the macOS native-messaging companion with `npm run install:host:mac`. The installer records the local Codex executable and permits extension ID `fodoakcimglhplkoohggjdggdffhkdam`.
+3. Install or refresh the macOS native-messaging companion with `npm run install:host:mac`. The installer records the local Codex executable and permits Chrome Web Store extension ID `mpdfhhhjgbpdpfnkjbnboebdjokfjglf` (plus the legacy development ID during migration).
 4. Open `chrome://extensions`, enable **Developer mode**, select **Load unpacked**, and choose this repository's `dist/` directory.
-5. Confirm Chrome shows extension ID `fodoakcimglhplkoohggjdggdffhkdam`. A different ID cannot connect to the installed native host.
+5. Confirm Chrome shows extension ID `mpdfhhhjgbpdpfnkjbnboebdjokfjglf`. A different ID cannot connect to the installed native host unless it is the temporarily supported legacy development ID.
 6. Pin or open **Browser Control**, then use the toolbar icon to open its side panel.
 7. After source changes, run `npm run build` again and select **Reload** on `chrome://extensions`. Reopen the side panel if Chrome has discarded its previous extension context.
 8. Inspect runtime failures from the extension's **Service worker** link on `chrome://extensions` and from the side panel's own DevTools console.
@@ -150,7 +150,7 @@ Run `npm run test:installed-host` after host installation to verify the Chrome-s
 ## Manual testing protocol
 
 - Treat manual Chrome testing as required for changes to the side panel, service worker lifecycle, authentication, native messaging, permissions, page attachment, tabs, or `page.*` tools. Automated tests are necessary but not sufficient for these surfaces.
-- Build first, reload the unpacked `dist/` extension, and confirm the fixed extension ID `fodoakcimglhplkoohggjdggdffhkdam`. Reinstall the native host when its files, manifest, Codex path, or extension ID changes.
+- Build first, reload the unpacked `dist/` extension, and confirm the fixed Store ID `mpdfhhhjgbpdpfnkjbnboebdjokfjglf`. Reinstall the native host when its files, manifest, Codex path, or extension ID changes.
 - Test the changed flow plus its nearest failure path. At minimum, verify expected UI state, activity state, resulting tab/page state, cancellation, and relevant service-worker/side-panel console output.
 - Use a disposable page or test account for consequential actions. Never use real passwords, authentication codes, payment data, private keys, or other sensitive values in test fields or evidence.
 - Require a fresh, specific confirmation before a manual test submits, sends, publishes, books, deletes, uploads, or modifies external state. Confirmation is for one exact action and does not authorize later repetitions.

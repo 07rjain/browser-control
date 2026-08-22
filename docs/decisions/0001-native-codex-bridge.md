@@ -8,7 +8,7 @@
 
 Use a Chrome native-messaging host that launches `codex app-server --stdio`. Use App Server's managed `chatgpt` browser authentication for identity and ChatGPT-subscription model access.
 
-The extension ID is pinned to `fodoakcimglhplkoohggjdggdffhkdam` with a public manifest key. The native-host manifest allowlists only that exact extension origin.
+The Chrome Web Store extension ID is pinned to `mpdfhhhjgbpdpfnkjbnboebdjokfjglf` with the Store public manifest key. The native-host manifest allowlists that exact extension origin and temporarily retains the legacy development ID `fodoakcimglhplkoohggjdggdffhkdam` for local migration.
 
 ## Why
 

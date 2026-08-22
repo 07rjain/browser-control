@@ -2,9 +2,9 @@
   "manifest_version": 3,
   "name": "Browser Control",
   "description": "Chat with Codex and use supervised browser actions beside the current page.",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "minimum_chrome_version": "114",
-  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAjtH4mf8P/yTUcTb3iuiW+5LqRzDF4LpnXYD2BA7u2/yGgBLP82+0ejeGz3ckyXJ1Gm9P0D20s2V1bZtQihkRQg43dCr76ll35bL9t7yJ9bOPHgB5s0pR0TNZ6LoNdmSu5lisxUIhHeKlEvT8MxloirMv4HDe2wDsViMpbok3rC2QqXRhJFhZkpmDMiVL8+6pNDaGL7ZjEwow4t9mVPxkmQRkTw1vETeGacChrkb7FlVbqmCWXe/+lalBL4bX3vjUg/T3scgI3cvRmqL+FKfjp/9eTQeruItnYXwjSu2zMqRxxcbBiYZZufMtUQuCgqgLlLSaeMsmQppdpD+Qy/eJ6wIDAQAB",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAr/oTadz1oDckqowbOB/rrKxRxiljsM5bxuJD0LDfJDeyu7utRGP9X2vw8gkxPUK8t1eHZDbClDLPoickXUsaKYUOjQV+cfZZ8EG/1qJ6u/CoCKaeVfHFCpb1Ub6RciBXBrWLSrK5N3vqvCPTevfKKHIl/0w7wiJInU3mxBrARjaAeGoEyxIq2HKn080yPyU3LXF5UHESUSF8CmNOoWyucPd9YdNVNA0LKgqX9QsZTxcGnsYkFA/3ND5gcCWbViXIVhkE9jKgGCeeH83s372L1AyReITBRasKZtJXYEjR+LOXRk9rjrwez6zWLdChZenCMoXPDGgFGNx6kmwW+NMk0QIDAQAB",
   "permissions": [
     "activeTab",
     "nativeMessaging",

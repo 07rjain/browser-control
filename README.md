@@ -60,7 +60,7 @@ Then open `chrome://extensions`, enable **Developer mode**, choose **Load unpack
 The manifest has a fixed public key, so the development extension ID should be:
 
 ```text
-fodoakcimglhplkoohggjdggdffhkdam
+mpdfhhhjgbpdpfnkjbnboebdjokfjglf
 ```
 
 If Chrome shows a different ID, native messaging will be rejected. Confirm that Chrome loaded `dist/manifest.json`, then rebuild and reload.
@@ -120,7 +120,7 @@ Manual testing is required for browser-visible or browser-action changes because
 1. Run the automated validation commands above.
 2. Run `npm run install:host:mac` if the host or extension ID changed.
 3. Open `chrome://extensions`, enable **Developer mode**, and load `dist/` unpacked.
-4. Confirm the extension ID is `fodoakcimglhplkoohggjdggdffhkdam` and select **Reload** after every rebuild.
+4. Confirm the extension ID is `mpdfhhhjgbpdpfnkjbnboebdjokfjglf` and select **Reload** after every rebuild.
 5. Open the extension service-worker inspector and keep the Console visible while testing.
 
 Use a disposable test page or test account when an action could send, publish, delete, invite, or otherwise change external state. Do not use real secrets, payment fields, authentication codes, or private data.

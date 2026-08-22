@@ -11,8 +11,11 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 
-const companionVersion = "0.3.0";
-const extensionIds = ["fodoakcimglhplkoohggjdggdffhkdam"];
+const companionVersion = "0.3.1";
+const extensionIds = [
+  "mpdfhhhjgbpdpfnkjbnboebdjokfjglf",
+  "fodoakcimglhplkoohggjdggdffhkdam",
+];
 const hostName = "com.codex.sidebar";
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const sourceHostScript = join(repositoryRoot, "bridge", "native-host.mjs");
