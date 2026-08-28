@@ -274,6 +274,7 @@ This milestone is complete only when all of the following are true:
 - The user can explicitly jump to the active task's pinned tab from the sidebar without retargeting the task.
 - The active authorized working page shows a non-interactive visual frame only for the lifetime of the browser task; completion, cancellation, or moving the pin clears the old frame.
 - Reloads, redirects, DOM changes, and retries do not cause stale or duplicate actions.
+- Closing the working tab leaves the task active, invalidates its old references, and lets the assistant open or activate a background replacement and continue from a fresh inspection. Recovery never adopts the user's newly visible tab or blindly repeats an uncertain consequential action.
 - Unsupported pages, frames, elements, and security-sensitive requests fail with a clear explanation.
 - No arbitrary model-generated JavaScript, selector, or unsafe URL reaches execution.
 - Origin access is explicit, minimal, visible, and revocable.

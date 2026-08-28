@@ -33,6 +33,7 @@ if (!executorGlobal.__codexPageExecutorInstalled) {
     "input:not([type='hidden'])",
     "textarea",
     "select",
+    "[contenteditable]:not([contenteditable='false'])",
     "[role='button']",
     "[role='link']",
     "[role='menuitem']",
@@ -105,16 +106,22 @@ if (!executorGlobal.__codexPageExecutorInstalled) {
     return (value ?? "").replace(/\s+/g, " ").trim().slice(0, max);
   }
 
+  function isContentEditable(element: Element): boolean {
+    if (!(element instanceof HTMLElement)) return false;
+    const attribute = element.getAttribute("contenteditable");
+    return element.isContentEditable || attribute === "" || attribute === "true" || attribute === "plaintext-only";
+  }
+
   function isSensitive(element: Element): boolean {
-    if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)) return false;
+    if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || isContentEditable(element))) return false;
     if (element instanceof HTMLInputElement && element.type === "file") return true;
     const haystack = [
-      element.type,
-      element.autocomplete,
-      element.name,
+      element instanceof HTMLInputElement ? element.type : "",
+      element.getAttribute("autocomplete") ?? "",
+      element.getAttribute("name") ?? "",
       element.id,
       element.getAttribute("aria-label") ?? "",
-      element.placeholder,
+      element.getAttribute("placeholder") ?? "",
     ].join(" ");
     return /(password|passcode|one.?time|otp|verification.?code|credit.?card|card.?number|cc-|cvv|cvc|security.?code|private.?key|secret|recovery|social.?security|ssn|aadhaar|pan.?number)/i.test(haystack);
   }
@@ -126,6 +133,18 @@ if (!executorGlobal.__codexPageExecutorInstalled) {
     if (element.closest('[hidden], [aria-hidden="true"]')) return false;
     const rect = element.getBoundingClientRect();
     return rect.width > 0 && rect.height > 0;
+  }
+
+  function querySelectorAllDeep(selector: string): Element[] {
+    const matches: Element[] = [];
+    const visit = (root: Document | ShadowRoot): void => {
+      matches.push(...Array.from(root.querySelectorAll(selector)));
+      for (const element of Array.from(root.querySelectorAll("*"))) {
+        if (element.shadowRoot) visit(element.shadowRoot);
+      }
+    };
+    visit(document);
+    return matches;
   }
 
   function labelFor(element: Element): string {
@@ -158,6 +177,7 @@ if (!executorGlobal.__codexPageExecutorInstalled) {
     if (element instanceof HTMLButtonElement) return "button";
     if (element instanceof HTMLTextAreaElement) return "textbox";
     if (element instanceof HTMLSelectElement) return "combobox";
+    if (isContentEditable(element)) return "textbox";
     if (element instanceof HTMLInputElement) {
       if (element.type === "checkbox") return "checkbox";
       if (element.type === "radio") return "radio";
@@ -260,7 +280,7 @@ if (!executorGlobal.__codexPageExecutorInstalled) {
     // Reactive applications can replace a control without changing what it is.
     // Rebind only when there is exactly one visible semantic match, so an
     // unrelated rerender does not break the action or make the target ambiguous.
-    const matches = Array.from(document.querySelectorAll(REFERENCED_SELECTOR))
+    const matches = querySelectorAllDeep(REFERENCED_SELECTOR)
       .filter(isVisible)
       .filter((element) => fingerprint(element) === ref.fingerprint);
     if (matches.length !== 1) throw new Error("This page element changed or no longer exists. Inspect the page again.");
@@ -279,34 +299,78 @@ if (!executorGlobal.__codexPageExecutorInstalled) {
     return resolveRef(refId);
   }
 
+  function isInViewport(element: Element): boolean {
+    const rect = element.getBoundingClientRect();
+    return rect.bottom > 0 && rect.top < innerHeight && rect.right > 0 && rect.left < innerWidth;
+  }
+
+  function targetOwnsHit(element: Element, covering: Element): boolean {
+    if (covering === element || element.contains(covering) || covering.contains(element)) return true;
+    let shadowNode = element;
+    let root = shadowNode.getRootNode();
+    while (root instanceof ShadowRoot) {
+      if (covering === root.host || covering.contains(root.host)) return true;
+      shadowNode = root.host;
+      root = shadowNode.getRootNode();
+    }
+    return false;
+  }
+
+  function hasAccessibleHitPoint(element: Element): boolean {
+    const rect = element.getBoundingClientRect();
+    const left = Math.max(0, rect.left);
+    const right = Math.min(innerWidth, rect.right);
+    const top = Math.max(0, rect.top);
+    const bottom = Math.min(innerHeight, rect.bottom);
+    if (right <= left || bottom <= top) return true;
+
+    const width = right - left;
+    const height = bottom - top;
+    const points = [
+      [left + width / 2, top + height / 2],
+      [left + width * 0.2, top + height * 0.2],
+      [left + width * 0.8, top + height * 0.2],
+      [left + width * 0.2, top + height * 0.8],
+      [left + width * 0.8, top + height * 0.8],
+    ];
+    let foundHit = false;
+    for (const [rawX, rawY] of points) {
+      const x = Math.min(innerWidth - 1, Math.max(0, rawX));
+      const y = Math.min(innerHeight - 1, Math.max(0, rawY));
+      const covering = document.elementFromPoint(x, y);
+      if (!covering) continue;
+      foundHit = true;
+      if (targetOwnsHit(element, covering)) return true;
+    }
+    return !foundHit;
+  }
+
   function assertInteractable(element: Element): void {
     if (!isVisible(element)) throw new Error("The requested element is not visible.");
     if (("disabled" in element && Boolean((element as HTMLButtonElement).disabled)) || element.getAttribute("aria-disabled") === "true") {
       throw new Error("The requested element is disabled.");
     }
-    const rect = element.getBoundingClientRect();
-    if (rect.bottom <= 0 || rect.top >= innerHeight || rect.right <= 0 || rect.left >= innerWidth) {
+    if (!isInViewport(element)) {
       throw new Error("The requested element is outside the viewport. Scroll it into view first.");
     }
-    const x = Math.min(innerWidth - 1, Math.max(0, rect.left + rect.width / 2));
-    const y = Math.min(innerHeight - 1, Math.max(0, rect.top + rect.height / 2));
-    if (x >= 0 && y >= 0 && x < innerWidth && y < innerHeight) {
-      const covering = document.elementFromPoint(x, y);
-      if (covering && covering !== element && !element.contains(covering) && !covering.contains(element)) {
-        throw new Error("The requested element is covered by another page element.");
-      }
-    }
+    if (!hasAccessibleHitPoint(element)) throw new Error("The requested element is covered by another page element.");
   }
 
   function inspect() {
     refs.clear();
     snapshotId = crypto.randomUUID();
     snapshotCreatedAt = Date.now();
-    const primary = Array.from(document.querySelectorAll(INTERACTIVE_SELECTOR)).filter(isVisible);
-    const primarySet = new Set(primary);
-    const dragCandidates = Array.from(document.querySelectorAll(DRAG_SELECTOR))
+    const prioritizeViewport = (left: Element, right: Element): number => Number(isInViewport(right)) - Number(isInViewport(left));
+    const primary = querySelectorAllDeep(INTERACTIVE_SELECTOR)
       .filter(isVisible)
+      .filter((element) => !isInViewport(element) || hasAccessibleHitPoint(element))
+      .sort(prioritizeViewport);
+    const primarySet = new Set(primary);
+    const dragCandidates = querySelectorAllDeep(DRAG_SELECTOR)
+      .filter(isVisible)
+      .filter((element) => !isInViewport(element) || hasAccessibleHitPoint(element))
       .filter((element) => !primarySet.has(element));
+    dragCandidates.sort(prioritizeViewport);
     const candidates = [...primary, ...dragCandidates];
     const elements = candidates.slice(0, MAX_ELEMENTS).map((element, index) => {
       const refId = `e${index + 1}`;
@@ -318,6 +382,10 @@ if (!executorGlobal.__codexPageExecutorInstalled) {
           ? isSensitive(element)
             ? undefined
             : text(element.value, 500)
+          : isContentEditable(element)
+            ? isSensitive(element)
+              ? undefined
+              : text(element.textContent, 500)
           : undefined;
       return { ...details, value };
     });
@@ -340,6 +408,16 @@ if (!executorGlobal.__codexPageExecutorInstalled) {
     setter.call(element, value);
     element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: value }));
     element.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  function setContentEditableValue(element: HTMLElement, value: string): void {
+    const inputType = value ? "insertText" : "deleteContentBackward";
+    const beforeInput = new InputEvent("beforeinput", { bubbles: true, cancelable: true, inputType, data: value || null });
+    if (!element.dispatchEvent(beforeInput)) throw new Error("The page rejected the field value.");
+
+    element.replaceChildren();
+    if (value) element.append(document.createTextNode(value));
+    element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType, data: value || null }));
   }
 
   function handle(command: ExecutorCommand): unknown {
@@ -369,15 +447,21 @@ if (!executorGlobal.__codexPageExecutorInstalled) {
       case "FILL": {
         const element = assertFresh(command.refId, command.snapshotId);
         assertInteractable(element);
-        if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)) throw new Error("The target is not a text field.");
+        const contentEditable = isContentEditable(element);
+        if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || contentEditable)) {
+          throw new Error("The target is not a text field.");
+        }
         if (isSensitive(element)) throw new Error("Browser Control will not read or fill sensitive fields.");
-        if (["checkbox", "radio", "file", "button", "submit", "reset", "image"].includes(element.type)) {
+        if (element instanceof HTMLInputElement && ["checkbox", "radio", "file", "button", "submit", "reset", "image"].includes(element.type)) {
           throw new Error("Use the matching page control tool for this field type.");
         }
-        const next = command.mode === "clear" ? "" : command.mode === "append" ? element.value + command.value : command.value;
-        element.focus({ preventScroll: true });
-        setNativeValue(element, next);
-        if (element.value !== next) throw new Error("The page rejected the field value.");
+        const current = contentEditable ? element.textContent ?? "" : (element as HTMLInputElement | HTMLTextAreaElement).value;
+        const next = command.mode === "clear" ? "" : command.mode === "append" ? current + command.value : command.value;
+        (element as HTMLElement).focus({ preventScroll: true });
+        if (contentEditable) setContentEditableValue(element as HTMLElement, next);
+        else setNativeValue(element as HTMLInputElement | HTMLTextAreaElement, next);
+        const actual = contentEditable ? element.textContent ?? "" : (element as HTMLInputElement | HTMLTextAreaElement).value;
+        if (actual !== next) throw new Error("The page rejected the field value.");
         return { filled: true, label: labelFor(element), characterCount: next.length };
       }
       case "SELECT": {
@@ -423,7 +507,8 @@ if (!executorGlobal.__codexPageExecutorInstalled) {
         assertInteractable(element);
         element.focus({ preventScroll: true });
         if (command.key === "Tab") {
-          const focusable = Array.from(document.querySelectorAll<HTMLElement>("a[href],button,input,textarea,select,[tabindex]:not([tabindex='-1'])")).filter(isVisible);
+          const focusable = querySelectorAllDeep("a[href],button,input,textarea,select,[tabindex]:not([tabindex='-1'])")
+            .filter(isVisible) as HTMLElement[];
           const index = focusable.indexOf(element);
           focusable[(index + 1) % focusable.length]?.focus();
         } else if (command.key === "Enter") {

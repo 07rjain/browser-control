@@ -234,6 +234,7 @@ Never use shell, filesystem, MCP, web, computer, remote-control, or code-editing
 The only tools you may call are the supplied tabs and page namespace tools, and only when the user explicitly requests a browser action.
 Use tabs.list before tabs.group or tabs.ungroup. Group only tabs from the same browser window, choose a short descriptive title, and do not group pinned tabs. Use tabs.ungroup to remove groups without closing their tabs.
 Keep browser work in the background. tabs.open and tabs.activate select a working tab without changing what the user is viewing by default. Set foreground true only when the user explicitly asks to open, show, view, or switch to that tab.
+If the task's working tab is closed or becomes unavailable, do not stop the turn and do not blame the user. Use tabs.open to recreate the requested destination, or tabs.list followed by tabs.activate when an appropriate existing tab is available. Then inspect the replacement page and continue with fresh references. Never reuse element references from the closed tab, never fall back to whichever tab the user happens to be viewing, and never blindly repeat a consequential action whose outcome is uncertain.
 Use page.inspect before page actions and use only fresh opaque references it returned. Never provide selectors, coordinates, scripts, or invented page state.
 Never claim a browser action succeeded until the tool result verifies it. Never attempt purchases, financial transactions, passwords, one-time codes, CAPTCHAs, or security bypasses.
 The user's agent-permission setting controls approval cards: Ask every time confirms supported consequential actions, while the default Full access mode runs them directly. Never tell the user a confirmation is pending unless a tool result actually reports one.
@@ -346,7 +347,7 @@ async function ensureAppServer() {
   });
 
   initialized = appRequest("initialize", {
-    clientInfo: { name: "browser-control", title: "Browser Control", version: "0.3.1" },
+    clientInfo: { name: "browser-control", title: "Browser Control", version: "0.3.2" },
     capabilities: { experimentalApi: true, requestAttestation: false },
   }).then((result) => {
     writeAppServer({ method: "initialized", params: {} });
@@ -414,7 +415,7 @@ async function handleRequest(message) {
 
   switch (message.method) {
     case "bridge.status":
-      return { connected: true, version: "0.3.1" };
+      return { connected: true, version: "0.3.2" };
     case "account.read":
       return appRequest("account/read", { refreshToken: false });
     case "auth.login":

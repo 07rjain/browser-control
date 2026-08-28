@@ -11,7 +11,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 
-const companionVersion = "0.3.1";
+const companionVersion = "0.3.2";
 const extensionIds = [
   "mpdfhhhjgbpdpfnkjbnboebdjokfjglf",
   "fodoakcimglhplkoohggjdggdffhkdam",

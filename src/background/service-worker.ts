@@ -92,6 +92,8 @@ interface BrowserTaskState {
   authorizedOrigin?: string;
   authorizedOriginPattern?: string;
   authorizedTabId?: number;
+  recoveryUrl?: string;
+  workingTabClosed?: boolean;
   updatedAt: number;
 }
 
@@ -342,9 +344,19 @@ async function hasRememberedControlAccess(originPattern: string): Promise<boolea
 }
 
 async function refreshRememberedTaskOrigin(task: BrowserTaskState, tabId: number): Promise<void> {
+  const tab = await chrome.tabs.get(tabId).catch(() => undefined);
+  if (!tab) {
+    task.authorizedTabId = undefined;
+    task.authorizedOrigin = undefined;
+    task.authorizedOriginPattern = undefined;
+    task.workingTabClosed = true;
+    return;
+  }
   task.authorizedTabId = tabId;
   task.authorizedOrigin = undefined;
   task.authorizedOriginPattern = undefined;
+  task.workingTabClosed = false;
+  if (tab.url && isSafeHttpUrl(tab.url)) task.recoveryUrl = tab.url;
   try {
     const controlOrigin = await currentControlOrigin(tabId);
     const remembered = await hasRememberedControlAccess(controlOrigin.originPattern);
@@ -370,7 +382,26 @@ async function initializeBrowserTask(threadId: string, turnId: string, tabId: nu
     canceled: false,
     updatedAt: Date.now(),
   };
-  task.authorizedTabId ??= tabId;
+  if (task.authorizedTabId === undefined && !task.workingTabClosed) task.authorizedTabId = tabId;
+  if (task.authorizedTabId !== undefined) await refreshRememberedTaskOrigin(task, task.authorizedTabId);
+  task.updatedAt = Date.now();
+  await saveTask(task);
+}
+
+function workingTabRecoveryError(task: BrowserTaskState): Error {
+  const destination = task.recoveryUrl
+    ? ` Reopen ${task.recoveryUrl} with tabs.open, or select another appropriate tab with tabs.activate.`
+    : " Open a replacement with tabs.open, or select an appropriate existing tab with tabs.activate.";
+  return new Error(
+    `The task's working tab was closed. The browser task is still active.${destination} Then inspect the replacement page and continue without reusing old element references.`,
+  );
+}
+
+async function markWorkingTabClosed(task: BrowserTaskState): Promise<void> {
+  task.authorizedTabId = undefined;
+  task.authorizedOrigin = undefined;
+  task.authorizedOriginPattern = undefined;
+  task.workingTabClosed = true;
   task.updatedAt = Date.now();
   await saveTask(task);
 }
@@ -613,10 +644,17 @@ async function handlePageCall(call: PageToolCall, announce: boolean): Promise<vo
   const task = await activeTask(call);
   if (announce) await storeActivity(call, "requested");
   if (task.authorizedTabId === undefined) {
+    if (task.workingTabClosed) throw workingTabRecoveryError(task);
     task.authorizedTabId = await ensureThreadWorkingTab(call.threadId);
     task.updatedAt = Date.now();
     await saveTask(task);
   }
+  const workingTab = await chrome.tabs.get(task.authorizedTabId).catch(() => undefined);
+  if (!workingTab) {
+    await markWorkingTabClosed(task);
+    throw workingTabRecoveryError(task);
+  }
+  if (workingTab.url && isSafeHttpUrl(workingTab.url)) task.recoveryUrl = workingTab.url;
   const controlOrigin = await currentControlOrigin(task.authorizedTabId);
   if (
     task.authorizedTabId !== controlOrigin.tabId ||
@@ -628,6 +666,7 @@ async function handlePageCall(call: PageToolCall, announce: boolean): Promise<vo
     task.authorizedOrigin = controlOrigin.origin;
     task.authorizedOriginPattern = controlOrigin.originPattern;
     task.authorizedTabId = controlOrigin.tabId;
+    task.workingTabClosed = false;
     task.updatedAt = Date.now();
     await saveTask(task);
   }
@@ -729,13 +768,24 @@ async function handleDynamicToolCall(input: unknown): Promise<void> {
       broadcast("tool.permission", prompt);
       return;
     }
-    const message = error instanceof Error ? error.message : "Browser action failed.";
+    let message = error instanceof Error ? error.message : "Browser action failed.";
+    let recoveryTask: BrowserTaskState | undefined;
+    if (call.namespace === "page") {
+      const failedTask = await getTask(call).catch(() => undefined);
+      if (failedTask?.workingTabClosed) {
+        recoveryTask = failedTask;
+        message = workingTabRecoveryError(failedTask).message;
+      }
+    }
     if (error instanceof z.ZodError && call.namespace === "page") {
       await respondToTool(call, false, { error: "The page tool arguments were rejected by policy." }).catch(() => undefined);
       await storeActivity(call, "failed", { error: "The page tool arguments were rejected by policy." });
       return;
     }
-    await finishTool(call, false, { error: message }, /stale|expired|changed/i.test(message) ? "stale" : "failed").catch(() => undefined);
+    const result = recoveryTask
+      ? { error: message, recoverable: true, recoveryAction: "open-or-activate-tab" }
+      : { error: message };
+    await finishTool(call, false, result, /stale|expired|changed|closed/i.test(message) ? "stale" : "failed").catch(() => undefined);
   }
 }
 
@@ -969,21 +1019,58 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
-  void (async () => {
-    const targets = await storedList<ThreadWorkingTab>(THREAD_TARGETS_KEY);
-    await chrome.storage.session.set({
-      [THREAD_TARGETS_KEY]: targets.filter((target) => target.tabId !== tabId),
-    });
-    const tasks = await storedList<BrowserTaskState>(TASK_KEY);
-    for (const task of tasks) {
-      if (task.authorizedTabId === tabId && !task.finished) {
-        task.canceled = true;
-        task.updatedAt = Date.now();
-      }
-    }
-    await chrome.storage.session.set({ [TASK_KEY]: tasks });
-  })();
+  void handleRemovedWorkingTab(tabId);
 });
+
+async function handleRemovedWorkingTab(tabId: number): Promise<void> {
+  const targets = await storedList<ThreadWorkingTab>(THREAD_TARGETS_KEY);
+  await chrome.storage.session.set({
+    [THREAD_TARGETS_KEY]: targets.filter((target) => target.tabId !== tabId),
+  });
+  const tasks = await storedList<BrowserTaskState>(TASK_KEY);
+  const affectedTasks = new Map<string, BrowserTaskState>();
+  for (const task of tasks) {
+    if (task.authorizedTabId === tabId && !task.finished && !task.canceled) {
+      task.authorizedTabId = undefined;
+      task.authorizedOrigin = undefined;
+      task.authorizedOriginPattern = undefined;
+      task.workingTabClosed = true;
+      task.updatedAt = Date.now();
+      affectedTasks.set(task.key, task);
+    }
+  }
+  await chrome.storage.session.set({ [TASK_KEY]: tasks });
+
+  if (affectedTasks.size === 0) return;
+  const storedPrompts = await storedList<StoredPendingPrompt>(PENDING_PROMPTS_KEY);
+  const pendingCalls = new Map<string, BrowserToolCall>();
+  for (const pending of pendingApprovals.values()) pendingCalls.set(pending.call.callId, pending.call);
+  for (const pending of pendingPermissions.values()) pendingCalls.set(pending.call.callId, pending.call);
+  for (const prompt of storedPrompts) {
+    const call = prompt.approval?.call ?? prompt.permission?.call;
+    if (call) pendingCalls.set(call.callId, call);
+  }
+  const failedCallIds = new Set<string>();
+  for (const call of pendingCalls.values()) {
+    const task = affectedTasks.get(taskKey(call));
+    if (!task) continue;
+    failedCallIds.add(call.callId);
+    pendingApprovals.delete(call.callId);
+    pendingPermissions.delete(call.callId);
+    pendingPrompts.delete(call.callId);
+    await finishTool(
+      call,
+      false,
+      { error: workingTabRecoveryError(task).message, recoverable: true, recoveryAction: "open-or-activate-tab" },
+      "stale",
+    ).catch(() => undefined);
+  }
+  if (failedCallIds.size > 0) {
+    await chrome.storage.session.set({
+      [PENDING_PROMPTS_KEY]: storedPrompts.filter((prompt) => !failedCallIds.has(prompt.callId)),
+    });
+  }
+}
 
 async function enableSidePanel(): Promise<void> {
   await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
@@ -1003,6 +1090,7 @@ export const serviceWorkerTestHooks = {
   finishBrowserTurn,
   getTask,
   getThreadWorkingTab,
+  handleRemovedWorkingTab,
   processCapturedPopup,
   actionResultFailed,
   isTrustedUiSender,

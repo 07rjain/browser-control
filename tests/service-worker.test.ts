@@ -27,6 +27,140 @@ function storageArea(data: Record<string, unknown>) {
 describe("service-worker browser orchestration", () => {
   beforeEach(() => vi.resetModules());
 
+  it("keeps a task active after its working tab closes and allows a background replacement", async () => {
+    const sessionData: Record<string, unknown> = {
+      codexSidebarThreadWorkingTabs: [{ threadId: "thread-recover", tabId: 12, updatedAt: Date.now() }],
+      codexSidebarBrowserTasks: [{
+        key: "thread-recover:turn-recover",
+        threadId: "thread-recover",
+        turnId: "turn-recover",
+        actionCount: 0,
+        canceled: false,
+        authorizedTabId: 12,
+        recoveryUrl: "https://chatgpt.com/",
+        updatedAt: Date.now(),
+      }],
+    };
+    const localData: Record<string, unknown> = {};
+    const tabs = new Map<number, chrome.tabs.Tab>();
+    const query = vi.fn(async () => [{ id: 99, active: true, url: "https://user.example/" }] as chrome.tabs.Tab[]);
+    const create = vi.fn(async (properties: chrome.tabs.CreateProperties) => {
+      const tab = {
+        id: 77,
+        windowId: 1,
+        index: 0,
+        active: properties.active ?? false,
+        pinned: false,
+        highlighted: false,
+        incognito: false,
+        selected: false,
+        discarded: false,
+        autoDiscardable: true,
+        frozen: false,
+        lastAccessed: Date.now(),
+        groupId: -1,
+        title: "ChatGPT",
+        url: properties.url,
+        status: "complete" as const,
+      } satisfies chrome.tabs.Tab;
+      tabs.set(77, tab);
+      return tab;
+    });
+    const get = vi.fn(async (tabId: number) => {
+      const tab = tabs.get(tabId);
+      if (!tab) throw new Error(`No tab with id: ${tabId}`);
+      return tab;
+    });
+    const nativeRequests: NativeRequest[] = [];
+    let nativeMessageListener: ((message: unknown) => void) | undefined;
+    const port = {
+      onMessage: { addListener: (listener: (message: unknown) => void) => { nativeMessageListener = listener; } },
+      onDisconnect: { addListener: vi.fn() },
+      postMessage: (message: NativeRequest) => {
+        nativeRequests.push(message);
+        queueMicrotask(() => nativeMessageListener?.({ type: "response", id: message.id, ok: true, data: {} }));
+      },
+    };
+
+    vi.stubGlobal("chrome", {
+      runtime: {
+        id: "extension-id",
+        connectNative: () => port,
+        sendMessage: vi.fn(async () => undefined),
+        onMessage: { addListener: vi.fn() },
+        onInstalled: { addListener: vi.fn() },
+        onStartup: { addListener: vi.fn() },
+      },
+      storage: { session: storageArea(sessionData), local: storageArea(localData) },
+      tabs: {
+        query,
+        get,
+        create,
+        sendMessage: vi.fn(async () => ({ ok: true, data: { active: false } })),
+        onRemoved: { addListener: vi.fn() },
+      },
+      permissions: { contains: vi.fn(async () => false) },
+      sidePanel: { setPanelBehavior: vi.fn(async () => undefined) },
+    });
+
+    const { serviceWorkerTestHooks } = await import("../src/background/service-worker");
+    await serviceWorkerTestHooks.handleRemovedWorkingTab(12);
+    await expect(serviceWorkerTestHooks.getThreadWorkingTab("thread-recover")).resolves.toBeUndefined();
+    await expect(serviceWorkerTestHooks.getTask({
+      requestId: 1,
+      threadId: "thread-recover",
+      turnId: "turn-recover",
+      callId: "inspect-after-close",
+      namespace: "page",
+      tool: "inspect",
+      arguments: { idempotencyKey: "inspect-after-close" },
+    })).resolves.toMatchObject({
+      canceled: false,
+      authorizedTabId: undefined,
+      workingTabClosed: true,
+      recoveryUrl: "https://chatgpt.com/",
+    });
+
+    await serviceWorkerTestHooks.handleDynamicToolCall({
+      requestId: 1,
+      threadId: "thread-recover",
+      turnId: "turn-recover",
+      callId: "inspect-after-close",
+      namespace: "page",
+      tool: "inspect",
+      arguments: { idempotencyKey: "inspect-after-close" },
+    });
+    expect(query).not.toHaveBeenCalled();
+    expect(nativeRequests).toContainEqual(expect.objectContaining({
+      method: "tool.respond",
+      params: expect.objectContaining({
+        success: false,
+        result: expect.objectContaining({ error: expect.stringMatching(/still active.*tabs\.open/i) }),
+      }),
+    }));
+
+    await serviceWorkerTestHooks.handleDynamicToolCall({
+      requestId: 2,
+      threadId: "thread-recover",
+      turnId: "turn-recover",
+      callId: "open-replacement",
+      namespace: "tabs",
+      tool: "open",
+      arguments: { url: "https://chatgpt.com/" },
+    });
+    expect(create).toHaveBeenCalledWith({ url: "https://chatgpt.com/", active: false });
+    await expect(serviceWorkerTestHooks.getThreadWorkingTab("thread-recover")).resolves.toBe(77);
+    await expect(serviceWorkerTestHooks.getTask({
+      requestId: 2,
+      threadId: "thread-recover",
+      turnId: "turn-recover",
+      callId: "open-replacement",
+      namespace: "tabs",
+      tool: "open",
+      arguments: { url: "https://chatgpt.com/" },
+    })).resolves.toMatchObject({ canceled: false, authorizedTabId: 77, workingTabClosed: false });
+  });
+
   it("skips tab-close approval by default and restores it in ask mode", async () => {
     const sessionData: Record<string, unknown> = {
       codexSidebarBrowserTasks: [{

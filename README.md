@@ -160,7 +160,7 @@ Google Calendar is the current representative dynamic-site test:
 4. Verify the extension does not silently switch to another Calendar tab.
 5. Do not save or send an invitation unless that exact consequential action was intentionally approved for the test.
 
-Until inspection prioritization is fixed, a target after the first 80 controls is an expected known failure and must be recorded rather than misreported as an unsupported click.
+Inspection prioritizes usable in-viewport controls ahead of off-screen controls and omits controls currently covered by a modal. If a dense page still omits the intended target after the 80-control cap, record it as truncation rather than misreporting it as an unsupported click.
 
 ### Record the result
 
@@ -176,7 +176,7 @@ Ask Codex to inspect or navigate a normal `http` or `https` page. Full access as
 - **Settings → Browser actions per request** controls the shared `tabs.*` and `page.*` execution budget for one Codex request. It defaults to 40, accepts 5–100, and a change applies to the next request.
 - Browser tasks snapshot a thread working tab before the request begins and retain it across follow-up requests. Opening or selecting another work tab updates that pin in the background, so changing the tab you are viewing does not pull focus back or retarget the task. An explicit user request to show or switch to a tab may foreground it.
 - After a response begins browser-tool activity, **View working tab** focuses the pinned tab and its browser window. Chat-only replies do not show the control. On an authorized normal page, a pointer-transparent illuminated frame identifies that Browser Control is operating the page; it clears when the task finishes, is stopped, or moves to another tab.
-- New-tab links opened by page actions are created in the background and become the thread working tab. Closed or discarded working tabs fail closed or reload without falling back to the currently visible tab.
+- New-tab links opened by page actions are created in the background and become the thread working tab. Discarded tabs reload in place. If a working tab is closed, the task remains active, invalidates its old element references, and can open or activate a background replacement before continuing from a fresh inspection; it never falls back to the currently visible tab.
 - Completed browser work shows a dismissible sidebar message that survives side-panel recreation. **Settings → Task completion sound** optionally plays a quiet, primed local tone; it is off by default and suppressed when reduced motion is requested.
 - Fill/select/check tools refuse passwords, payment fields, authentication codes, private keys, and similar sensitive controls.
 - Stop cancels the model turn and pending browser task without silently revoking remembered site choices.

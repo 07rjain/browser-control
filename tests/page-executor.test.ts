@@ -35,7 +35,7 @@ beforeAll(async () => {
   });
   Object.defineProperty(document, "elementFromPoint", {
     configurable: true,
-    value: () => document.querySelector("button, input, a"),
+    value: () => null,
   });
   await import("../src/content/page-executor");
 });
@@ -114,6 +114,48 @@ describe("packaged page executor", () => {
     expect(() => command({ action: "DESCRIBE", snapshotId: "old", refId: field?.refId })).toThrow(/stale/i);
   });
 
+  it("inspects and fills a contenteditable textbox", () => {
+    document.body.innerHTML = `<div contenteditable="true" role="textbox" aria-label="Chat message">Draft</div>`;
+    const editor = document.querySelector<HTMLElement>("[contenteditable]") as HTMLElement;
+    const input = vi.fn();
+    editor.addEventListener("input", input);
+    const inspection = command<{
+      snapshotId: string;
+      elements: Array<{ refId: string; label: string; role: string; value?: string }>;
+    }>({ action: "INSPECT" });
+    const field = inspection.elements.find((item) => item.label === "Chat message");
+
+    expect(field).toEqual(expect.objectContaining({ role: "textbox", value: "Draft" }));
+    expect(command({
+      action: "FILL",
+      snapshotId: inspection.snapshotId,
+      refId: field?.refId,
+      value: "What is the meaning of life?",
+      mode: "replace",
+    })).toEqual(expect.objectContaining({ filled: true, characterCount: 28 }));
+    expect(editor.textContent).toBe("What is the meaning of life?");
+    expect(input).toHaveBeenCalledOnce();
+  });
+
+  it("does not expose or fill a sensitive contenteditable field", () => {
+    document.body.innerHTML = `<div contenteditable="true" role="textbox" aria-label="Recovery code">do-not-return</div>`;
+    const inspection = command<{
+      snapshotId: string;
+      elements: Array<{ refId: string; label: string; sensitive: boolean; value?: string }>;
+    }>({ action: "INSPECT" });
+    const field = inspection.elements.find((item) => item.label === "Recovery code");
+
+    expect(field).toEqual(expect.objectContaining({ sensitive: true, value: undefined }));
+    expect(JSON.stringify(inspection)).not.toContain("do-not-return");
+    expect(() => command({
+      action: "FILL",
+      snapshotId: inspection.snapshotId,
+      refId: field?.refId,
+      value: "replacement",
+      mode: "replace",
+    })).toThrow(/sensitive/i);
+  });
+
   it("keeps references valid when an unrelated part of a dynamic page changes", async () => {
     document.body.innerHTML = `<button id="save">Save</button><div id="live-region">Idle</div>`;
     const inspection = command<{ snapshotId: string; elements: Array<{ refId: string; label: string }> }>({ action: "INSPECT" });
@@ -140,6 +182,71 @@ describe("packaged page executor", () => {
 
     const result = command<{ clicked: boolean }>({ action: "CLICK", snapshotId: inspection.snapshotId, refId: save?.refId });
     expect(result.clicked).toBe(true);
+  });
+
+  it("inspects and activates controls inside an open shadow root", () => {
+    const host = document.createElement("div");
+    host.id = "interop-outlet";
+    const shadow = host.attachShadow({ mode: "open" });
+    shadow.innerHTML = `<button aria-label="Post update">Post</button>`;
+    document.body.append(host);
+    const button = shadow.querySelector("button") as HTMLButtonElement;
+    const hitTest = vi.spyOn(document, "elementFromPoint").mockReturnValue(host);
+    const clicked = vi.fn();
+    const keydown = vi.fn();
+    button.addEventListener("click", clicked);
+    button.addEventListener("keydown", keydown);
+
+    const inspection = command<{ snapshotId: string; elements: Array<{ refId: string; label: string }> }>({ action: "INSPECT" });
+    const post = inspection.elements.find((item) => item.label === "Post update");
+    expect(post).toBeDefined();
+    expect(command({ action: "CLICK", snapshotId: inspection.snapshotId, refId: post?.refId })).toEqual(
+      expect.objectContaining({ clicked: true, label: "Post update" }),
+    );
+    expect(clicked).toHaveBeenCalledOnce();
+    expect(command({ action: "KEYPRESS", snapshotId: inspection.snapshotId, refId: post?.refId, key: "ArrowDown" })).toEqual(
+      expect.objectContaining({ dispatched: true, key: "ArrowDown" }),
+    );
+    expect(keydown).toHaveBeenCalledOnce();
+    hitTest.mockRestore();
+  });
+
+  it("omits covered controls and prioritizes a foreground shadow editor over the element cap", () => {
+    document.body.innerHTML = Array.from({ length: 80 }, (_, index) => `<button>Offscreen ${index + 1}</button>`).join("");
+    for (const button of Array.from(document.querySelectorAll("button"))) {
+      Object.defineProperty(button, "getBoundingClientRect", {
+        configurable: true,
+        value: () => ({ x: 0, y: 2_000, top: 2_000, left: 0, right: 120, bottom: 2_030, width: 120, height: 30, toJSON: () => ({}) }),
+      });
+    }
+    const covered = document.createElement("button");
+    covered.textContent = "Start a post";
+    document.body.prepend(covered);
+    const host = document.createElement("div");
+    host.id = "interop-outlet";
+    const shadow = host.attachShadow({ mode: "open" });
+    shadow.innerHTML = `<div contenteditable="true" role="textbox" aria-label="Text editor for creating content">Draft post</div>`;
+    document.body.append(host);
+    const hitTest = vi.spyOn(document, "elementFromPoint").mockReturnValue(host);
+
+    const inspection = command<{ elements: Array<{ label: string }> }>({ action: "INSPECT" });
+    expect(inspection.elements).toHaveLength(80);
+    expect(inspection.elements[0]?.label).toBe("Text editor for creating content");
+    expect(inspection.elements.map((item) => item.label)).not.toContain("Start a post");
+    hitTest.mockRestore();
+  });
+
+  it("still rejects a control when an unrelated overlay appears after inspection", () => {
+    document.body.innerHTML = `<button aria-label="Continue">Continue</button><div id="overlay"></div>`;
+    const buttonElement = document.querySelector("button") as HTMLButtonElement;
+    const overlay = document.getElementById("overlay") as HTMLDivElement;
+    const hitTest = vi.spyOn(document, "elementFromPoint").mockReturnValue(buttonElement);
+    const inspection = command<{ snapshotId: string; elements: Array<{ refId: string; label: string }> }>({ action: "INSPECT" });
+    const button = inspection.elements.find((item) => item.label === "Continue");
+    hitTest.mockReturnValue(overlay);
+
+    expect(() => command({ action: "CLICK", snapshotId: inspection.snapshotId, refId: button?.refId })).toThrow(/covered/i);
+    hitTest.mockRestore();
   });
 
   it("blocks a JavaScript-created popup during a real button click and records its URL", () => {
