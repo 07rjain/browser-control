@@ -35,6 +35,9 @@ Key features:
   checking, keypress, scrolling, history, waiting, dragging, and form submission.
 - See chronological browser activity, use short-lived element references, set a
   per-request action limit, and stop active work.
+- Copy a completed reply or fork a conversation from an earlier response.
+- Record a browser demonstration, review its steps, and save it as a local skill
+  for later matching requests. Settings can disable or delete saved skills.
 - Choose Ask every time for exact-site access and supported consequential-action
   confirmations, or explicitly enable Full access once for normal HTTP and HTTPS
   pages.
@@ -148,13 +151,15 @@ Browser Control settings can revoke access.
   dedicated Codex login; credentials remain managed by Codex outside Chrome
   extension storage.
 - Personal communications and user-generated content: prompts, responses, and
-  locally retained conversation records.
+  locally retained conversation records and reviewed local skill instructions.
 - Website content: user-attached page context, inspected visible controls, and
   bounded non-sensitive visible form values.
 - Web history or browsing activity: open-tab titles/URLs and origins used for
   user-requested browser work. Browser Control does not use the Chrome History
   API.
 - User activity: requested browser actions and approval/result activity.
+- Recorded demonstrations: the site, action type, accessible control name, and
+  only example values the user chooses to keep during review.
 - Form data: non-sensitive values used for user-requested fill/select/check and
   reviewed submission.
 
@@ -177,7 +182,9 @@ that sensitive fields and transactions are refused.
 ### Data recipients
 
 OpenAI's Codex service receives prompts and user-attached or browser-tool-returned
-context under the user's authenticated account. The publisher does not operate
+context under the user's authenticated account. It also receives the names and
+descriptions of enabled local skills, and the instructions of a selected skill
+when a matching request uses it. The publisher does not operate
 a telemetry, analytics, advertising, or transcript-storage server. Chrome Native
 Messaging between the extension and companion remains local to the computer.
 

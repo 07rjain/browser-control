@@ -13,7 +13,7 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 
-const companionVersion = "0.3.2";
+const companionVersion = "0.3.3";
 const extensionIds = [
   "mpdfhhhjgbpdpfnkjbnboebdjokfjglf",
   "fodoakcimglhplkoohggjdggdffhkdam",
