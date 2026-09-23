@@ -111,10 +111,16 @@ if (!recorderGlobal.__codexPageRecorderInstalled) {
     frameHost = host;
   }
 
+  function isCrossFrame(element: Node, name: string): boolean {
+    const view = element.ownerDocument?.defaultView as (Window & Record<string, unknown>) | null;
+    const constructor = view?.[name];
+    return typeof constructor === "function" && element instanceof (constructor as new () => Node);
+  }
+
   function isContentEditable(element: Element): boolean {
-    if (!(element instanceof HTMLElement)) return false;
+    if (!isCrossFrame(element, "HTMLElement")) return false;
     const attribute = element.getAttribute("contenteditable");
-    return element.isContentEditable || attribute === "" || attribute === "true" || attribute === "plaintext-only";
+    return (element as HTMLElement).isContentEditable || attribute === "" || attribute === "true" || attribute === "plaintext-only";
   }
 
   function rawLabel(element: Element): string {
@@ -151,21 +157,28 @@ if (!recorderGlobal.__codexPageRecorderInstalled) {
   }
 
   function rememberPassword(element: Element): void {
-    if (element instanceof HTMLInputElement && element.type === "password") passwordFields.add(element);
+    if (isCrossFrame(element, "HTMLInputElement") && (element as HTMLInputElement).type === "password") passwordFields.add(element);
   }
 
   function isSensitiveElement(element: Element): boolean {
     rememberPassword(element);
     if (passwordFields.has(element)) return true;
-    if (element instanceof HTMLInputElement && element.type === "file") return true;
-    const field = element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement || isContentEditable(element);
+    if (isCrossFrame(element, "HTMLInputElement") && (element as HTMLInputElement).type === "file") return true;
+    const field = isCrossFrame(element, "HTMLInputElement") || isCrossFrame(element, "HTMLTextAreaElement") || isCrossFrame(element, "HTMLSelectElement") || isContentEditable(element);
     if (!field) return false;
     return SENSITIVE_RECORDING_PATTERN.test(fieldHaystack(element));
   }
 
+  function isElementNode(node: EventTarget): node is Element {
+    if (typeof node !== "object" || node === null || !("nodeType" in node) || (node as Node).nodeType !== 1) return false;
+    const element = node as Element;
+    const view = element.ownerDocument?.defaultView as (Window & { Element?: unknown }) | null;
+    return typeof view?.Element === "function" && element instanceof (view.Element as new () => Element);
+  }
+
   function nearestControl(event: RecordingEvent): Element | null {
     for (const node of event.composedPath()) {
-      if (!(node instanceof Element)) continue;
+      if (!isElementNode(node)) continue;
       if (node.matches(INTERACTIVE_SELECTOR)) return node;
     }
     return null;
@@ -201,15 +214,43 @@ if (!recorderGlobal.__codexPageRecorderInstalled) {
         else role = "textbox";
       } else role = element.tagName.toLowerCase();
     }
-    return { role: cleanRole(role), label: cleanPageLabel(rawLabel(element)) };
+    const cleanedRole = cleanRole(role);
+    return { role: cleanedRole, label: cleanPageLabel(rawLabel(element)) || cleanedRole };
+  }
+
+  function fillTarget(element: Element): Element {
+    let current: Element | null = element;
+    while (current) {
+      if (current.getAttribute("role") === "combobox") return current;
+      const root = current.getRootNode();
+      current = current.parentElement ?? (root instanceof ShadowRoot ? root.host : null);
+    }
+    return element;
+  }
+
+  function collectedFieldText(element: Element): string {
+    const chunks: string[] = [];
+    const visit = (node: Element): void => {
+      if (node !== element && node.getAttribute("role") === "listbox") return;
+      const tagged = node.getAttribute("email") ?? node.getAttribute("data-email") ?? "";
+      if (tagged.trim()) chunks.push(tagged);
+      if (isCrossFrame(node, "HTMLInputElement") || isCrossFrame(node, "HTMLTextAreaElement") || isCrossFrame(node, "HTMLSelectElement")) {
+        chunks.push((node as HTMLInputElement).value);
+      } else if (node === element && isContentEditable(node)) {
+        chunks.push(node.textContent ?? "");
+      }
+      for (const child of Array.from(node.children)) visit(child);
+    };
+    visit(element);
+    return chunks.join(" ");
   }
 
   function fieldValue(element: Element): string {
-    if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement) {
-      return cleanPageLabel(element.value, 200);
-    }
-    if (isContentEditable(element)) return cleanPageLabel(element.textContent ?? "", 200);
-    return "";
+    const root = fillTarget(element);
+    const collected = collectedFieldText(root);
+    const emails = [...new Set(collected.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) ?? [])];
+    if (emails.length > 0) return cleanPageLabel(emails.join(", "), 200);
+    return cleanPageLabel(collected, 200);
   }
 
   function scheduleFill(element: Element): void {
@@ -217,13 +258,13 @@ if (!recorderGlobal.__codexPageRecorderInstalled) {
     if (existing) clearTimeout(existing);
     fillTimers.set(element, setTimeout(() => {
       fillTimers.delete(element);
-      if (!listening || isSensitiveElement(element)) {
-        if (listening && isSensitiveElement(element)) skip(element, "sensitive");
+      const target = fillTarget(element);
+      if (!listening || isSensitiveElement(element) || isSensitiveElement(target)) {
+        if (listening && (isSensitiveElement(element) || isSensitiveElement(target))) skip(target, "sensitive");
         return;
       }
-      const identity = roleAndLabel(element);
-      if (!identity.label) return;
-      report({ kind: "fill", ...identity, example: fieldValue(element) });
+      const identity = roleAndLabel(target);
+      report({ kind: "fill", ...identity, example: fieldValue(target) });
     }, 400));
   }
 
@@ -271,7 +312,6 @@ if (!recorderGlobal.__codexPageRecorderInstalled) {
       skip(target, "purchase");
       return;
     }
-    if (!identity.label) return;
     report({ kind: "click", ...identity });
   }
 
@@ -300,8 +340,8 @@ if (!recorderGlobal.__codexPageRecorderInstalled) {
       return;
     }
     if (
-      target instanceof HTMLInputElement ||
-      target instanceof HTMLTextAreaElement ||
+      isCrossFrame(target, "HTMLInputElement") ||
+      isCrossFrame(target, "HTMLTextAreaElement") ||
       isContentEditable(target)
     ) {
       scheduleFill(target);
@@ -376,8 +416,10 @@ if (!recorderGlobal.__codexPageRecorderInstalled) {
   }
 
   function asRecordingEvent(event: Event): RecordingEvent {
+    // Test-only. The page cannot set this global because the recorder runs in an isolated world.
+    const trustedEvents = (globalThis as { __codexRecorderTrustedEvents?: WeakSet<Event> }).__codexRecorderTrustedEvents;
     return {
-      isTrusted: event.isTrusted,
+      isTrusted: event.isTrusted || trustedEvents?.has(event) === true,
       type: event.type,
       composedPath: () => event.composedPath(),
       key: "key" in event && typeof event.key === "string" ? event.key : undefined,
@@ -385,17 +427,55 @@ if (!recorderGlobal.__codexPageRecorderInstalled) {
     };
   }
 
-  document.addEventListener("click", (event) => onClick(asRecordingEvent(event)), true);
-  document.addEventListener("input", (event) => onInput(asRecordingEvent(event)), true);
-  document.addEventListener("change", (event) => onInput(asRecordingEvent(event)), true);
-  document.addEventListener("keydown", (event) => onKeyDown(asRecordingEvent(event)), true);
-  document.addEventListener("submit", (event) => onSubmit(asRecordingEvent(event)), true);
-  document.addEventListener("dragstart", (event) => onDrag(asRecordingEvent(event)), true);
-  document.addEventListener("drop", (event) => onDrag(asRecordingEvent(event)), true);
-  document.addEventListener("wheel", (event) => onWheel(asRecordingEvent(event)), true);
-  document.addEventListener("focusin", (event) => {
-    if (event.target instanceof Element) rememberPassword(event.target);
-  }, true);
+  const watchedDocuments = new WeakSet<Document>();
+
+  function childDocument(frame: HTMLIFrameElement): Document | null {
+    try {
+      return frame.contentDocument;
+    } catch {
+      return null;
+    }
+  }
+
+  function attachFrame(frame: HTMLIFrameElement): void {
+    const child = childDocument(frame);
+    if (child) watchDocument(child);
+  }
+
+  function watchDocument(doc: Document): void {
+    if (!doc.documentElement || watchedDocuments.has(doc)) return;
+    watchedDocuments.add(doc);
+    doc.addEventListener("click", (event) => onClick(asRecordingEvent(event)), true);
+    doc.addEventListener("input", (event) => onInput(asRecordingEvent(event)), true);
+    doc.addEventListener("change", (event) => onInput(asRecordingEvent(event)), true);
+    doc.addEventListener("keydown", (event) => onKeyDown(asRecordingEvent(event)), true);
+    doc.addEventListener("submit", (event) => onSubmit(asRecordingEvent(event)), true);
+    doc.addEventListener("dragstart", (event) => onDrag(asRecordingEvent(event)), true);
+    doc.addEventListener("drop", (event) => onDrag(asRecordingEvent(event)), true);
+    doc.addEventListener("wheel", (event) => onWheel(asRecordingEvent(event)), true);
+    doc.addEventListener("focusin", (event) => {
+      if (event.target instanceof Element) rememberPassword(event.target);
+    }, true);
+    doc.addEventListener("load", (event) => {
+      if (event.target instanceof HTMLIFrameElement) attachFrame(event.target);
+    }, true);
+    const attachNode = (node: Node): void => {
+      if (!(node instanceof Element)) return;
+      if (node instanceof HTMLIFrameElement) attachFrame(node);
+      for (const frame of Array.from(node.querySelectorAll("iframe"))) {
+        if (frame instanceof HTMLIFrameElement) attachFrame(frame);
+      }
+    };
+    attachNode(doc.documentElement);
+    const observer = new MutationObserver((records) => {
+      for (const record of records) {
+        for (const node of record.addedNodes) attachNode(node);
+      }
+    });
+    observer.observe(doc.documentElement, { childList: true, subtree: true });
+  }
+
+  watchDocument(document);
   connect();
 }
 

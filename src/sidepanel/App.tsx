@@ -232,6 +232,9 @@ function RecordingReview({
         When to use it
         <textarea value={description} maxLength={500} rows={3} onChange={(event) => setDescription(event.target.value)} onBlur={() => onUpdate({ description })} />
       </label>
+      {recording.steps.every((step) => step.kind === "skipped") && (
+        <p className="recording-error">No page actions were captured. Cancel and record again while the recording frame is visible on the page.</p>
+      )}
       <ol className="recording-steps">
         {recording.steps.map((step) => (
           <li key={step.id} className="recording-step">
@@ -268,7 +271,7 @@ function RecordingReview({
         <button
           type="button"
           className="primary-button"
-          disabled={name.trim().length === 0 || description.trim().length === 0 || (recording.steps.length === 0 && notes.trim().length === 0)}
+          disabled={name.trim().length === 0 || description.trim().length === 0 || recording.steps.every((step) => step.kind === "skipped")}
           onClick={() => onSave({ name, description, notes })}
         >
           Save skill

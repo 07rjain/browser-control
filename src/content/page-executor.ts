@@ -21,6 +21,7 @@ interface ExecutorGlobal {
 }
 
 const executorGlobal = globalThis as typeof globalThis & ExecutorGlobal;
+let frameByDocument = new WeakMap<Document, HTMLIFrameElement>();
 
 if (!executorGlobal.__codexPageExecutorInstalled) {
   executorGlobal.__codexPageExecutorInstalled = true;
@@ -40,6 +41,8 @@ if (!executorGlobal.__codexPageExecutorInstalled) {
     "[role='tab']",
     "[role='checkbox']",
     "[role='radio']",
+    "[role='combobox']",
+    "[role='textbox']",
   ].join(",");
   const DRAG_SELECTOR = [
     "[draggable='true']",
@@ -106,10 +109,16 @@ if (!executorGlobal.__codexPageExecutorInstalled) {
     return (value ?? "").replace(/\s+/g, " ").trim().slice(0, max);
   }
 
+  function isCrossFrame(element: Node, name: string): boolean {
+    const view = element.ownerDocument?.defaultView as (Window & Record<string, unknown>) | null;
+    const constructor = view?.[name];
+    return typeof constructor === "function" && element instanceof (constructor as new () => Node);
+  }
+
   function isContentEditable(element: Element): boolean {
-    if (!(element instanceof HTMLElement)) return false;
+    if (!isCrossFrame(element, "HTMLElement")) return false;
     const attribute = element.getAttribute("contenteditable");
-    return element.isContentEditable || attribute === "" || attribute === "true" || attribute === "plaintext-only";
+    return (element as HTMLElement).isContentEditable || attribute === "" || attribute === "true" || attribute === "plaintext-only";
   }
 
   function isSensitive(element: Element): boolean {
@@ -127,7 +136,7 @@ if (!executorGlobal.__codexPageExecutorInstalled) {
   }
 
   function isVisible(element: Element): boolean {
-    if (!(element instanceof HTMLElement) && !(element instanceof SVGElement)) return false;
+    if (!isCrossFrame(element, "HTMLElement") && !isCrossFrame(element, "SVGElement")) return false;
     const style = getComputedStyle(element);
     if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) return false;
     if (element.closest('[hidden], [aria-hidden="true"]')) return false;
@@ -135,16 +144,57 @@ if (!executorGlobal.__codexPageExecutorInstalled) {
     return rect.width > 0 && rect.height > 0;
   }
 
+  function sameOriginDocument(frame: HTMLIFrameElement): Document | null {
+    try {
+      return frame.contentDocument;
+    } catch {
+      return null;
+    }
+  }
+
+  function owningFrame(element: Element): HTMLIFrameElement | null {
+    const frame = element.ownerDocument.defaultView?.frameElement;
+    if (frame instanceof HTMLIFrameElement) return frame;
+    return frameByDocument.get(element.ownerDocument) ?? null;
+  }
+
   function querySelectorAllDeep(selector: string): Element[] {
     const matches: Element[] = [];
+    const seen = new Set<Document | ShadowRoot>();
+    frameByDocument = new WeakMap();
     const visit = (root: Document | ShadowRoot): void => {
+      if (seen.has(root)) return;
+      seen.add(root);
       matches.push(...Array.from(root.querySelectorAll(selector)));
       for (const element of Array.from(root.querySelectorAll("*"))) {
         if (element.shadowRoot) visit(element.shadowRoot);
+        if (element instanceof HTMLIFrameElement) {
+          const child = sameOriginDocument(element);
+          if (!child) continue;
+          frameByDocument.set(child, element);
+          visit(child);
+        }
       }
     };
     visit(document);
     return matches;
+  }
+
+  function inaccessibleFrameCount(): number {
+    let count = 0;
+    const seen = new Set<Document | ShadowRoot>();
+    const visit = (root: Document | ShadowRoot): void => {
+      if (seen.has(root)) return;
+      seen.add(root);
+      for (const frame of Array.from(root.querySelectorAll("iframe"))) {
+        if (!(frame instanceof HTMLIFrameElement)) continue;
+        const child = sameOriginDocument(frame);
+        if (child) visit(child);
+        else count += 1;
+      }
+    };
+    visit(document);
+    return count;
   }
 
   function labelFor(element: Element): string {
@@ -311,9 +361,58 @@ if (!executorGlobal.__codexPageExecutorInstalled) {
     return resolveRef(refId);
   }
 
-  function isInViewport(element: Element): boolean {
+  function topViewportBox(element: Element): { left: number; top: number; right: number; bottom: number } {
     const rect = element.getBoundingClientRect();
-    return rect.bottom > 0 && rect.top < innerHeight && rect.right > 0 && rect.left < innerWidth;
+    let left = rect.left;
+    let top = rect.top;
+    let right = rect.right;
+    let bottom = rect.bottom;
+    let frame: HTMLIFrameElement | null = owningFrame(element);
+    while (frame instanceof HTMLElement) {
+      const frameRect = frame.getBoundingClientRect();
+      const style = getComputedStyle(frame);
+      const borderLeft = Number.parseFloat(style.borderLeftWidth) || 0;
+      const borderTop = Number.parseFloat(style.borderTopWidth) || 0;
+      left += frameRect.left + borderLeft;
+      right += frameRect.left + borderLeft;
+      top += frameRect.top + borderTop;
+      bottom += frameRect.top + borderTop;
+      frame = owningFrame(frame);
+    }
+    return { left, top, right, bottom };
+  }
+
+  function isInViewport(element: Element): boolean {
+    const box = topViewportBox(element);
+    return box.bottom > 0 && box.top < innerHeight && box.right > 0 && box.left < innerWidth;
+  }
+
+  function elementAtPoint(x: number, y: number): Element | null {
+    let currentDocument: Document = document;
+    let localX = x;
+    let localY = y;
+    let found: Element | null = null;
+    for (let depth = 0; depth < 8; depth += 1) {
+      const hit = currentDocument.elementFromPoint(localX, localY);
+      if (!hit) return found;
+      found = hit;
+      if (!(hit instanceof HTMLIFrameElement)) return hit;
+      const child = sameOriginDocument(hit);
+      if (!child) return hit;
+      const frameRect = hit.getBoundingClientRect();
+      const style = getComputedStyle(hit);
+      localX -= frameRect.left + (Number.parseFloat(style.borderLeftWidth) || 0);
+      localY -= frameRect.top + (Number.parseFloat(style.borderTopWidth) || 0);
+      currentDocument = child;
+    }
+    return found;
+  }
+
+  function inOpenDialog(element: Element): boolean {
+    const dialogSelector = "[role='dialog'], [aria-modal='true']";
+    if (element.closest(dialogSelector)) return true;
+    const frame = owningFrame(element);
+    return frame instanceof Element && Boolean(frame.closest(dialogSelector));
   }
 
   function targetOwnsHit(element: Element, covering: Element): boolean {
@@ -329,11 +428,11 @@ if (!executorGlobal.__codexPageExecutorInstalled) {
   }
 
   function hasAccessibleHitPoint(element: Element): boolean {
-    const rect = element.getBoundingClientRect();
-    const left = Math.max(0, rect.left);
-    const right = Math.min(innerWidth, rect.right);
-    const top = Math.max(0, rect.top);
-    const bottom = Math.min(innerHeight, rect.bottom);
+    const box = topViewportBox(element);
+    const left = Math.max(0, box.left);
+    const right = Math.min(innerWidth, box.right);
+    const top = Math.max(0, box.top);
+    const bottom = Math.min(innerHeight, box.bottom);
     if (right <= left || bottom <= top) return true;
 
     const width = right - left;
@@ -349,7 +448,7 @@ if (!executorGlobal.__codexPageExecutorInstalled) {
     for (const [rawX, rawY] of points) {
       const x = Math.min(innerWidth - 1, Math.max(0, rawX));
       const y = Math.min(innerHeight - 1, Math.max(0, rawY));
-      const covering = document.elementFromPoint(x, y);
+      const covering = elementAtPoint(x, y);
       if (!covering) continue;
       foundHit = true;
       if (targetOwnsHit(element, covering)) return true;
@@ -372,7 +471,14 @@ if (!executorGlobal.__codexPageExecutorInstalled) {
     refs.clear();
     snapshotId = crypto.randomUUID();
     snapshotCreatedAt = Date.now();
-    const prioritizeViewport = (left: Element, right: Element): number => Number(isInViewport(right)) - Number(isInViewport(left));
+    const prioritizeViewport = (left: Element, right: Element): number => {
+      const rank = (element: Element): number => {
+        if (inOpenDialog(element) && isInViewport(element)) return 0;
+        if (isInViewport(element)) return 1;
+        return 2;
+      };
+      return rank(left) - rank(right);
+    };
     const primary = querySelectorAllDeep(INTERACTIVE_SELECTOR)
       .filter(isVisible)
       .filter((element) => !isInViewport(element) || hasAccessibleHitPoint(element))
@@ -409,12 +515,13 @@ if (!executorGlobal.__codexPageExecutorInstalled) {
       expiresAt: snapshotCreatedAt + REF_TTL_MS,
       elements,
       truncated: candidates.length > MAX_ELEMENTS,
-      unsupportedFrames: document.querySelectorAll("iframe").length,
+      unsupportedFrames: inaccessibleFrameCount(),
     };
   }
 
   function setNativeValue(element: HTMLInputElement | HTMLTextAreaElement, value: string): void {
-    const prototype = element instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    const view = element.ownerDocument.defaultView ?? window;
+    const prototype = isCrossFrame(element, "HTMLTextAreaElement") ? view.HTMLTextAreaElement.prototype : view.HTMLInputElement.prototype;
     const setter = Object.getOwnPropertyDescriptor(prototype, "value")?.set;
     if (!setter) throw new Error("This field cannot be changed safely.");
     setter.call(element, value);
@@ -428,7 +535,7 @@ if (!executorGlobal.__codexPageExecutorInstalled) {
     if (!element.dispatchEvent(beforeInput)) throw new Error("The page rejected the field value.");
 
     element.replaceChildren();
-    if (value) element.append(document.createTextNode(value));
+    if (value) element.append(element.ownerDocument.createTextNode(value));
     element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType, data: value || null }));
   }
 
@@ -461,7 +568,7 @@ if (!executorGlobal.__codexPageExecutorInstalled) {
         const element = assertFresh(command.refId, command.snapshotId);
         assertInteractable(element);
         const contentEditable = isContentEditable(element);
-        if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || contentEditable)) {
+        if (!(isCrossFrame(element, "HTMLInputElement") || isCrossFrame(element, "HTMLTextAreaElement") || contentEditable)) {
           throw new Error("The target is not a text field.");
         }
         if (isSensitive(element)) throw new Error("Browser Control will not read or fill sensitive fields.");

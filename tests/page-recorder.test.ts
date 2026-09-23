@@ -7,7 +7,10 @@ type PortListener = (message: unknown) => void;
 let portListener: PortListener;
 const posted: unknown[] = [];
 
+const trustedEvents = new WeakSet<Event>();
+
 beforeAll(async () => {
+  (globalThis as { __codexRecorderTrustedEvents?: WeakSet<Event> }).__codexRecorderTrustedEvents = trustedEvents;
   vi.stubGlobal("chrome", {
     runtime: {
       id: "extension-id",
@@ -24,7 +27,7 @@ beforeAll(async () => {
 
 function trustedClick(target: Element): void {
   const event = new MouseEvent("click", { bubbles: true, composed: true });
-  Object.defineProperty(event, "isTrusted", { configurable: true, get: () => true });
+  trustedEvents.add(event);
   target.dispatchEvent(event);
 }
 
@@ -52,5 +55,49 @@ describe("page skill recorder", () => {
       "sensitive",
     ]);
     expect(JSON.stringify(posted)).not.toContain("password-value");
+  });
+
+  it("records a click inside a same-origin frame", async () => {
+    posted.length = 0;
+    document.body.replaceChildren();
+    portListener({ type: "START", nonce: crypto.randomUUID() });
+    const frame = document.createElement("iframe");
+    document.body.append(frame);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const button = frame.contentDocument?.createElement("button");
+    expect(button).toBeTruthy();
+    button!.textContent = "Send";
+    frame.contentDocument?.body.append(button as HTMLButtonElement);
+    trustedClick(button as HTMLButtonElement);
+
+    const steps = posted.filter((message) => (message as { type?: string }).type === "STEP") as Array<{ step: { kind: string; label?: string } }>;
+    expect(steps.map((message) => message.step.label)).toContain("Send");
+  });
+
+  it("records the email chip inside a recipient combobox", async () => {
+    posted.length = 0;
+    document.body.replaceChildren();
+    portListener({ type: "START", nonce: crypto.randomUUID() });
+    document.body.innerHTML = `
+      <div role="combobox" aria-label="To recipients">
+        <span email="rishabh@example.com"></span>
+        <input aria-label="To" />
+        <div role="listbox"><span email="other@example.com"></span></div>
+      </div>
+    `;
+    const field = document.querySelector("input");
+    expect(field).toBeTruthy();
+    const event = new Event("input", { bubbles: true });
+    trustedEvents.add(event);
+    field?.dispatchEvent(event);
+    await new Promise((resolve) => setTimeout(resolve, 450));
+
+    const steps = posted.filter((message) => (message as { type?: string }).type === "STEP") as Array<{ step: { kind: string; role?: string; label?: string; example?: string } }>;
+    expect(steps.at(-1)?.step).toMatchObject({
+      kind: "fill",
+      role: "combobox",
+      label: "To recipients",
+      example: "rishabh@example.com",
+    });
   });
 });

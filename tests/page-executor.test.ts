@@ -368,4 +368,27 @@ describe("packaged page executor", () => {
     expect(events).toEqual(["dragstart", "dragenter", "dragover", "drop", "dragend"]);
     hitTest.mockRestore();
   });
+
+  it("keeps a compose field inside a same-origin frame when the inbox exceeds the control cap", () => {
+    const rows = Array.from({ length: 81 }, (_, index) => `<button>Row ${index}</button>`).join("");
+    document.body.innerHTML = `${rows}<div role="dialog"><iframe id="compose"></iframe><button>Send</button></div>`;
+    const frame = document.querySelector<HTMLIFrameElement>("#compose");
+    const frameWindow = frame?.contentDocument?.defaultView;
+    if (frameWindow) {
+      Object.defineProperty(frameWindow.HTMLElement.prototype, "getBoundingClientRect", {
+        configurable: true,
+        value: () => ({ x: 0, y: 0, top: 0, left: 0, right: 120, bottom: 30, width: 120, height: 30, toJSON: () => ({}) }),
+      });
+    }
+    const field = frame?.contentDocument?.createElement("textarea");
+    expect(field).toBeTruthy();
+    field?.setAttribute("aria-label", "Message Body");
+    frame?.contentDocument?.body.append(field as HTMLTextAreaElement);
+
+    const inspection = command<{ elements: Array<{ label: string }>; truncated: boolean; unsupportedFrames: number }>({ action: "INSPECT" });
+    expect(inspection.truncated).toBe(true);
+    expect(inspection.unsupportedFrames).toBe(0);
+    expect(inspection.elements[0]?.label).toBe("Send");
+    expect(inspection.elements.map((element) => element.label)).toContain("Message Body");
+  });
 });

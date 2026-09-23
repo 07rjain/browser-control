@@ -59,4 +59,31 @@ describe("recorded skill documents", () => {
     const again = withRecorderLocation({ kind: "scroll", direction: "down" }, location);
     expect(appendRecordingStep([down], again).steps).toHaveLength(1);
   });
+
+  it("keeps a demonstrated email address and does not erase it when the field clears", () => {
+    const recipient = withRecorderLocation({
+      kind: "fill",
+      role: "combobox",
+      label: "To recipients",
+      example: "rishabh@example.com",
+    }, location);
+    expect(recipient).toMatchObject({ kind: "fill", keepExample: true });
+    const cleared = withRecorderLocation({
+      kind: "fill",
+      role: "combobox",
+      label: "To recipients",
+      example: "",
+    }, location);
+    const typed = appendRecordingStep([recipient], cleared);
+    expect(typed.steps[0]).toMatchObject({ example: "rishabh@example.com", keepExample: true });
+
+    const document = buildSkillDocument({
+      name: "mail to rishabh",
+      description: "mail to rishabh",
+      notes: "",
+      steps: typed.steps,
+    });
+    expect(document.markdown).toContain('with "rishabh@example.com"');
+    expect(document.markdown).not.toContain("using the value from the current request. Example from the demonstration: \"rishabh@example.com\"");
+  });
 });

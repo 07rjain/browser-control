@@ -116,6 +116,11 @@ async function hasRememberedControlAccess(originPattern: string): Promise<boolea
   return chrome.permissions.contains({ origins: [originPattern] });
 }
 
+async function focusedActiveTab(): Promise<chrome.tabs.Tab | undefined> {
+  const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  return tab;
+}
+
 async function activeBrowserTask(): Promise<boolean> {
   const stored = await chrome.storage.session.get(BROWSER_TASKS_KEY);
   const tasks = Array.isArray(stored[BROWSER_TASKS_KEY]) ? stored[BROWSER_TASKS_KEY] as unknown[] : [];
@@ -249,7 +254,7 @@ export function startSkillRecording(description: string): Promise<RecordingView>
     if (!cleaned) throw new Error("Describe when this skill should be used.");
     if (await loadSession()) throw new Error("Finish or cancel the skill recording that is already open.");
     if (await activeBrowserTask()) throw new Error("Finish or stop the browser task before recording a skill.");
-    const [active] = await chrome.tabs.query({ active: true, currentWindow: true });
+    const active = await focusedActiveTab();
     let session: RecordingSession = {
       status: "recording",
       nonce: crypto.randomUUID(),
@@ -297,7 +302,7 @@ export function grantSkillRecording(originPattern: string, granted: boolean): Pr
     const allowed = await chrome.permissions.contains({ origins: [originPattern] });
     if (!allowed) throw new Error("Chrome did not grant that site.");
     await rememberOrigin(originPattern);
-    const [active] = await chrome.tabs.query({ active: true, currentWindow: true });
+    const active = await focusedActiveTab();
     const next = active?.id !== undefined ? await followTab(session, active.id) : session;
     await saveSession(next);
     return publish(next);
@@ -336,8 +341,8 @@ export function saveSkillRecording(
   return enqueue(async () => {
     const session = await loadSession();
     if (!session || session.status !== "review") throw new Error("Review the recording before saving it.");
-    if (session.steps.length === 0 && session.notes.trim().length === 0) {
-      throw new Error("Record at least one step or add a note before saving.");
+    if (!session.steps.some((step) => step.kind !== "skipped")) {
+      throw new Error("No page actions were captured. Record the task while the recording frame is visible, then stop.");
     }
     const document = previewSkillDocument(session);
     if (!document.preview) throw new Error(document.previewError || "This recording cannot be saved.");
@@ -373,7 +378,12 @@ export function noteRecordingNavigation(tabId: number, url: string | undefined):
   if (!url) return;
   void enqueue(async () => {
     const session = await loadSession();
-    if (!session || session.status !== "recording" || session.observedTabId !== tabId) return;
+    if (!session || session.status !== "recording") return;
+    if (session.observedTabId !== undefined && session.observedTabId !== tabId) return;
+    if (session.observedTabId === undefined) {
+      const active = await focusedActiveTab();
+      if (active?.id !== tabId) return;
+    }
     const next = await followTab(session, tabId);
     await saveSession(next);
     publish(next);

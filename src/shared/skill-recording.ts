@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
   cleanPageLabel,
   cleanSkillNotes,
+  containsEmailAddress,
   defaultSkillName,
   isConsequentialRecordingText,
   quotePageText,
@@ -127,6 +128,9 @@ function renderStoredStep(step: StoredRecordingStep): string {
     case "click":
       return `On ${where}, call page.inspect and click the control with role ${quotePageText(step.role)} and label ${quotePageText(step.label)}.${step.consequential ? " This can send, submit, or delete. Follow the task permission mode before doing it." : ""}`;
     case "fill":
+      if (step.keepExample && step.example && containsEmailAddress(step.example)) {
+        return `On ${where}, call page.inspect and fill the control with role ${quotePageText(step.role)} and label ${quotePageText(step.label)} with ${quotePageText(step.example)}.`;
+      }
       return step.keepExample && step.example
         ? `On ${where}, call page.inspect and fill the control with role ${quotePageText(step.role)} and label ${quotePageText(step.label)} using the value from the current request. Example from the demonstration: ${quotePageText(step.example)}.`
         : `On ${where}, call page.inspect and fill the control with role ${quotePageText(step.role)} and label ${quotePageText(step.label)} using the value from the current request.`;
@@ -218,7 +222,7 @@ export function withRecorderLocation(
         role: step.role,
         label: cleanPageLabel(step.label),
         example: cleanPageLabel(step.example, 200),
-        keepExample: false,
+        keepExample: containsEmailAddress(step.example),
       };
     case "select":
       return { ...base, kind: "select", role: step.role, label: cleanPageLabel(step.label), option: cleanPageLabel(step.option) };
@@ -251,8 +255,9 @@ export function appendRecordingStep(steps: StoredRecordingStep[], next: StoredRe
     last.role === next.role &&
     last.label === next.label
   ) {
+    const example = next.example.trim() ? next.example : last.example;
     const merged = steps.slice(0, -1);
-    merged.push({ ...last, example: next.example, keepExample: last.keepExample });
+    merged.push({ ...last, example, keepExample: last.keepExample || containsEmailAddress(example) });
     return { steps: merged, truncated: false };
   }
   if (

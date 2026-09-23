@@ -59,6 +59,12 @@ export function publicLocation(value: string): { origin: string; path: string } 
   }
 }
 
+const EMAIL_ADDRESS_PATTERN = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
+
+export function containsEmailAddress(value: string): boolean {
+  return EMAIL_ADDRESS_PATTERN.test(value);
+}
+
 export function isSensitiveRecordingText(value: string): boolean {
   return SENSITIVE_RECORDING_PATTERN.test(value);
 }
