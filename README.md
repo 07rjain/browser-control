@@ -2,7 +2,7 @@
 
 A Chrome side-panel extension powered by the user's ChatGPT Codex subscription through the official Codex App Server interface.
 
-The repository contains the implemented MVP plus the approved supervised browser-control milestone: sidebar chat, managed ChatGPT sign-in, model selection, explicit current-page attachment, seven tab tools, and eleven typed page tools. It does not contain remote control, unattended automation, arbitrary JavaScript/selectors, connectors, analytics, or ChatGPT cookie scraping.
+The repository contains the implemented MVP plus the approved supervised browser-control milestone: sidebar chat, managed ChatGPT sign-in, model selection, explicit current-page attachment, seven tab tools, eleven typed page tools, and message Copy/Fork actions. It does not contain remote control, unattended automation, arbitrary JavaScript/selectors, connectors, analytics, publisher API keys, or ChatGPT cookie scraping.
 
 ## Project status
 
@@ -131,6 +131,7 @@ Use a disposable test page or test account when an action could send, publish, d
 - Sign in with ChatGPT, return to the panel, and verify the account state. Then sign out and verify credentials are not exposed in extension storage or logs.
 - Open Settings, change the model, send a message, start a new chat, and verify the selected model and thread behavior.
 - Send messages in two chats, open **History**, switch between them, and verify both transcripts and their matching browser-activity dropdowns are restored after closing and reopening the side panel.
+- On a completed assistant response, verify **Copy** preserves Markdown. Fork an earlier response, continue the fork, and confirm History retains an unchanged original plus an independently continued fork.
 - Stream a response, press **Stop**, retry, and verify reconnecting does not duplicate a message or tool action.
 - Attach a normal `http` or `https` page, inspect the preview, remove it, and verify no page content is shared before attachment.
 - Attempt attachment on `chrome://extensions` and verify the extension reports the protected-page limitation cleanly.
@@ -201,7 +202,7 @@ No host access is granted at installation. Full access can request the manifest'
 
 **Native host not found:** run `npm run install:host:mac`, confirm the extension ID above, then fully reload the extension.
 
-**Codex not found:** make sure `which codex` succeeds before running the host installer; the installer records its absolute path.
+**Codex not found:** set `CODEX_BIN` to the Codex executable or make sure `which codex` succeeds before running the host installer. The installer records the resolved absolute path.
 
 **Cannot attach a page:** Chrome blocks scripting on internal pages such as `chrome://extensions`. Open a normal `http` or `https` page and click the toolbar icon again before attaching.
 

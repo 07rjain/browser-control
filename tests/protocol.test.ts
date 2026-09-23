@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { isSafeHttpUrl, uiRequestSchema } from "../src/shared/protocol";
+import { isSafeHttpUrl, sanitizeMarkdownUrl, uiRequestSchema } from "../src/shared/protocol";
 import { dynamicToolCallSchema, parseToolArguments } from "../src/background/tab-tools";
 import {
   browserPermissionModeSchema,
   browserTaskActionLimitSchema,
   DEFAULT_BROWSER_PERMISSION_MODE,
   DEFAULT_BROWSER_TASK_ACTION_LIMIT,
+  looksSensitiveField,
   normalizeBrowserPermissionMode,
   normalizeBrowserTaskActionLimit,
   pageToolCallSchema,
@@ -36,6 +37,17 @@ describe("extension boundary validation", () => {
     expect(isSafeHttpUrl("http://localhost:3000")).toBe(true);
     expect(isSafeHttpUrl("javascript:alert(1)")).toBe(false);
     expect(isSafeHttpUrl("chrome://settings")).toBe(false);
+    expect(sanitizeMarkdownUrl("https://example.com/docs")).toBe("https://example.com/docs");
+    expect(sanitizeMarkdownUrl("/relative")).toBe("");
+    expect(sanitizeMarkdownUrl("javascript:alert(1)")).toBe("");
+    expect(sanitizeMarkdownUrl("data:text/html,hi")).toBe("");
+  });
+
+  it("classifies token and API key fields as sensitive", () => {
+    expect(looksSensitiveField(["text", "api_key"])).toBe(true);
+    expect(looksSensitiveField(["hidden", "access-token"])).toBe(true);
+    expect(looksSensitiveField(["text", "authorization"])).toBe(true);
+    expect(looksSensitiveField(["text", "username"])).toBe(false);
   });
 
   it("rejects empty chat messages", () => {
@@ -47,6 +59,15 @@ describe("extension boundary validation", () => {
       text: "   ",
     });
     expect(result.success).toBe(false);
+  });
+
+  it("validates conversation fork requests", () => {
+    expect(uiRequestSchema.safeParse({
+      type: "CHAT_FORK",
+      requestId: crypto.randomUUID(),
+      threadId: "thread-1",
+      lastTurnId: "turn-1",
+    }).success).toBe(true);
   });
 
   it("accepts only a specific conversation for working-tab focus", () => {

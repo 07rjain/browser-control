@@ -204,6 +204,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .message pre code { padding: 0; background: none; }
 .message a { color: #3972c7; text-underline-offset: 2px; }
 .message-failed { opacity: 0.65; }
+.message-actions { display: flex; align-items: center; gap: 3px; margin-top: 8px; }
+.message-actions button { min-height: 28px; display: inline-flex; align-items: center; gap: 5px; padding: 4px 7px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); cursor: pointer; font-size: 10px; font-weight: 650; }
+.message-actions button:hover { background: var(--soft); color: var(--text); }
+.message-actions button:disabled { opacity: 0.4; cursor: default; }
 .turn-block { min-width: 0; }
 .thinking { display: inline-flex; gap: 4px; padding: 8px 0; }
 .thinking i { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); animation: pulse 1.2s infinite ease-in-out; }

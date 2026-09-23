@@ -35,6 +35,11 @@ export const uiRequestSchema = z.discriminatedUnion("type", [
   requestBase.extend({ type: z.literal("CHAT_START"), model: z.string().min(1).max(120).optional() }),
   requestBase.extend({ type: z.literal("CHAT_RESUME"), threadId: z.string().min(1), model: z.string().min(1).max(120).optional() }),
   requestBase.extend({
+    type: z.literal("CHAT_FORK"),
+    threadId: z.string().min(1),
+    lastTurnId: z.string().min(1),
+  }),
+  requestBase.extend({
     type: z.literal("CHAT_SEND"),
     threadId: z.string().min(1),
     text: z.string().trim().min(1).max(80_000),
@@ -109,4 +114,8 @@ export function isSafeHttpUrl(value: string): boolean {
   } catch {
     return false;
   }
+}
+
+export function sanitizeMarkdownUrl(value: string): string {
+  return isSafeHttpUrl(value) ? new URL(value).href : "";
 }

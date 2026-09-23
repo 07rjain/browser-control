@@ -195,9 +195,8 @@ async function waitForPopupGuardQuiet(tabId: number, guardId: string): Promise<P
 }
 
 async function activeTarget(tabId?: number): Promise<PageTarget> {
-  let tab = tabId === undefined
-    ? (await chrome.tabs.query({ active: true, currentWindow: true }))[0]
-    : await chrome.tabs.get(tabId);
+  if (tabId === undefined) throw new Error("This browser task has no working tab.");
+  let tab = await chrome.tabs.get(tabId);
   if (!tab?.id) throw new Error("The task's working tab is no longer available.");
   const resolvedTabId = tab.id;
   if (tab.discarded) {
@@ -301,9 +300,11 @@ export async function inspectActivePage(call: PageToolCall, tabId?: number): Pro
 export async function describePageTarget(call: PageToolCall, refreshExpired = false, taskTabId?: number): Promise<PageTargetDescription> {
   const args = call.tool === "click"
     ? clickArgumentsSchema.parse(call.arguments)
-    : call.tool === "keypress"
-      ? keypressArgumentsSchema.parse(call.arguments)
-      : submitArgumentsSchema.parse(call.arguments);
+    : call.tool === "fill"
+      ? fillArgumentsSchema.parse(call.arguments)
+      : call.tool === "keypress"
+        ? keypressArgumentsSchema.parse(call.arguments)
+        : submitArgumentsSchema.parse(call.arguments);
   return withRef<PageTargetDescription>(args.ref, refreshExpired ? "REVALIDATE" : "DESCRIBE", undefined, taskTabId);
 }
 
@@ -317,6 +318,9 @@ export async function executePageTool(call: PageToolCall, taskTabId?: number): P
         throw new Error("The page element does not belong to this task's working tab. Inspect the working tab again.");
       }
       const guardId = crypto.randomUUID();
+      const existingTabIds = new Set(
+        (await chrome.tabs.query({})).flatMap((tab) => (tab.id === undefined ? [] : [tab.id])),
+      );
       await installPopupGuard(args.ref.tabId, guardId);
       let result: Record<string, unknown>;
       let popup: PopupGuardReport;
@@ -332,7 +336,11 @@ export async function executePageTool(call: PageToolCall, taskTabId?: number): P
       } finally {
         popup = await waitForPopupGuardQuiet(args.ref.tabId, guardId);
       }
-      if (clickError && popup.attempted === 0 && !popup.collectionFailed) throw clickError;
+      const createdTabs = (await chrome.tabs.query({})).flatMap((tab) => {
+        if (tab.id === undefined || existingTabIds.has(tab.id)) return [];
+        return [{ id: tab.id, url: tab.url ?? "", title: tab.title ?? "", active: tab.active === true }];
+      });
+      if (clickError && popup.attempted === 0 && createdTabs.length === 0 && !popup.collectionFailed) throw clickError;
       const tab = await chrome.tabs.get(args.ref.tabId).catch(() => undefined);
       return {
         ...result,
@@ -340,8 +348,9 @@ export async function executePageTool(call: PageToolCall, taskTabId?: number): P
         title: tab?.title ?? "",
         status: tab?.status ?? "unavailable",
         tabUnavailable: tab === undefined,
-        popupAttempts: popup.attempted,
+        popupAttempts: Math.max(popup.attempted, createdTabs.length),
         popupUrls: popup.urls,
+        createdTabs,
         popupBlocked: popup.collectionFailed === true || popup.attempted > popup.urls.length,
         popupCollectionFailed: popup.collectionFailed === true,
       };
@@ -415,7 +424,7 @@ export async function executePageTool(call: PageToolCall, taskTabId?: number): P
   }
 }
 
-export async function currentControlOrigin(tabId?: number): Promise<{ tabId: number; origin: string; originPattern: string }> {
+export async function currentControlOrigin(tabId: number): Promise<{ tabId: number; origin: string; originPattern: string }> {
   const target = await activeTarget(tabId);
   return { tabId: target.tabId, origin: target.origin, originPattern: target.originPattern };
 }

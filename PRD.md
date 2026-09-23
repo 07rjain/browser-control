@@ -238,6 +238,19 @@ Chrome documents that `chrome.tabs` can create, modify, and rearrange tabs, whil
 - A completed browser task produces a dismissible sidebar notice. An off-by-default local completion tone can be enabled in Settings.
 - Stop cancels the Codex turn, pending page action, and pending confirmation. It does not revoke an exact-origin grant the user chose to remember. Permission-mode changes apply only to the next browser task.
 - Service-worker suspension, reconnect, or retry cannot silently repeat a completed action.
+
+### Epic H — Message actions
+
+#### Requirements
+
+- Completed assistant messages expose Copy and Fork controls. Streaming, failed, and browser-tool output blocks do not expose these actions.
+- Copy preserves the assistant's original Markdown and provides a short local success state.
+- Fork uses Codex App Server `thread/fork` with the selected response's turn ID, opens the returned persistent thread, retains the original conversation in History, and copies the original thread's working-tab pin without foregrounding it.
+
+#### Acceptance criteria
+
+- Copy works from a direct click and does not require reading clipboard contents.
+- Forking through an earlier response produces an independently continuable history entry while later original turns remain only in the original conversation.
 - The visible tab is snapshotted as the thread working tab before a turn begins. Page tools and permission resumes remain bound to that tab even when the user changes tabs, and the pin persists across follow-up turns until explicitly replaced or closed.
 - Closing the pinned working tab does not cancel the user-started turn. The task clears its stale tab and origin binding, reports a recoverable tool result, and may use `tabs.open` or `tabs.activate` to select a background replacement before re-inspecting and continuing. It never retargets whichever tab the user happens to be viewing, reuses closed-tab element references, or blindly repeats a consequential action with an uncertain outcome. Only the explicit Stop control cancels the browser task.
 - The last safe `http` or `https` working URL may be retained in session storage for the active task solely as a recovery hint; it is subject to the same short-lived task cleanup and is not added to telemetry or remote storage.
@@ -381,6 +394,11 @@ Do not request persistent required `<all_urls>`, `history`, `bookmarks`, `downlo
 - Deliver inspect/click/scroll/history/wait first, then fields and permission-mode-governed submission.
 - Validate stale references, sensitive-field refusal, permission revocation, Stop, form preview expiry, and Chrome MV3 restart behavior.
 - Connectors remain blocked until this phase passes and a separate connector PRD is approved.
+
+### Phase 5 — Message actions
+
+- Add Copy and per-turn Codex thread forking with local history integration.
+- Validate copy fidelity, fork independence, local history integration, and companion compatibility before release.
 
 ### MVP release criterion
 

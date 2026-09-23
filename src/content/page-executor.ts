@@ -123,7 +123,7 @@ if (!executorGlobal.__codexPageExecutorInstalled) {
       element.getAttribute("aria-label") ?? "",
       element.getAttribute("placeholder") ?? "",
     ].join(" ");
-    return /(password|passcode|one.?time|otp|verification.?code|credit.?card|card.?number|cc-|cvv|cvc|security.?code|private.?key|secret|recovery|social.?security|ssn|aadhaar|pan.?number)/i.test(haystack);
+    return /(password|passcode|one.?time|otp|verification.?code|credit.?card|card.?number|cc-|cvv|cvc|security.?code|private.?key|secret|recovery|social.?security|ssn|aadhaar|pan.?number|api[-_]?key|access[-_]?token|refresh[-_]?token|id[-_]?token|auth[-_]?token|bearer|authorization)/i.test(haystack);
   }
 
   function isVisible(element: Element): boolean {
@@ -214,17 +214,29 @@ if (!executorGlobal.__codexPageExecutorInstalled) {
       action = "";
     }
     const fields: Array<{ name: string; value: string; sensitive: boolean }> = [];
-    for (const control of Array.from(form.elements).slice(0, 30)) {
+    const seen = new Set<Element>();
+    for (const control of Array.from(form.elements)) {
       if (!(control instanceof HTMLInputElement || control instanceof HTMLTextAreaElement || control instanceof HTMLSelectElement)) continue;
+      if (!isSensitive(control)) continue;
+      fields.push({
+        name: text(control.name || control.id || labelFor(control), 120) || "sensitive field",
+        value: "[sensitive value hidden]",
+        sensitive: true,
+      });
+      seen.add(control);
+    }
+    for (const control of Array.from(form.elements)) {
+      if (fields.length >= 30) break;
+      if (!(control instanceof HTMLInputElement || control instanceof HTMLTextAreaElement || control instanceof HTMLSelectElement)) continue;
+      if (seen.has(control)) continue;
       if (control instanceof HTMLInputElement && control.type === "hidden") continue;
       if (!isVisible(control)) continue;
       const name = text(control.name || control.id || labelFor(control), 120);
       if (!name) continue;
-      const sensitive = isSensitive(control);
       fields.push({
         name,
-        value: sensitive ? "[sensitive value hidden]" : text(control.value, 300),
-        sensitive,
+        value: text(control.value, 300),
+        sensitive: false,
       });
     }
     return { action, method: (form.method || "get").toUpperCase(), fields };
@@ -439,6 +451,7 @@ if (!executorGlobal.__codexPageExecutorInstalled) {
       case "CLICK": {
         const element = assertFresh(command.refId, command.snapshotId);
         assertInteractable(element);
+        if (isSensitive(element)) throw new Error("Browser Control will not interact with sensitive fields.");
         const before = location.href;
         (element as HTMLElement).focus({ preventScroll: true });
         (element as HTMLElement).click();
@@ -505,6 +518,7 @@ if (!executorGlobal.__codexPageExecutorInstalled) {
       case "KEYPRESS": {
         const element = assertFresh(command.refId, command.snapshotId) as HTMLElement;
         assertInteractable(element);
+        if (isSensitive(element)) throw new Error("Browser Control will not interact with sensitive fields.");
         element.focus({ preventScroll: true });
         if (command.key === "Tab") {
           const focusable = querySelectorAllDeep("a[href],button,input,textarea,select,[tabindex]:not([tabindex='-1'])")
@@ -554,7 +568,7 @@ if (!executorGlobal.__codexPageExecutorInstalled) {
   }
 
   chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {
-    if (sender.id !== chrome.runtime.id || !message || typeof message !== "object") return false;
+    if (sender.id !== chrome.runtime.id || sender.tab !== undefined || !message || typeof message !== "object") return false;
     const command = message as Partial<ExecutorCommand>;
     if (command.type !== "CODEX_PAGE_EXECUTOR" || typeof command.action !== "string") return false;
     try {

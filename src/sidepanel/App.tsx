@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { PageAttachment, SidebarEvent, UiResponse } from "../shared/protocol";
+import { isSafeHttpUrl, sanitizeMarkdownUrl, type PageAttachment, type SidebarEvent, type UiResponse } from "../shared/protocol";
 import {
   BROWSER_PERMISSION_MODE_KEY,
   BROWSER_TASK_ACTION_LIMIT_KEY,
@@ -224,6 +224,8 @@ export default function App() {
   const [hydrated, setHydrated] = useState(false);
   const [retryPayload, setRetryPayload] = useState<RetryPayload | null>(null);
   const [pendingPageOrigin, setPendingPageOrigin] = useState<string | null>(null);
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
+  const [forkingMessageId, setForkingMessageId] = useState<string | null>(null);
   const transcriptRef = useRef<HTMLDivElement>(null);
   const threadReadyRef = useRef(false);
   const inFlightPayloadRef = useRef<RetryPayload | null>(null);
@@ -347,7 +349,8 @@ export default function App() {
   }, [messages, toolApproval, toolPermission]);
 
   useEffect(() => {
-    const listener = (message: SidebarEvent) => {
+    const listener = (message: SidebarEvent, sender: chrome.runtime.MessageSender) => {
+      if (sender.id !== chrome.runtime.id || sender.tab !== undefined) return;
       if (message?.source !== "codex-sidebar-background") return;
       switch (message.event) {
         case "bridge.status":
@@ -636,6 +639,61 @@ export default function App() {
   const retryLastMessage = async () => {
     if (!retryPayload || streaming) return;
     await sendChatMessage(retryPayload, false);
+  };
+
+  const copyMessage = async (message: ChatMessage) => {
+    try {
+      await navigator.clipboard.writeText(message.text);
+    } catch {
+      const textarea = document.createElement("textarea");
+      textarea.value = message.text;
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.append(textarea);
+      textarea.select();
+      const copied = document.execCommand("copy");
+      textarea.remove();
+      if (!copied) {
+        setError("Unable to copy this response. Check the extension's clipboard access.");
+        return;
+      }
+    }
+    setCopiedMessageId(message.id);
+    window.setTimeout(() => setCopiedMessageId((current) => current === message.id ? null : current), 1_500);
+  };
+
+  const forkConversation = async (message: ChatMessage) => {
+    if (!threadId || streaming || message.streaming || message.failed) return;
+    const messageIndex = messages.findIndex((item) => item.id === message.id);
+    if (messageIndex < 0) return;
+    setForkingMessageId(message.id);
+    setError(null);
+    try {
+      const result = await sendRequest<{ threadId: string }>({
+        type: "CHAT_FORK",
+        threadId,
+        lastTurnId: message.id,
+      });
+      const forkedMessages = messages.slice(0, messageIndex + 1).map((item) => ({ ...item, streaming: false }));
+      const forkedMessageIds = new Set(forkedMessages.map((item) => item.id));
+      const forkedStatuses = toolStatuses.filter((status) => status.turnId && forkedMessageIds.has(status.turnId));
+      const original = createConversationRecord(currentConversationId, threadId, messages, toolStatuses);
+      setConversationHistory((current) => upsertConversation(current, original));
+      setCurrentConversationId(crypto.randomUUID());
+      setThreadId(result.threadId);
+      threadReadyRef.current = true;
+      setMessages(forkedMessages);
+      setToolStatuses(forkedStatuses);
+      setRetryPayload(null);
+      setAttachment(null);
+      setCompletionNotice(null);
+      setHistoryOpen(false);
+      setMenuOpen(false);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to fork this conversation.");
+    } finally {
+      setForkingMessageId(null);
+    }
   };
 
   const stop = async () => {
@@ -1053,10 +1111,14 @@ export default function App() {
                     message.text ? (
                       <ReactMarkdown
                         remarkPlugins={[remarkGfm]}
+                        urlTransform={sanitizeMarkdownUrl}
                         components={{
-                          a: ({ children, ...props }) => (
-                            <a {...props} target="_blank" rel="noreferrer noopener">{children}</a>
-                          ),
+                          img: () => null,
+                          a: ({ children, href, title }) => {
+                            const safeHref = href && isSafeHttpUrl(href) ? href : undefined;
+                            if (!safeHref) return <span>{children}</span>;
+                            return <a href={safeHref} title={title} target="_blank" rel="noreferrer noopener">{children}</a>;
+                          },
                         }}
                       >
                         {message.text}
@@ -1066,6 +1128,21 @@ export default function App() {
                     )
                   ) : (
                     <p>{message.text}</p>
+                  )}
+                  {message.role === "assistant" && message.text && !message.streaming && !message.failed && (
+                    <div className="message-actions" aria-label="Response actions">
+                      <button type="button" onClick={() => void copyMessage(message)} title="Copy response">
+                        <span aria-hidden="true">▣</span> {copiedMessageId === message.id ? "Copied" : "Copy"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void forkConversation(message)}
+                        disabled={!threadId || Boolean(forkingMessageId) || streaming}
+                        title="Fork conversation from this response"
+                      >
+                        <span aria-hidden="true">⑂</span> {forkingMessageId === message.id ? "Forking…" : "Fork"}
+                      </button>
+                    </div>
                   )}
                 </article>}
               </div>

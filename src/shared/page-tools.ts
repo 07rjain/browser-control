@@ -177,7 +177,13 @@ export function originPatternForUrl(value: string): string {
 
 const blockedActionPattern = /\b(buy|checkout|pay|purchase|place order|confirm order|transfer|send money|bet|wager)\b/i;
 const blockedUrlPattern = /\/(checkout|payment|purchase|order-confirmation)(?:\/|$|[?#])/i;
+const sensitiveFieldPattern =
+  /(password|passcode|one.?time|otp|verification.?code|credit.?card|card.?number|cc-|cvv|cvc|security.?code|private.?key|secret|recovery|social.?security|ssn|aadhaar|pan.?number|api[-_]?key|access[-_]?token|refresh[-_]?token|id[-_]?token|auth[-_]?token|bearer|authorization)/i;
 
 export function isBlockedConsequentialTarget(label: string, url?: string): boolean {
   return blockedActionPattern.test(label) || (url ? blockedUrlPattern.test(url) : false);
+}
+
+export function looksSensitiveField(parts: Array<string | null | undefined>): boolean {
+  return sensitiveFieldPattern.test(parts.filter((part): part is string => Boolean(part && part.trim())).join(" "));
 }

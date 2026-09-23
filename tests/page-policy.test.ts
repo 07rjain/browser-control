@@ -4,7 +4,7 @@ import { decidePageAction, type PageTargetDescription } from "../src/background/
 
 const ref = { id: "e1", snapshotId: "snapshot-1", tabId: 1, origin: "https://example.com" };
 
-function call(tool: "click" | "submit" | "keypress", args: Record<string, unknown>) {
+function call(tool: "click" | "fill" | "submit" | "keypress", args: Record<string, unknown>) {
   return pageToolCallSchema.parse({
     requestId: 1,
     threadId: "thread-1",
@@ -107,5 +107,18 @@ describe("page action policy", () => {
     expect(decidePageAction(call("keypress", { key: "Tab" }), target({ sensitive: true }), "ask")).toMatchObject({ decision: "refuse" });
     expect(decidePageAction(call("click", {}), target({ label: "Buy now" }), "full")).toMatchObject({ decision: "refuse" });
     expect(decidePageAction(call("keypress", { key: "Tab" }), target({ sensitive: true }), "full")).toMatchObject({ decision: "refuse" });
+  });
+
+  it("refuses clicks and fills on sensitive targets", () => {
+    expect(decidePageAction(call("click", {}), target({ tag: "input", role: "textbox", inputType: "password", sensitive: true, href: undefined }), "ask"))
+      .toMatchObject({ decision: "refuse" });
+    expect(decidePageAction(call("click", {}), target({ tag: "input", role: "button", inputType: "file", sensitive: true, href: undefined }), "full"))
+      .toMatchObject({ decision: "refuse" });
+    expect(decidePageAction(call("fill", { value: "secret" }), target({ tag: "input", role: "textbox", inputType: "text", sensitive: true, href: undefined }), "full"))
+      .toMatchObject({ decision: "refuse" });
+    expect(decidePageAction(call("fill", { value: "ok" }), undefined, "full"))
+      .toMatchObject({ decision: "refuse" });
+    expect(decidePageAction(call("fill", { value: "Ada" }), target({ tag: "input", role: "textbox", href: undefined }), "full"))
+      .toEqual({ decision: "allow" });
   });
 });

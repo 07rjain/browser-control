@@ -53,6 +53,7 @@ const loginResponseSchema = z.object({
   authUrl: z.string().url(),
 });
 const threadResponseSchema = z.object({ threadId: z.string().min(1), model: z.string().min(1) });
+const threadIdResponseSchema = z.object({ threadId: z.string().min(1) });
 const turnResponseSchema = z.object({ turnId: z.string().min(1) });
 const modelsResponseSchema = z.object({
   models: z.array(z.object({
@@ -254,6 +255,11 @@ async function setThreadWorkingTab(threadId: string, tabId: number): Promise<voi
   const targets = (await storedList<ThreadWorkingTab>(THREAD_TARGETS_KEY)).filter((item) => item.threadId !== threadId);
   targets.push({ threadId, tabId, updatedAt: Date.now() });
   await chrome.storage.session.set({ [THREAD_TARGETS_KEY]: targets.slice(-40) });
+}
+
+async function copyThreadWorkingTab(sourceThreadId: string, targetThreadId: string): Promise<void> {
+  const tabId = await getThreadWorkingTab(sourceThreadId);
+  if (tabId !== undefined) await setThreadWorkingTab(targetThreadId, tabId);
 }
 
 async function ensureThreadWorkingTab(threadId: string): Promise<number> {
@@ -588,8 +594,23 @@ async function processCapturedPopup(
   if (call.tool !== "click" || !result || typeof result !== "object") return result;
 
   const clickResult = result as Record<string, unknown>;
+  const createdTabs = Array.isArray(clickResult.createdTabs)
+    ? clickResult.createdTabs.filter((tab): tab is { id: number; url: string; title?: string; active?: boolean } =>
+      Boolean(tab && typeof tab === "object" && typeof (tab as { id?: unknown }).id === "number"))
+    : [];
+  const safeCreated: Array<{ id: number; url: string }> = [];
+  for (const tab of createdTabs) {
+    const url = typeof tab.url === "string" ? tab.url : "";
+    if (!url || !isSafeHttpUrl(url)) {
+      await chrome.tabs.remove(tab.id).catch(() => undefined);
+      continue;
+    }
+    if (tab.active === true) await chrome.tabs.update(tab.id, { active: false }).catch(() => undefined);
+    safeCreated.push({ id: tab.id, url });
+  }
+
   const popupAttempts = typeof clickResult.popupAttempts === "number" ? clickResult.popupAttempts : 0;
-  const popupCollectionFailed = clickResult.popupCollectionFailed === true;
+  const popupCollectionFailed = clickResult.popupCollectionFailed === true && safeCreated.length === 0;
   const popupUrls = Array.isArray(clickResult.popupUrls)
     ? clickResult.popupUrls.filter((url): url is string => typeof url === "string" && isSafeHttpUrl(url))
     : [];
@@ -600,8 +621,8 @@ async function processCapturedPopup(
       popupReason: "The popup was blocked, but its destination could not be collected safely.",
     };
   }
-  if (popupAttempts === 0) return result;
-  if (popupUrls.length === 0) {
+  if (popupAttempts === 0 && safeCreated.length === 0) return result;
+  if (popupUrls.length === 0 && safeCreated.length === 0) {
     return {
       ...clickResult,
       popupBlocked: true,
@@ -612,24 +633,27 @@ async function processCapturedPopup(
   if (task.authorizedTabId === undefined) throw new Error("This browser task has no working tab.");
   const previousTabId = task.authorizedTabId;
   const source = await chrome.tabs.get(previousTabId).catch(() => undefined);
-  const created = await chrome.tabs.create({
-    url: popupUrls[0],
-    active: false,
-    ...(source?.windowId === undefined ? {} : { windowId: source.windowId }),
-  });
-  if (created.id === undefined) throw new Error("Chrome did not return the opened background tab.");
-  await refreshRememberedTaskOrigin(task, created.id);
+  const opened = safeCreated[0] ?? await (async () => {
+    const created = await chrome.tabs.create({
+      url: popupUrls[0],
+      active: false,
+      ...(source?.windowId === undefined ? {} : { windowId: source.windowId }),
+    });
+    if (created.id === undefined) throw new Error("Chrome did not return the opened background tab.");
+    return { id: created.id, url: created.url ?? popupUrls[0] };
+  })();
+  await refreshRememberedTaskOrigin(task, opened.id);
   task.updatedAt = Date.now();
   await saveTask(task);
-  await setThreadWorkingTab(call.threadId, created.id);
+  await setThreadWorkingTab(call.threadId, opened.id);
   await syncTaskIndicator(previousTabId);
-  await syncTaskIndicator(created.id);
+  await syncTaskIndicator(opened.id);
   return {
     ...clickResult,
-    popupBlocked: popupAttempts > 1,
-    blockedPopupCount: Math.max(0, popupAttempts - 1),
-    openedPopupUrl: popupUrls[0],
-    openedPopupTabId: created.id,
+    popupBlocked: popupAttempts > 1 || safeCreated.length > 1,
+    blockedPopupCount: Math.max(0, Math.max(popupAttempts, safeCreated.length) - 1),
+    openedPopupUrl: opened.url,
+    openedPopupTabId: opened.id,
     openedInBackground: true,
     selectedForTask: true,
   };
@@ -675,7 +699,7 @@ async function handlePageCall(call: PageToolCall, announce: boolean): Promise<vo
   await saveTask(task);
   await syncTaskIndicator(task.authorizedTabId);
   let target: PageTargetDescription | undefined;
-  if (["click", "keypress", "submit"].includes(call.tool)) target = await describePageTarget(call, false, task.authorizedTabId);
+  if (["click", "fill", "keypress", "submit"].includes(call.tool)) target = await describePageTarget(call, false, task.authorizedTabId);
   const permissionMode = await getTaskPermissionMode(task);
   const confirmationBypassed = permissionMode === "full" && decidePageAction(call, target, "ask").decision === "confirm";
   const policy = decidePageAction(call, target, permissionMode);
@@ -974,6 +998,14 @@ async function routeRequest(input: unknown): Promise<unknown> {
     case "MODELS_READ": return modelsResponseSchema.parse(await requestNative("models.list"));
     case "CHAT_START": return threadResponseSchema.parse(await requestNative("chat.start", { model: request.model }));
     case "CHAT_RESUME": return threadResponseSchema.parse(await requestNative("chat.resume", { threadId: request.threadId, model: request.model }));
+    case "CHAT_FORK": {
+      const result = threadIdResponseSchema.parse(await requestNative("chat.fork", {
+        threadId: request.threadId,
+        lastTurnId: request.lastTurnId,
+      }));
+      await copyThreadWorkingTab(request.threadId, result.threadId);
+      return result;
+    }
     case "CHAT_SEND": {
       const tabId = await ensureThreadWorkingTab(request.threadId);
       const result = turnResponseSchema.parse(await requestNative("chat.send", { threadId: request.threadId, text: request.text, clientMessageId: request.clientMessageId, model: request.model }));

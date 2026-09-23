@@ -154,6 +154,35 @@ describe("packaged page executor", () => {
       value: "replacement",
       mode: "replace",
     })).toThrow(/sensitive/i);
+    expect(() => command({
+      action: "CLICK",
+      snapshotId: inspection.snapshotId,
+      refId: field?.refId,
+    })).toThrow(/sensitive/i);
+  });
+
+  it("treats hidden token fields as sensitive in form previews without leaking values", () => {
+    document.body.innerHTML = `
+      <form>
+        <input type="hidden" name="csrf" value="hidden-token">
+        <input type="hidden" name="api_key" value="sk-live-do-not-return">
+        <input id="hidden-pass" type="password" value="do-not-return" style="display:none">
+        <button type="submit">Continue</button>
+      </form>
+    `;
+    const inspection = command<{ snapshotId: string; elements: Array<{ refId: string; label: string }> }>({ action: "INSPECT" });
+    const submit = inspection.elements.find((item) => item.label === "Continue");
+    const described = command<{
+      form: { fields: Array<{ name: string; value: string; sensitive: boolean }> };
+    }>({ action: "DESCRIBE", snapshotId: inspection.snapshotId, refId: submit?.refId });
+    expect(described.form.fields.filter((field) => field.sensitive)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "api_key", value: "[sensitive value hidden]", sensitive: true }),
+      expect.objectContaining({ name: "hidden-pass", value: "[sensitive value hidden]", sensitive: true }),
+    ]));
+    expect(described.form.fields.some((field) => field.name === "csrf")).toBe(false);
+    expect(JSON.stringify(described)).not.toContain("sk-live-do-not-return");
+    expect(JSON.stringify(described)).not.toContain("hidden-token");
+    expect(JSON.stringify(described)).not.toContain("do-not-return");
   });
 
   it("keeps references valid when an unrelated part of a dynamic page changes", async () => {

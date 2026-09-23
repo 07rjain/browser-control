@@ -46,15 +46,21 @@ export function decidePageAction(
   target: PageTargetDescription | undefined,
   permissionMode: BrowserPermissionMode,
 ): PageActionDecision {
-  if (["inspect", "fill", "select", "check", "drag", "scroll", "history", "wait"].includes(call.tool)) {
+  if (["inspect", "select", "check", "drag", "scroll", "history", "wait"].includes(call.tool)) {
     return { decision: "allow" };
   }
 
   if (!target) return { decision: "refuse", reason: "The page target could not be inspected safely." };
   if (target.disabled) return { decision: "refuse", reason: "The requested page control is disabled." };
-  if (target.sensitive && call.tool === "keypress") {
-    return { decision: "refuse", reason: "Keyboard actions are not allowed on sensitive fields." };
+  if (target.sensitive && ["click", "fill", "keypress"].includes(call.tool)) {
+    return {
+      decision: "refuse",
+      reason: call.tool === "fill"
+        ? "Browser Control will not read or fill sensitive fields."
+        : "Browser Control will not interact with sensitive fields.",
+    };
   }
+  if (call.tool === "fill") return { decision: "allow" };
   if (isBlockedConsequentialTarget(target.label, target.href ?? target.form?.action)) {
     return { decision: "refuse", reason: "Purchases and financial transactions are not supported." };
   }

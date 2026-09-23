@@ -346,8 +346,10 @@ describe("service-worker browser orchestration", () => {
       storage: { session: storageArea(sessionData), local: storageArea(localData) },
       tabs: {
         get: vi.fn(async () => tab),
+        query: vi.fn(async () => [tab]),
         sendMessage,
         create: vi.fn(),
+        update: vi.fn(async () => tab),
         onRemoved: { addListener: vi.fn() },
       },
       permissions: { contains: vi.fn(async () => true) },
@@ -515,7 +517,11 @@ describe("service-worker browser orchestration", () => {
           type: "response",
           id: message.id,
           ok: true,
-          data: message.method === "chat.send" ? { turnId: `turn-${++turnSequence}` } : {},
+          data: message.method === "chat.send"
+            ? { turnId: `turn-${++turnSequence}` }
+            : message.method === "chat.fork"
+              ? { threadId: "thread-fork" }
+              : {},
         }));
       },
     };
@@ -570,6 +576,13 @@ describe("service-worker browser orchestration", () => {
     })).resolves.toMatchObject({ tabId: 12, title: "Calendar" });
     expect(updateWindow).toHaveBeenCalledWith(1, { focused: true });
     expect(update).toHaveBeenCalledWith(12, { active: true });
+    await expect(serviceWorkerTestHooks.routeRequest({
+      type: "CHAT_FORK",
+      requestId: requestId(),
+      threadId: "thread-1",
+      lastTurnId: "turn-1",
+    })).resolves.toEqual({ threadId: "thread-fork" });
+    await expect(serviceWorkerTestHooks.getThreadWorkingTab("thread-fork")).resolves.toBe(12);
     const inspectCall = {
       requestId: 10,
       threadId: "thread-1",
@@ -771,5 +784,70 @@ describe("service-worker browser orchestration", () => {
     expect(serviceWorkerTestHooks.actionResultFailed(result)).toBe(true);
     expect(serviceWorkerTestHooks.actionResultFailed({ clicked: true })).toBe(false);
     await expect(serviceWorkerTestHooks.getThreadWorkingTab("thread-popup")).resolves.toBe(77);
+  });
+
+  it("reuses a tab created when the page bypasses the popup guard", async () => {
+    const sessionData: Record<string, unknown> = {};
+    const localData: Record<string, unknown> = {};
+    const create = vi.fn();
+    const update = vi.fn(async () => ({ id: 88, active: false }));
+    const remove = vi.fn(async () => undefined);
+    vi.stubGlobal("chrome", {
+      runtime: {
+        id: "extension-id",
+        sendMessage: vi.fn(async () => undefined),
+        onMessage: { addListener: vi.fn() },
+        onInstalled: { addListener: vi.fn() },
+        onStartup: { addListener: vi.fn() },
+      },
+      storage: { session: storageArea(sessionData), local: storageArea(localData) },
+      tabs: {
+        get: vi.fn(async () => ({ id: 12, windowId: 1, url: "https://example.com" })),
+        create,
+        update,
+        remove,
+        onRemoved: { addListener: vi.fn() },
+      },
+      sidePanel: { setPanelBehavior: vi.fn(async () => undefined) },
+    });
+
+    const { serviceWorkerTestHooks } = await import("../src/background/service-worker");
+    const result = await serviceWorkerTestHooks.processCapturedPopup({
+      requestId: 14,
+      threadId: "thread-bypass",
+      turnId: "turn-bypass",
+      callId: "call-bypass",
+      namespace: "page",
+      tool: "click",
+      arguments: {
+        idempotencyKey: "click-bypass-00001",
+        ref: { id: "e1", snapshotId: "snapshot-bypass", tabId: 12, origin: "https://example.com" },
+      },
+    }, {
+      key: "thread-bypass:turn-bypass",
+      threadId: "thread-bypass",
+      turnId: "turn-bypass",
+      actionCount: 0,
+      canceled: false,
+      authorizedTabId: 12,
+      updatedAt: Date.now(),
+    }, {
+      clicked: true,
+      popupAttempts: 0,
+      popupUrls: [],
+      createdTabs: [
+        { id: 88, url: "https://example.com/workspace", active: true },
+        { id: 89, url: "javascript:alert(1)" },
+      ],
+    });
+
+    expect(create).not.toHaveBeenCalled();
+    expect(update).toHaveBeenCalledWith(88, { active: false });
+    expect(remove).toHaveBeenCalledWith(89);
+    expect(result).toEqual(expect.objectContaining({
+      openedPopupTabId: 88,
+      openedPopupUrl: "https://example.com/workspace",
+      openedInBackground: true,
+    }));
   });
 });

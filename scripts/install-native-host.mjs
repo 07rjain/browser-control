@@ -4,10 +4,12 @@ import {
   constants,
   copyFileSync,
   mkdirSync,
+  realpathSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 
@@ -18,8 +20,8 @@ const extensionIds = [
 ];
 const hostName = "com.codex.sidebar";
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const sourceHostScript = join(repositoryRoot, "bridge", "native-host.mjs");
-const sourceProtocolScript = join(repositoryRoot, "bridge", "protocol.mjs");
+const sourceHostScript = realpathSync(join(repositoryRoot, "bridge", "native-host.mjs"));
+const sourceProtocolScript = realpathSync(join(repositoryRoot, "bridge", "protocol.mjs"));
 const applicationRoot = join(homedir(), "Library", "Application Support", "Browser Control");
 const runtimeDir = join(applicationRoot, "host", companionVersion);
 const installedHostScript = join(runtimeDir, "native-host.mjs");
@@ -38,8 +40,25 @@ if (process.platform !== "darwin") {
 
 accessSync(sourceHostScript, constants.R_OK);
 accessSync(sourceProtocolScript, constants.R_OK);
-const codexBinary = execFileSync("which", ["codex"], { encoding: "utf8" }).trim();
-if (!codexBinary) throw new Error("Codex CLI was not found on PATH.");
+
+function resolveCodexBinary() {
+  const requested = process.env.CODEX_BIN?.trim()
+    || execFileSync("which", ["codex"], { encoding: "utf8" }).trim();
+  if (!requested) throw new Error("Codex CLI was not found. Set CODEX_BIN or install Codex on PATH.");
+  let resolved;
+  try {
+    resolved = realpathSync(requested);
+  } catch {
+    throw new Error(`Codex CLI was not found at ${requested}.`);
+  }
+  if (!isAbsolute(resolved)) throw new Error("CODEX_BIN must resolve to an absolute path.");
+  const stat = statSync(resolved);
+  if (!stat.isFile()) throw new Error("CODEX_BIN must point to the Codex executable file.");
+  if ((stat.mode & 0o111) === 0) throw new Error("The Codex CLI is not executable.");
+  return resolved;
+}
+
+const codexBinary = resolveCodexBinary();
 
 mkdirSync(runtimeDir, { recursive: true, mode: 0o700 });
 mkdirSync(binDir, { recursive: true, mode: 0o700 });

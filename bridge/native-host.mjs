@@ -457,6 +457,15 @@ async function handleRequest(message) {
       });
       return { threadId: result.thread.id, model: result.model };
     }
+    case "chat.fork": {
+      const result = await appRequest("thread/fork", {
+        threadId: message.params?.threadId,
+        lastTurnId: message.params?.lastTurnId,
+        ...safeThreadParams(),
+        dynamicTools,
+      });
+      return { threadId: result.thread.id };
+    }
     case "chat.send": {
       const result = await appRequest("turn/start", {
         threadId: message.params?.threadId,

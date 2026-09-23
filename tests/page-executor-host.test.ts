@@ -19,6 +19,13 @@ describe("task working-tab isolation", () => {
     expect(query).not.toHaveBeenCalled();
   });
 
+  it("refuses to fall back to the visible tab when no working tab is provided", async () => {
+    const query = vi.fn(async () => [{ id: 99, url: "https://evil.example", discarded: false }]);
+    vi.stubGlobal("chrome", { tabs: { query } });
+    await expect(currentControlOrigin(undefined as unknown as number)).rejects.toThrow(/working tab/i);
+    expect(query).not.toHaveBeenCalled();
+  });
+
   it("reloads a discarded pinned tab before using it", async () => {
     const get = vi.fn()
       .mockResolvedValueOnce({ id: 12, url: "https://example.com", discarded: true })

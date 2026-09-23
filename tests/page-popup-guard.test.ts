@@ -38,6 +38,14 @@ beforeAll(async () => {
           discarded: false,
         };
       }),
+      query: vi.fn(async () => [{
+        id: 1,
+        windowId: 1,
+        url: location.href,
+        title: "Popup test",
+        status: "complete",
+        discarded: false,
+      }]),
       sendMessage: vi.fn(async (_tabId: number, message: unknown) => {
         let response: unknown;
         listener(message, { id: "extension-id" }, (value) => {
