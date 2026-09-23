@@ -48,7 +48,7 @@ export function parseSkillDocument(text) {
 
 function walkSkills(directory, root, depth, skills, errors) {
   if (depth > MAX_SKILL_DEPTH) return;
-  let entries = [];
+  let entries;
   try {
     entries = readdirSync(directory, { withFileTypes: true });
   } catch {

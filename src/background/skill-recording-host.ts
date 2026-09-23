@@ -180,7 +180,7 @@ async function followTab(session: RecordingSession, tabId: number): Promise<Reco
     if (session.status !== "review") session.status = "recording";
     return session;
   }
-  let originPattern = "";
+  let originPattern: string;
   try {
     originPattern = originPatternForUrl(tab.url);
   } catch {
@@ -321,6 +321,8 @@ export function updateSkillRecording(patch: {
     if (!session || session.status !== "review") throw new Error("Stop recording before editing the skill.");
     if (patch.name !== undefined) session.name = sanitizeSkillField(patch.name, 100);
     if (patch.description !== undefined) session.description = sanitizeSkillField(patch.description, 500);
+    // Recording notes may keep line breaks, but not other control characters.
+    // eslint-disable-next-line no-control-regex
     if (patch.notes !== undefined) session.notes = patch.notes.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "").slice(0, 4_000);
     if (patch.deleteStepId) session.steps = session.steps.filter((step) => step.id !== patch.deleteStepId);
     if (patch.keepExample) {
@@ -402,7 +404,7 @@ export function acceptRecorderPort(port: chrome.runtime.Port): void {
     const session = await loadSession();
     const tab = await chrome.tabs.get(tabId).catch(() => undefined);
     const location = tab?.url ? publicLocation(tab.url) : null;
-    let originPattern = "";
+    let originPattern: string;
     try {
       originPattern = tab?.url ? originPatternForUrl(tab.url) : "";
     } catch {

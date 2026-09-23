@@ -9,6 +9,7 @@ export const MAX_RECORDING_EXAMPLE_CHARS = 200;
 
 export function cleanPageLabel(value: string, max = MAX_RECORDING_LABEL_CHARS): string {
   return value
+    // eslint-disable-next-line no-control-regex -- Remove control characters from page-supplied labels.
     .replace(/[\u0000-\u001F\u007F]/g, " ")
     .replace(/[`#"\\]/g, "")
     .replace(/-{3,}/g, " ")
@@ -25,6 +26,7 @@ export function cleanRole(value: string): string {
 
 export function sanitizeSkillField(value: string, max: number): string {
   return value
+    // eslint-disable-next-line no-control-regex -- Keep generated skill metadata on one line.
     .replace(/[\u0000-\u001F\u007F]/g, " ")
     .replace(/["\\]/g, "")
     .replace(/\s+/g, " ")
@@ -34,6 +36,7 @@ export function sanitizeSkillField(value: string, max: number): string {
 
 export function cleanSkillNotes(value: string): string {
   return value
+    // eslint-disable-next-line no-control-regex -- Preserve newlines while removing other controls.
     .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "")
     .replace(/\r\n/g, "\n")
     .split("\n")

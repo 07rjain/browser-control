@@ -216,12 +216,6 @@ function RecordingReview({
   const [description, setDescription] = useState(recording.description);
   const [notes, setNotes] = useState(recording.notes);
 
-  useEffect(() => {
-    setName(recording.name);
-    setDescription(recording.description);
-    setNotes(recording.notes);
-  }, [recording.name, recording.description, recording.notes]);
-
   return (
     <>
       <label>
@@ -453,8 +447,7 @@ export default function App() {
 
   useEffect(() => {
     menuOpenRef.current = menuOpen;
-    if (menuOpen) void refreshSkills();
-  }, [menuOpen, refreshSkills]);
+  }, [menuOpen]);
 
   useEffect(() => {
     transcriptRef.current?.scrollTo({ top: transcriptRef.current.scrollHeight, behavior: "smooth" });
@@ -1126,6 +1119,7 @@ export default function App() {
           <button className="icon-button" aria-label="Open settings" aria-expanded={menuOpen} onClick={() => {
             setMenuOpen(!menuOpen);
             setHistoryOpen(false);
+            if (!menuOpen) void refreshSkills();
           }}>•••</button>
         </div>
         {historyOpen && (
@@ -1479,6 +1473,7 @@ export default function App() {
             )}
             {recording.status === "review" && (
               <RecordingReview
+                key={JSON.stringify([recording.name, recording.description, recording.notes])}
                 recording={recording}
                 onUpdate={updateRecording}
                 onCancel={() => void runRecording(() => sendRequest<RecordingView>({ type: "RECORDING_CANCEL" }))}

@@ -7,6 +7,7 @@ const PURCHASE_RECORDING_PATTERN =
 
 function cleanPageLabel(value: string, max = 80): string {
   return value
+    // eslint-disable-next-line no-control-regex -- Remove control characters from page-supplied labels.
     .replace(/[\u0000-\u001F\u007F]/g, " ")
     .replace(/[`#"\\]/g, "")
     .replace(/-{3,}/g, " ")
