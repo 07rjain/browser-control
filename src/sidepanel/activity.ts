@@ -36,7 +36,12 @@ export function groupToolStatuses(statuses: ToolStatus[]): Map<string, ToolStatu
 }
 
 export function hasBrowserActivityForTurn(statuses: ToolStatus[], turnId: string | null): boolean {
-  return turnId !== null && statuses.some((status) => status.turnId === turnId);
+  return turnId !== null && statuses.some((status) => status.turnId === turnId && status.namespace !== "skills");
+}
+
+export function activityStepLabel(status: ToolStatus): string {
+  if (status.namespace === "skills") return `Skill · ${status.tool}`;
+  return `Browser · ${status.namespace ? `${status.namespace}.` : ""}${status.tool}`;
 }
 
 export function visibleActivityFormFields(status: ToolStatus): Array<{ name: string; value: string }> {
@@ -51,8 +56,9 @@ export function summarizeToolStatuses(statuses: ToolStatus[]): {
 } {
   const latestByCall = new Map<string, ToolStatus>();
   for (const status of statuses) latestByCall.set(status.callId, status);
+  const calls = [...latestByCall.values()];
   return {
-    actionCount: latestByCall.size,
-    failed: [...latestByCall.values()].some((status) => ["failed", "rejected", "canceled", "stale"].includes(status.status)),
+    actionCount: calls.filter((status) => status.namespace !== "skills").length,
+    failed: calls.some((status) => ["failed", "rejected", "canceled", "stale"].includes(status.status)),
   };
 }

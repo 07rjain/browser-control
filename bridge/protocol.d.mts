@@ -15,3 +15,5 @@ export function normalizeAppServerNotification(message: {
 }): { event: string; data: unknown } | null;
 
 export function isAllowedDynamicTool(namespace: unknown, tool: unknown): boolean;
+
+export function isHostSkillTool(namespace: unknown, tool: unknown): boolean;

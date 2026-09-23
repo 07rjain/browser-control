@@ -67,6 +67,8 @@ export function normalizeAppServerNotification(message) {
       return { event: "chat.error", data: message.params };
     case "warning":
       return { event: "bridge.warning", data: message.params };
+    case "skills/changed":
+      return { event: "skills.changed", data: message.params ?? {} };
     default:
       return null;
   }
@@ -79,4 +81,8 @@ const ALLOWED_DYNAMIC_TOOLS = {
 
 export function isAllowedDynamicTool(namespace, tool) {
   return (namespace === "tabs" || namespace === "page") && ALLOWED_DYNAMIC_TOOLS[namespace].has(tool);
+}
+
+export function isHostSkillTool(namespace, tool) {
+  return namespace === "skills" && tool === "read";
 }

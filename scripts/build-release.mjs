@@ -44,7 +44,7 @@ try {
   mkdirSync(releaseDir, { recursive: true });
   mkdirSync(join(companionStage, "bridge"), { recursive: true });
   mkdirSync(join(companionStage, "scripts"), { recursive: true });
-  for (const file of ["native-host.mjs", "protocol.mjs"]) {
+  for (const file of ["native-host.mjs", "protocol.mjs", "skills.mjs"]) {
     copyFileSync(join(repositoryRoot, "bridge", file), join(companionStage, "bridge", file));
   }
   for (const file of ["install-native-host.mjs", "uninstall-native-host.mjs", "smoke-installed-host.mjs"]) {

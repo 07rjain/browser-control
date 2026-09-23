@@ -5,6 +5,7 @@ import {
   LengthPrefixedJsonDecoder,
   normalizeAppServerNotification,
   isAllowedDynamicTool,
+  isHostSkillTool,
 } from "../bridge/protocol.mjs";
 
 describe("native bridge framing", () => {
@@ -30,6 +31,10 @@ describe("native bridge framing", () => {
       }),
     ).toEqual({ event: "chat.delta", data: { turnId: "turn-1", delta: "Hello" } });
     expect(normalizeAppServerNotification({ method: "command/exec/outputDelta", params: {} })).toBeNull();
+    expect(normalizeAppServerNotification({ method: "skills/changed", params: {} })).toEqual({
+      event: "skills.changed",
+      data: {},
+    });
   });
 
   it("allows only declared tabs and page tools", () => {
@@ -41,5 +46,8 @@ describe("native bridge framing", () => {
     expect(isAllowedDynamicTool("page", "submit")).toBe(true);
     expect(isAllowedDynamicTool("page", "executeScript")).toBe(false);
     expect(isAllowedDynamicTool("computer", "click")).toBe(false);
+    expect(isAllowedDynamicTool("skills", "read")).toBe(false);
+    expect(isHostSkillTool("skills", "read")).toBe(true);
+    expect(isHostSkillTool("skills", "list")).toBe(false);
   });
 });

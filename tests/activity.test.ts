@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  activityStepLabel,
   groupToolStatuses,
   hasBrowserActivityForTurn,
   summarizeToolStatuses,
@@ -34,6 +35,17 @@ describe("tool activity summaries", () => {
       activity({ status: "succeeded" }),
       activity({ callId: "call-2", tool: "fill", status: "failed" }),
     ])).toEqual({ actionCount: 2, failed: true });
+  });
+
+  it("labels a taught skill read separately from browser actions", () => {
+    const skill = activity({ namespace: "skills", tool: "reply-tibo-tweets", status: "succeeded" });
+    expect(activityStepLabel(skill)).toBe("Skill · reply-tibo-tweets");
+    expect(activityStepLabel(activity({ namespace: "tabs", tool: "open" }))).toBe("Browser · tabs.open");
+    expect(summarizeToolStatuses([
+      skill,
+      activity({ callId: "call-2", namespace: "tabs", tool: "open", status: "succeeded" }),
+    ])).toEqual({ actionCount: 1, failed: false });
+    expect(hasBrowserActivityForTurn([skill], "turn-1")).toBe(false);
   });
 
   it("shows working-tab affordances only after the active turn has browser activity", () => {

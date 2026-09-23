@@ -73,7 +73,7 @@ If Chrome shows a different ID, native messaging will be rejected. Confirm that 
 4. Finish authentication; Codex App Server receives the localhost callback.
 5. Return to the side panel. It will display the email and plan information returned by Codex App Server.
 
-The companion uses the legacy compatibility path `~/.codex-sidebar` as an isolated Codex home. It does not reuse the normal `~/.codex` configuration or place reusable credentials in Chrome storage. The path and native-host identifier `com.codex.sidebar` intentionally remain unchanged so existing development installations keep their authentication and extension connection.
+The companion uses the legacy compatibility path `~/.codex-sidebar` as an isolated Codex home. Taught skills live in `~/.codex-sidebar/skills` and are offered automatically when a request matches. Settings can record a demonstration on pages Browser Control is already allowed to use; review it, then save it on this Mac. The companion does not reuse the normal `~/.codex` configuration or place reusable credentials in Chrome storage. The path and native-host identifier `com.codex.sidebar` intentionally remain unchanged so existing development installations keep their authentication and extension connection.
 
 ## Commands
 

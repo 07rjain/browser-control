@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { isSafeHttpUrl, sanitizeMarkdownUrl, type PageAttachment, type SidebarEvent, type UiResponse } from "../shared/protocol";
+import { isSafeHttpUrl, sanitizeMarkdownUrl, type PageAttachment, type SidebarEvent, type SidebarSkill, type UiResponse } from "../shared/protocol";
 import {
   BROWSER_PERMISSION_MODE_KEY,
   BROWSER_TASK_ACTION_LIMIT_KEY,
@@ -9,13 +9,15 @@ import {
   DEFAULT_BROWSER_TASK_ACTION_LIMIT,
   FULL_ACCESS_HOST_GRANT_KEY,
   FULL_ACCESS_HOST_PATTERNS,
+  TASK_ORIGINS_KEY,
   MAX_BROWSER_TASK_ACTION_LIMIT,
   MIN_BROWSER_TASK_ACTION_LIMIT,
   normalizeBrowserPermissionMode,
   normalizeBrowserTaskActionLimit,
   type BrowserPermissionMode,
 } from "../shared/page-tools";
-import { groupToolStatuses, hasBrowserActivityForTurn, summarizeToolStatuses, visibleActivityFormFields, type ToolStatus } from "./activity";
+import { IDLE_RECORDING_VIEW, recordingStepSummary, type RecordingView } from "../shared/skill-recording";
+import { activityStepLabel, groupToolStatuses, hasBrowserActivityForTurn, summarizeToolStatuses, visibleActivityFormFields, type ToolStatus } from "./activity";
 import { settleCanceledMessages, type ChatMessage } from "./chat-state";
 import {
   createConversationRecord,
@@ -85,7 +87,6 @@ interface RetryPayload {
 const INITIAL_STATE: PersistedState = { threadId: null, messages: [], theme: "system", selectedModel: "", completionSoundEnabled: false };
 const STORAGE_KEY = "codexSidebarState";
 const PAGE_ORIGINS_KEY = "codexSidebarGrantedPageOrigins";
-const TASK_ORIGINS_KEY = "codexSidebarTaskControlOrigins";
 const COMPANION_SUPPORT_URL = "https://07rjain.github.io/browser-control-support/support.html";
 
 class ExtensionRequestError extends Error {
@@ -170,7 +171,7 @@ function ToolActivity({ statuses, complete }: { statuses: ToolStatus[]; complete
       <ol className="tool-steps">
         {statuses.map((status, index) => (
           <li key={`${status.callId}-${status.status}-${status.timestamp ?? index}`}>
-            <span>Browser · {status.namespace ? `${status.namespace}.` : ""}{status.tool}</span>
+            <span>{activityStepLabel(status)}</span>
             <strong>{status.status}</strong>
             {status.origin && <small>{status.origin}</small>}
             {status.confirmationBypassed && (
@@ -191,6 +192,89 @@ function ToolActivity({ statuses, complete }: { statuses: ToolStatus[]; complete
         ))}
       </ol>
     </details>
+  );
+}
+
+function RecordingReview({
+  recording,
+  onUpdate,
+  onCancel,
+  onSave,
+}: {
+  recording: RecordingView;
+  onUpdate: (patch: {
+    name?: string;
+    description?: string;
+    notes?: string;
+    deleteStepId?: string;
+    keepExample?: { stepId: string; keep: boolean };
+  }) => void;
+  onCancel: () => void;
+  onSave: (fields: { name: string; description: string; notes: string }) => void;
+}) {
+  const [name, setName] = useState(recording.name);
+  const [description, setDescription] = useState(recording.description);
+  const [notes, setNotes] = useState(recording.notes);
+
+  useEffect(() => {
+    setName(recording.name);
+    setDescription(recording.description);
+    setNotes(recording.notes);
+  }, [recording.name, recording.description, recording.notes]);
+
+  return (
+    <>
+      <label>
+        Name
+        <input value={name} maxLength={100} onChange={(event) => setName(event.target.value)} onBlur={() => onUpdate({ name })} />
+      </label>
+      <label>
+        When to use it
+        <textarea value={description} maxLength={500} rows={3} onChange={(event) => setDescription(event.target.value)} onBlur={() => onUpdate({ description })} />
+      </label>
+      <ol className="recording-steps">
+        {recording.steps.map((step) => (
+          <li key={step.id} className="recording-step">
+            <div>
+              <span>{recordingStepSummary(step)}</span>
+              {step.kind === "fill" && step.example ? (
+                <label className="keep-example">
+                  <input
+                    type="checkbox"
+                    checked={step.keepExample}
+                    onChange={(event) => onUpdate({ keepExample: { stepId: step.id, keep: event.target.checked } })}
+                  />
+                  Keep example “{step.example}”
+                </label>
+              ) : null}
+            </div>
+            <button type="button" onClick={() => onUpdate({ deleteStepId: step.id })}>Delete</button>
+          </li>
+        ))}
+      </ol>
+      <label>
+        Extra notes
+        <textarea value={notes} maxLength={4000} rows={3} onChange={(event) => setNotes(event.target.value)} onBlur={() => onUpdate({ notes })} />
+      </label>
+      {recording.previewError && <p className="recording-error">{recording.previewError}</p>}
+      {recording.preview && (
+        <details>
+          <summary>File to save</summary>
+          <pre className="recording-preview">{recording.preview}</pre>
+        </details>
+      )}
+      <div className="recording-actions">
+        <button type="button" className="secondary-button" onClick={onCancel}>Cancel</button>
+        <button
+          type="button"
+          className="primary-button"
+          disabled={name.trim().length === 0 || description.trim().length === 0 || (recording.steps.length === 0 && notes.trim().length === 0)}
+          onClick={() => onSave({ name, description, notes })}
+        >
+          Save skill
+        </button>
+      </div>
+    </>
   );
 }
 
@@ -226,7 +310,14 @@ export default function App() {
   const [pendingPageOrigin, setPendingPageOrigin] = useState<string | null>(null);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [forkingMessageId, setForkingMessageId] = useState<string | null>(null);
+  const [taughtSkills, setTaughtSkills] = useState<SidebarSkill[]>([]);
+  const [skillsError, setSkillsError] = useState<string | null>(null);
+  const [recording, setRecording] = useState<RecordingView>(IDLE_RECORDING_VIEW);
+  const [recordingError, setRecordingError] = useState<string | null>(null);
+  const [recordWhen, setRecordWhen] = useState("");
+  const [recordComposerOpen, setRecordComposerOpen] = useState(false);
   const transcriptRef = useRef<HTMLDivElement>(null);
+  const menuOpenRef = useRef(false);
   const threadReadyRef = useRef(false);
   const inFlightPayloadRef = useRef<RetryPayload | null>(null);
   const turnExecutedToolRef = useRef(false);
@@ -234,6 +325,7 @@ export default function App() {
   const completionSoundEnabledRef = useRef(false);
 
   const streaming = activeTurnId !== null || isSending;
+  const recordingActive = recording.status !== "idle";
   const activeBrowserTask = streaming && hasBrowserActivityForTurn(toolStatuses, activeTurnId);
 
   const refreshAccount = useCallback(async () => {
@@ -278,6 +370,8 @@ export default function App() {
           await chrome.permissions.contains({ origins: [...FULL_ACCESS_HOST_PATTERNS] });
         setFullSiteAccessGranted(broadGrantPresent);
         setHydrated(true);
+        const restoredRecording = await sendRequest<RecordingView>({ type: "RECORDING_READ" }).catch(() => IDLE_RECORDING_VIEW);
+        setRecording(restoredRecording);
       })
       .finally(() => void refreshAccount());
   }, [refreshAccount]);
@@ -344,6 +438,21 @@ export default function App() {
     document.documentElement.dataset.theme = theme;
   }, [theme]);
 
+  const refreshSkills = useCallback(async () => {
+    try {
+      const result = await sendRequest<{ skills: SidebarSkill[] }>({ type: "SKILLS_LIST" });
+      setTaughtSkills(result.skills);
+      setSkillsError(null);
+    } catch (cause) {
+      setSkillsError(cause instanceof Error ? cause.message : "Unable to load taught skills.");
+    }
+  }, []);
+
+  useEffect(() => {
+    menuOpenRef.current = menuOpen;
+    if (menuOpen) void refreshSkills();
+  }, [menuOpen, refreshSkills]);
+
   useEffect(() => {
     transcriptRef.current?.scrollTo({ top: transcriptRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, toolApproval, toolPermission]);
@@ -359,6 +468,15 @@ export default function App() {
         case "auth.updated":
         case "auth.loginCompleted":
           void refreshAccount();
+          break;
+        case "skills.changed":
+          if (menuOpenRef.current) void refreshSkills();
+          break;
+        case "recording.status":
+          if (message.data && typeof message.data === "object" && "status" in message.data) {
+            setRecording(message.data as RecordingView);
+            setRecordingError(null);
+          }
           break;
         case "chat.delta": {
           if (stopRequestedRef.current) break;
@@ -448,7 +566,7 @@ export default function App() {
     };
     chrome.runtime.onMessage.addListener(listener);
     return () => chrome.runtime.onMessage.removeListener(listener);
-  }, [refreshAccount]);
+  }, [refreshAccount, refreshSkills]);
 
   const signIn = async () => {
     setAuthState("authenticating");
@@ -552,6 +670,62 @@ export default function App() {
     await chrome.permissions.remove({ origins: [...FULL_ACCESS_HOST_PATTERNS] }).catch(() => false);
   };
 
+  const runRecording = async (work: () => Promise<RecordingView | { name: string }>) => {
+    setRecordingError(null);
+    try {
+      const result = await work();
+      if ("status" in result) setRecording(result);
+      return true;
+    } catch (cause) {
+      setRecordingError(cause instanceof Error ? cause.message : "Skill recording failed.");
+      return false;
+    }
+  };
+
+  const startRecording = async () => {
+    const started = await runRecording(() => sendRequest<RecordingView>({ type: "RECORDING_START", description: recordWhen }));
+    if (!started) return;
+    setRecordComposerOpen(false);
+    setRecordWhen("");
+    setMenuOpen(false);
+  };
+
+  const grantRecordingSite = async () => {
+    if (!recording.pendingOriginPattern) return;
+    const originPattern = recording.pendingOriginPattern;
+    try {
+      const granted = browserPermissionMode === "full" && !fullSiteAccessGranted
+        ? await requestFullSiteAccess()
+        : await chrome.permissions.request({ origins: [originPattern] });
+      if (!granted) {
+        setRecordingError("Site access was not granted. Recording is paused on that page.");
+        return;
+      }
+      await runRecording(() => sendRequest<RecordingView>({ type: "RECORDING_GRANT", originPattern, granted: true }));
+    } catch (cause) {
+      setRecordingError(cause instanceof Error ? cause.message : "Unable to grant access for recording.");
+    }
+  };
+
+  const updateRecording = (patch: {
+    name?: string;
+    description?: string;
+    notes?: string;
+    deleteStepId?: string;
+    keepExample?: { stepId: string; keep: boolean };
+  }) => {
+    void runRecording(() => sendRequest<RecordingView>({ type: "RECORDING_UPDATE", ...patch }));
+  };
+
+  const saveRecording = async (fields: { name: string; description: string; notes: string }) => {
+    const updated = await runRecording(() => sendRequest<RecordingView>({ type: "RECORDING_UPDATE", ...fields }));
+    if (!updated) return;
+    const saved = await runRecording(() => sendRequest<{ name: string }>({ type: "RECORDING_SAVE" }));
+    if (!saved) return;
+    setMenuOpen(true);
+    void refreshSkills();
+  };
+
   const ensureThread = async (): Promise<string> => {
     if (threadId && threadReadyRef.current) return threadId;
     if (threadId) {
@@ -570,7 +744,7 @@ export default function App() {
   };
 
   const sendChatMessage = async (payload: RetryPayload, appendUser: boolean) => {
-    if (streaming) return;
+    if (streaming || recording.status !== "idle") return;
     setIsSending(true);
     setError(null);
     setCompletionNotice(null);
@@ -873,7 +1047,7 @@ export default function App() {
     }
   };
 
-  const canSend = draft.trim().length > 0 && !streaming && authState === "ready";
+  const canSend = draft.trim().length > 0 && !streaming && !recordingActive && authState === "ready";
   const emptyTitle = "Ready when you are";
   const activitiesByTurn = useMemo(() => groupToolStatuses(toolStatuses), [toolStatuses]);
   const visibleConversationHistory = useMemo(() => upsertConversation(
@@ -1042,6 +1216,82 @@ export default function App() {
             <p className="menu-hint">
               {MIN_BROWSER_TASK_ACTION_LIMIT}–{MAX_BROWSER_TASK_ACTION_LIMIT}; applies to the next request.
             </p>
+            <div className="skill-settings">
+              <p className="menu-hint">Taught skills</p>
+              <p className="menu-hint">Saved on this Mac and matched automatically when a request fits. Choosing a skill does not skip action confirmations.</p>
+              {recordComposerOpen ? (
+                <form className="record-start" onSubmit={(event) => {
+                  event.preventDefault();
+                  void startRecording();
+                }}>
+                  <label>
+                    When should the agent use this skill?
+                    <textarea
+                      value={recordWhen}
+                      maxLength={500}
+                      rows={3}
+                      onChange={(event) => setRecordWhen(event.target.value)}
+                      placeholder="Create a calendar event from the title and time in the request."
+                    />
+                  </label>
+                  <div className="recording-actions">
+                    <button type="button" onClick={() => setRecordComposerOpen(false)}>Cancel</button>
+                    <button type="submit" disabled={recordWhen.trim().length === 0 || streaming || recordingActive}>Start recording</button>
+                  </div>
+                </form>
+              ) : (
+                <button
+                  type="button"
+                  className="settings-grant-button"
+                  disabled={streaming || recordingActive}
+                  onClick={() => setRecordComposerOpen(true)}
+                >
+                  Record a skill
+                </button>
+              )}
+              {skillsError && <p className="menu-hint">{skillsError}</p>}
+              {taughtSkills.length === 0 ? (
+                <p className="menu-hint">No taught skills yet.</p>
+              ) : (
+                <ul className="skill-list">
+                  {taughtSkills.map((skill, index) => (
+                    <li key={`${skill.name}-${index}`} className="skill-row">
+                      <header>
+                        <strong>{skill.name}</strong>
+                        <button
+                          type="button"
+                          className="skill-delete"
+                          aria-label={`Delete ${skill.name}`}
+                          onClick={() => {
+                            if (!window.confirm(`Delete the skill “${skill.name}”? This removes it from this Mac.`)) return;
+                            void sendRequest({ type: "SKILLS_DELETE", name: skill.name })
+                              .then(() => refreshSkills())
+                              .catch((cause: unknown) => setSkillsError(cause instanceof Error ? cause.message : "Unable to delete that skill."));
+                          }}
+                        >
+                          Delete
+                        </button>
+                      </header>
+                      <p>{skill.description}</p>
+                      <label className="toggle-row">
+                        <span>Available to the agent</span>
+                        <input
+                          type="checkbox"
+                          checked={skill.enabled}
+                          aria-label={`Use ${skill.name} automatically`}
+                          onChange={(event) => {
+                            const enabled = event.target.checked;
+                            void sendRequest({ type: "SKILLS_SET_ENABLED", name: skill.name, enabled })
+                              .then(() => refreshSkills())
+                              .catch((cause: unknown) => setSkillsError(cause instanceof Error ? cause.message : "Unable to update that skill."));
+                          }}
+                        />
+                      </label>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
             <label className="toggle-row">
               <span>Task completion sound<small>Play a quiet tone after browser work finishes.</small></span>
               <input
@@ -1197,6 +1447,43 @@ export default function App() {
       </div>
 
       <footer className="composer-wrap">
+        {recordingActive && (
+          <section className="recording-panel" aria-label="Skill recording">
+            <p className="eyebrow">{recording.status === "review" ? "Review skill" : "Recording a skill"}</p>
+            <h2>{recording.name || "Taught skill"}</h2>
+            {recording.notice && <p>{recording.notice}</p>}
+            {recordingError && <p className="recording-error">{recordingError}</p>}
+            {recording.status === "needs-permission" && recording.pendingOriginPattern && (
+              <div className="recording-actions">
+                <button type="button" className="secondary-button" onClick={() => void runRecording(() => sendRequest<RecordingView>({ type: "RECORDING_CANCEL" }))}>Cancel</button>
+                <button type="button" className="primary-button" onClick={() => void grantRecordingSite()}>
+                  {browserPermissionMode === "full" && !fullSiteAccessGranted ? "Enable Full access" : "Allow this site"}
+                </button>
+              </div>
+            )}
+            {recording.status === "recording" && (
+              <>
+                <ol className="recording-steps">
+                  {recording.steps.length === 0 ? <li>Use the page. Clicks and typing will appear here.</li> : recording.steps.map((step) => (
+                    <li key={step.id}>{recordingStepSummary(step)}</li>
+                  ))}
+                </ol>
+                <div className="recording-actions">
+                  <button type="button" className="secondary-button" onClick={() => void runRecording(() => sendRequest<RecordingView>({ type: "RECORDING_CANCEL" }))}>Cancel</button>
+                  <button type="button" className="primary-button" onClick={() => void runRecording(() => sendRequest<RecordingView>({ type: "RECORDING_STOP" }))}>Done</button>
+                </div>
+              </>
+            )}
+            {recording.status === "review" && (
+              <RecordingReview
+                recording={recording}
+                onUpdate={updateRecording}
+                onCancel={() => void runRecording(() => sendRequest<RecordingView>({ type: "RECORDING_CANCEL" }))}
+                onSave={(fields) => void saveRecording(fields)}
+              />
+            )}
+          </section>
+        )}
         {activeBrowserTask && threadId && (
           <>
             <span className="sr-only" role="status">Browser Control started working in a browser tab.</span>
@@ -1249,7 +1536,8 @@ export default function App() {
                 if (canSend) event.currentTarget.form?.requestSubmit();
               }
             }}
-            placeholder="Ask Browser Control…"
+            placeholder={recordingActive ? "Finish or cancel skill recording before sending" : "Ask Browser Control…"}
+            disabled={recordingActive}
             aria-label="Message Browser Control"
             rows={1}
           />

@@ -10,6 +10,7 @@ export const BROWSER_TASK_ACTION_LIMIT_KEY = "codexSidebarBrowserTaskActionLimit
 export const BROWSER_PERMISSION_MODE_KEY = "codexSidebarBrowserPermissionMode";
 export const FULL_ACCESS_HOST_GRANT_KEY = "codexSidebarFullAccessHostGrant";
 export const FULL_ACCESS_HOST_PATTERNS = ["http://*/*", "https://*/*"] as const;
+export const TASK_ORIGINS_KEY = "codexSidebarTaskControlOrigins";
 export const browserPermissionModeSchema = z.enum(["ask", "full"]);
 export type BrowserPermissionMode = z.infer<typeof browserPermissionModeSchema>;
 export const DEFAULT_BROWSER_PERMISSION_MODE: BrowserPermissionMode = "full";

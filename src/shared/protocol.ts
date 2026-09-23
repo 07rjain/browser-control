@@ -76,7 +76,65 @@ export const uiRequestSchema = z.discriminatedUnion("type", [
     callId: z.string().min(1),
     approved: z.boolean(),
   }),
+  requestBase.extend({ type: z.literal("SKILLS_LIST") }),
+  requestBase.extend({
+    type: z.literal("SKILLS_SET_ENABLED"),
+    name: z.string().min(1).max(100),
+    enabled: z.boolean(),
+  }),
+  requestBase.extend({
+    type: z.literal("SKILLS_DELETE"),
+    name: z.string().min(1).max(100),
+  }),
+  requestBase.extend({ type: z.literal("RECORDING_READ") }),
+  requestBase.extend({
+    type: z.literal("RECORDING_START"),
+    description: z.string().trim().min(1).max(500),
+  }),
+  requestBase.extend({ type: z.literal("RECORDING_STOP") }),
+  requestBase.extend({ type: z.literal("RECORDING_CANCEL") }),
+  requestBase.extend({
+    type: z.literal("RECORDING_GRANT"),
+    originPattern: z.string().min(1).max(300),
+    granted: z.boolean(),
+  }),
+  requestBase.extend({
+    type: z.literal("RECORDING_UPDATE"),
+    name: z.string().max(100).optional(),
+    description: z.string().max(500).optional(),
+    notes: z.string().max(4_000).optional(),
+    deleteStepId: z.string().uuid().optional(),
+    keepExample: z.object({ stepId: z.string().uuid(), keep: z.boolean() }).optional(),
+  }),
+  requestBase.extend({ type: z.literal("RECORDING_SAVE") }),
 ]);
+
+export const sidebarSkillSchema = z.object({
+  name: z.string().min(1).max(100),
+  description: z.string().min(1).max(500),
+  enabled: z.boolean(),
+});
+
+export type SidebarSkill = z.infer<typeof sidebarSkillSchema>;
+
+export const skillsListResponseSchema = z.object({
+  skills: z.array(sidebarSkillSchema),
+});
+
+export const skillEnabledResponseSchema = z.object({
+  name: z.string().min(1).max(100),
+  enabled: z.boolean(),
+});
+
+export const skillDeletedResponseSchema = z.object({
+  name: z.string().min(1).max(100),
+  deleted: z.literal(true),
+});
+
+export const skillSavedResponseSchema = z.object({
+  name: z.string().min(1).max(100),
+  description: z.string().min(1).max(500),
+});
 
 export type UiRequest = z.infer<typeof uiRequestSchema>;
 

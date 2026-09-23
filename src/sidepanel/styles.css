@@ -156,6 +156,30 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .menu-card .settings-logout-button small { overflow: hidden; color: var(--muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .menu-card .settings-logout-button:disabled { opacity: 0.5; cursor: default; }
 .menu-hint { margin: 0 8px 7px; color: var(--muted); font-size: 10px; line-height: 1.4; }
+.skill-settings { margin-top: 4px; }
+.skill-list { list-style: none; margin: 0 8px 8px; padding: 0; display: grid; gap: 6px; }
+.skill-row { display: grid; gap: 4px; padding: 7px; border: 1px solid var(--border); border-radius: 8px; }
+.skill-row header { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.skill-row strong { min-width: 0; overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.skill-row p { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.35; }
+.menu-card .skill-delete { width: auto; padding: 2px 6px; color: var(--danger); font-size: 10px; }
+.skill-row .toggle-row { padding: 0; }
+.record-start { display: grid; gap: 6px; margin: 0 8px 8px; }
+.menu-card .record-start button { width: auto; }
+.record-start textarea, .recording-panel textarea, .recording-panel input { width: 100%; box-sizing: border-box; margin-top: 6px; padding: 7px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); font: inherit; }
+.recording-panel { margin: 0 0 10px; padding: 12px; border: 1px solid color-mix(in srgb, #e2a33a 55%, var(--border)); border-radius: 16px; background: var(--panel-solid); }
+.recording-panel label { display: block; margin: 0 0 8px; color: var(--muted); font-size: 11px; }
+.recording-panel h2 { margin: 0 0 6px; font-size: 15px; }
+.recording-panel p { margin: 0 0 8px; color: var(--muted); font-size: 12px; }
+.recording-error { color: var(--danger); }
+.recording-steps { list-style: decimal; margin: 0 0 8px; padding-left: 18px; max-height: 140px; overflow: auto; display: grid; gap: 4px; }
+.recording-steps li { font-size: 11px; line-height: 1.35; }
+.recording-step { display: grid; grid-template-columns: 1fr auto; gap: 6px; align-items: start; }
+.recording-step button { width: auto; }
+.recording-actions { display: flex; gap: 8px; }
+.recording-actions button { flex: 1; }
+.recording-preview { max-height: 120px; overflow: auto; margin: 0; white-space: pre-wrap; font-size: 10px; line-height: 1.4; }
+.keep-example { display: flex; align-items: center; gap: 6px; margin: 4px 0 0; color: var(--muted); font-size: 10px; }
 .menu-card .toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .toggle-row span, .toggle-row small { display: block; }
 .toggle-row small { margin-top: 3px; line-height: 1.35; }

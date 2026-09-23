@@ -850,4 +850,110 @@ describe("service-worker browser orchestration", () => {
       openedInBackground: true,
     }));
   });
+
+  it("refuses recording during a browser task and refuses chat while recording", async () => {
+    const sessionData: Record<string, unknown> = {
+      codexSidebarBrowserTasks: [{
+        key: "thread-1:turn-1",
+        threadId: "thread-1",
+        turnId: "turn-1",
+        actionCount: 0,
+        canceled: false,
+        updatedAt: Date.now(),
+      }],
+    };
+    const localData: Record<string, unknown> = {};
+    const tabs = new Map<number, chrome.tabs.Tab>([[12, {
+      id: 12,
+      windowId: 1,
+      index: 0,
+      active: true,
+      pinned: false,
+      highlighted: false,
+      incognito: false,
+      selected: false,
+      discarded: false,
+      autoDiscardable: true,
+      frozen: false,
+      lastAccessed: Date.now(),
+      groupId: -1,
+      title: "Example",
+      url: "https://example.com/start",
+      status: "complete",
+    } as chrome.tabs.Tab]]);
+    let nativeMessageListener: ((message: unknown) => void) | undefined;
+    const port = {
+      onMessage: { addListener: (listener: (message: unknown) => void) => { nativeMessageListener = listener; } },
+      onDisconnect: { addListener: vi.fn() },
+      postMessage: (message: NativeRequest) => {
+        queueMicrotask(() => nativeMessageListener?.({
+          type: "response",
+          id: message.id,
+          ok: true,
+          data: message.method === "chat.send" ? { turnId: "turn-2" } : {},
+        }));
+      },
+    };
+    vi.stubGlobal("chrome", {
+      runtime: {
+        id: "extension-id",
+        connectNative: () => port,
+        sendMessage: vi.fn(async () => undefined),
+        onMessage: { addListener: vi.fn() },
+        onConnect: { addListener: vi.fn() },
+        onInstalled: { addListener: vi.fn() },
+        onStartup: { addListener: vi.fn() },
+      },
+      storage: { session: storageArea(sessionData), local: storageArea(localData) },
+      tabs: {
+        query: vi.fn(async () => [tabs.get(12)]),
+        get: vi.fn(async (tabId: number) => {
+          const tab = tabs.get(tabId);
+          if (!tab) throw new Error("missing tab");
+          return tab;
+        }),
+        sendMessage: vi.fn(async () => ({ ok: true, data: {} })),
+        onRemoved: { addListener: vi.fn() },
+        onActivated: { addListener: vi.fn() },
+        onUpdated: { addListener: vi.fn() },
+      },
+      permissions: { contains: vi.fn(async () => false) },
+      scripting: { executeScript: vi.fn(async () => []) },
+      sidePanel: { setPanelBehavior: vi.fn(async () => undefined) },
+    });
+
+    const { serviceWorkerTestHooks } = await import("../src/background/service-worker");
+    const requestId = () => crypto.randomUUID();
+    await expect(serviceWorkerTestHooks.routeRequest({
+      type: "RECORDING_START",
+      requestId: requestId(),
+      description: "Do the example task from the current request.",
+    })).rejects.toThrow(/browser task/i);
+
+    sessionData.codexSidebarBrowserTasks = [];
+    const started = await serviceWorkerTestHooks.routeRequest({
+      type: "RECORDING_START",
+      requestId: requestId(),
+      description: "Do the example task from the current request.",
+    }) as { status: string; pendingOrigin: string };
+    expect(started.status).toBe("needs-permission");
+    expect(started.pendingOrigin).toBe("https://example.com");
+    await expect(serviceWorkerTestHooks.getThreadWorkingTab("thread-record")).resolves.toBeUndefined();
+    await expect(serviceWorkerTestHooks.routeRequest({
+      type: "CHAT_SEND",
+      requestId: requestId(),
+      threadId: "thread-record",
+      clientMessageId: requestId(),
+      text: "hello",
+    })).rejects.toThrow(/skill recording/i);
+
+    await serviceWorkerTestHooks.routeRequest({ type: "RECORDING_CANCEL", requestId: requestId() });
+    await expect(serviceWorkerTestHooks.routeRequest({
+      type: "CHAT_SEND",
+      requestId: requestId(),
+      threadId: "thread-record",
+      clientMessageId: requestId(),
+      text: "hello",
+    })).resolves.toEqual({ turnId: "turn-2" });
+  });
 });

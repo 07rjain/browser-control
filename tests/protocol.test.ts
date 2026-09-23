@@ -248,6 +248,28 @@ describe("extension boundary validation", () => {
 
   it("accepts model selection for thread and turn requests", () => {
     expect(uiRequestSchema.safeParse({ type: "MODELS_READ", requestId: crypto.randomUUID() }).success).toBe(true);
+    expect(uiRequestSchema.safeParse({ type: "SKILLS_LIST", requestId: crypto.randomUUID() }).success).toBe(true);
+    expect(uiRequestSchema.safeParse({
+      type: "SKILLS_SET_ENABLED",
+      requestId: crypto.randomUUID(),
+      name: "calendar-event",
+      enabled: false,
+    }).success).toBe(true);
+    expect(uiRequestSchema.safeParse({
+      type: "SKILLS_DELETE",
+      requestId: crypto.randomUUID(),
+      name: "",
+    }).success).toBe(false);
+    expect(uiRequestSchema.safeParse({
+      type: "RECORDING_START",
+      requestId: crypto.randomUUID(),
+      description: "Create an event from the current request.",
+    }).success).toBe(true);
+    expect(uiRequestSchema.safeParse({
+      type: "RECORDING_START",
+      requestId: crypto.randomUUID(),
+      description: " ",
+    }).success).toBe(false);
     expect(uiRequestSchema.safeParse({
       type: "CHAT_START",
       requestId: crypto.randomUUID(),

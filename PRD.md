@@ -400,6 +400,24 @@ Do not request persistent required `<all_urls>`, `history`, `bookmarks`, `downlo
 - Add Copy and per-turn Codex thread forking with local history integration.
 - Validate copy fidelity, fork independence, local history integration, and companion compatibility before release.
 
+### Phase 6 — Local skill discovery
+
+- Discover taught skills already stored under `~/.codex-sidebar/skills`.
+- Show name and description to the model on each thread, and load the full `SKILL.md` only after the model selects a skill.
+- Let Settings list, disable, and delete those skills on this Mac.
+- Keep `~/.codex` and `~/.agents/skills` out of Browser Control.
+
+### Phase 7 — Record a demonstration
+
+- Let the user record a skill by using the real page. The agent does not perform the demonstration.
+- Store the site, action, role, and accessible name. Do not store selectors, coordinates, live element ids, query strings, or secrets.
+- Treat control labels as page text. Quote them in the saved skill and tell the model they are not instructions.
+- Accept only trusted page events. Inject the packaged recorder only after the browser-control origin grant, and only in the top frame.
+- Refuse to start while a browser task is active, and refuse chat or browser tools while a recording is open.
+- Show a review before anything is written. The user can delete steps, add notes, and choose which typed examples to keep.
+- Save `~/.codex-sidebar/skills/<name>/SKILL.md` through the companion, then refresh the existing catalog.
+- Privacy: recordings stay on this Mac. Passwords, one-time codes, payment fields, and purchase controls are skipped. Other typed values are omitted unless the user keeps them in review. Saved skills are sent to the model only when a later request matches.
+
 ### MVP release criterion
 
 The MVP is ready for a private development beta when all P0 acceptance criteria pass, no critical/high security findings remain, authentication installation is documented, and the manager plus browser-validation specialist have verified the primary journey in Chrome.

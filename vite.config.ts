@@ -15,6 +15,7 @@ export default defineConfig({
         sidepanel: resolve(import.meta.dirname, "sidepanel.html"),
         background: resolve(import.meta.dirname, "src/background/service-worker.ts"),
         pageExecutor: resolve(import.meta.dirname, "src/content/page-executor.ts"),
+        pageRecorder: resolve(import.meta.dirname, "src/content/page-recorder.ts"),
       },
       output: {
         entryFileNames: (chunk) =>
@@ -22,7 +23,9 @@ export default defineConfig({
             ? "background.js"
             : chunk.name === "pageExecutor"
               ? "page-executor.js"
-              : "assets/[name]-[hash].js",
+              : chunk.name === "pageRecorder"
+                ? "page-recorder.js"
+                : "assets/[name]-[hash].js",
         chunkFileNames: "assets/[name]-[hash].js",
         assetFileNames: "assets/[name]-[hash][extname]",
       },

@@ -5,6 +5,10 @@ import {
   type NativeEnvelope,
   type SidebarEvent,
   type UiResponse,
+  skillDeletedResponseSchema,
+  skillEnabledResponseSchema,
+  skillSavedResponseSchema,
+  skillsListResponseSchema,
   uiRequestSchema,
   isSafeHttpUrl,
 } from "../shared/protocol";
@@ -13,6 +17,7 @@ import {
   BROWSER_TASK_ACTION_LIMIT_KEY,
   FULL_ACCESS_HOST_GRANT_KEY,
   FULL_ACCESS_HOST_PATTERNS,
+  TASK_ORIGINS_KEY,
   normalizeBrowserPermissionMode,
   normalizeBrowserTaskActionLimit,
   pageToolCallSchema,
@@ -20,6 +25,20 @@ import {
   type BrowserPermissionMode,
   type PageToolCall,
 } from "../shared/page-tools";
+import {
+  acceptRecorderPort,
+  cancelSkillRecording,
+  followRecordingActivation,
+  forgetRecordingTab,
+  grantSkillRecording,
+  noteRecordingNavigation,
+  readSkillRecording,
+  recordingBlocksBrowserWork,
+  saveSkillRecording,
+  startSkillRecording,
+  stopSkillRecording,
+  updateSkillRecording,
+} from "./skill-recording-host";
 import { captureCurrentPage, PagePermissionRequiredError } from "./page-extractor";
 import {
   currentControlOrigin,
@@ -44,7 +63,6 @@ const TASK_KEY = "codexSidebarBrowserTasks";
 const THREAD_TARGETS_KEY = "codexSidebarThreadWorkingTabs";
 const COMPLETION_NOTICE_KEY = "codexSidebarCompletionNotice";
 const PENDING_PROMPTS_KEY = "codexSidebarPendingBrowserPrompts";
-const TASK_ORIGINS_KEY = "codexSidebarTaskControlOrigins";
 const TASK_TOMBSTONE_TTL_MS = 10 * 60 * 1_000;
 const accountResponseSchema = z.object({ account: accountSchema, requiresOpenaiAuth: z.boolean() });
 const loginResponseSchema = z.object({
@@ -179,6 +197,10 @@ async function handleNativeEnvelope(message: NativeEnvelope): Promise<void> {
     void handleDynamicToolCall(message.data);
     return;
   }
+  if (message.event === "skill.status") {
+    await recordSkillStatus(message.data);
+    return;
+  }
   if (message.event === "chat.turnCompleted") {
     const data = message.data as { turnId?: unknown; turn?: { id?: unknown } } | undefined;
     const turnId = data?.turnId ?? data?.turn?.id;
@@ -283,7 +305,28 @@ async function storeCompleted(call: BrowserToolCall, success: boolean, result: u
   await chrome.storage.session.set({ [COMPLETED_KEY]: current.slice(-30) });
 }
 
-async function storeActivity(call: BrowserToolCall, status: string, extra?: Record<string, unknown>): Promise<void> {
+const skillStatusSchema = z.object({
+  callId: z.string().min(1),
+  threadId: z.string().min(1),
+  turnId: z.string().min(1),
+  name: z.string().trim().min(1).max(100),
+  status: z.enum(["succeeded", "failed"]),
+  error: z.string().max(500).optional(),
+});
+
+async function recordSkillStatus(input: unknown): Promise<void> {
+  const parsed = skillStatusSchema.safeParse(input);
+  if (!parsed.success) return;
+  await storeActivity({
+    callId: parsed.data.callId,
+    namespace: "skills",
+    tool: parsed.data.name,
+    threadId: parsed.data.threadId,
+    turnId: parsed.data.turnId,
+  }, parsed.data.status, parsed.data.error ? { error: parsed.data.error } : undefined);
+}
+
+async function storeActivity(call: { callId: string; namespace?: string; tool: string; threadId: string; turnId: string }, status: string, extra?: Record<string, unknown>): Promise<void> {
   const entry = {
     callId: call.callId,
     namespace: call.namespace,
@@ -760,6 +803,10 @@ async function handleDynamicToolCall(input: unknown): Promise<void> {
       await respondToTool(call, completed.success, completed.result);
       return;
     }
+    if (await recordingBlocksBrowserWork()) {
+      await finishTool(call, false, { error: "Skill recording is open. Finish or cancel it before browser actions." }, "failed");
+      return;
+    }
     if (call.namespace === "tabs") await handleTabCall(call, true);
     else await handlePageCall(call, true);
   } catch (error) {
@@ -996,6 +1043,20 @@ async function routeRequest(input: unknown): Promise<unknown> {
     case "AUTH_LOGOUT": return requestNative("auth.logout");
     case "DELETE_ALL_LOCAL_DATA": return requestNative("data.deleteAll");
     case "MODELS_READ": return modelsResponseSchema.parse(await requestNative("models.list"));
+    case "SKILLS_LIST": return skillsListResponseSchema.parse(await requestNative("skills.list"));
+    case "SKILLS_SET_ENABLED": return skillEnabledResponseSchema.parse(await requestNative("skills.setEnabled", { name: request.name, enabled: request.enabled }));
+    case "SKILLS_DELETE": return skillDeletedResponseSchema.parse(await requestNative("skills.delete", { name: request.name }));
+    case "RECORDING_READ": return readSkillRecording();
+    case "RECORDING_START": return startSkillRecording(request.description);
+    case "RECORDING_STOP": return stopSkillRecording();
+    case "RECORDING_CANCEL": return cancelSkillRecording();
+    case "RECORDING_GRANT": return grantSkillRecording(request.originPattern, request.granted);
+    case "RECORDING_UPDATE": return updateSkillRecording(request);
+    case "RECORDING_SAVE": {
+      const saved = await saveSkillRecording(async (markdown) => skillSavedResponseSchema.parse(await requestNative("skills.save", { markdown })));
+      broadcast("skills.changed");
+      return saved;
+    }
     case "CHAT_START": return threadResponseSchema.parse(await requestNative("chat.start", { model: request.model }));
     case "CHAT_RESUME": return threadResponseSchema.parse(await requestNative("chat.resume", { threadId: request.threadId, model: request.model }));
     case "CHAT_FORK": {
@@ -1007,6 +1068,7 @@ async function routeRequest(input: unknown): Promise<unknown> {
       return result;
     }
     case "CHAT_SEND": {
+      if (await recordingBlocksBrowserWork()) throw new Error("Finish or cancel skill recording before sending a message.");
       const tabId = await ensureThreadWorkingTab(request.threadId);
       const result = turnResponseSchema.parse(await requestNative("chat.send", { threadId: request.threadId, text: request.text, clientMessageId: request.clientMessageId, model: request.model }));
       await initializeBrowserTask(request.threadId, result.turnId, tabId);
@@ -1053,8 +1115,18 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
 chrome.tabs.onRemoved.addListener((tabId) => {
   void handleRemovedWorkingTab(tabId);
 });
+chrome.runtime.onConnect?.addListener?.((port) => {
+  acceptRecorderPort(port);
+});
+chrome.tabs.onActivated?.addListener?.((info) => {
+  followRecordingActivation(info.tabId);
+});
+chrome.tabs.onUpdated?.addListener?.((tabId, changeInfo, tab) => {
+  if (changeInfo.url || changeInfo.status === "complete") noteRecordingNavigation(tabId, changeInfo.url ?? tab.url);
+});
 
 async function handleRemovedWorkingTab(tabId: number): Promise<void> {
+  await forgetRecordingTab(tabId).catch(() => undefined);
   const targets = await storedList<ThreadWorkingTab>(THREAD_TARGETS_KEY);
   await chrome.storage.session.set({
     [THREAD_TARGETS_KEY]: targets.filter((target) => target.tabId !== tabId),

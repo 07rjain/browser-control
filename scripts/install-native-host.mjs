@@ -22,10 +22,12 @@ const hostName = "com.codex.sidebar";
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const sourceHostScript = realpathSync(join(repositoryRoot, "bridge", "native-host.mjs"));
 const sourceProtocolScript = realpathSync(join(repositoryRoot, "bridge", "protocol.mjs"));
+const sourceSkillsScript = realpathSync(join(repositoryRoot, "bridge", "skills.mjs"));
 const applicationRoot = join(homedir(), "Library", "Application Support", "Browser Control");
 const runtimeDir = join(applicationRoot, "host", companionVersion);
 const installedHostScript = join(runtimeDir, "native-host.mjs");
 const installedProtocolScript = join(runtimeDir, "protocol.mjs");
+const installedSkillsScript = join(runtimeDir, "skills.mjs");
 const binDir = join(applicationRoot, "bin");
 const launcher = join(binDir, "native-host");
 const appHome = join(homedir(), ".codex-sidebar");
@@ -40,6 +42,7 @@ if (process.platform !== "darwin") {
 
 accessSync(sourceHostScript, constants.R_OK);
 accessSync(sourceProtocolScript, constants.R_OK);
+accessSync(sourceSkillsScript, constants.R_OK);
 
 function resolveCodexBinary() {
   const requested = process.env.CODEX_BIN?.trim()
@@ -64,8 +67,10 @@ mkdirSync(runtimeDir, { recursive: true, mode: 0o700 });
 mkdirSync(binDir, { recursive: true, mode: 0o700 });
 copyFileSync(sourceHostScript, installedHostScript);
 copyFileSync(sourceProtocolScript, installedProtocolScript);
+copyFileSync(sourceSkillsScript, installedSkillsScript);
 chmodSync(installedHostScript, 0o700);
 chmodSync(installedProtocolScript, 0o600);
+chmodSync(installedSkillsScript, 0o600);
 
 const shellQuote = (value) => `'${value.replaceAll("'", `'\\''`)}'`;
 const nodeBinDirectory = dirname(process.execPath);
