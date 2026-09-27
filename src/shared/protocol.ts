@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { conversationSnapshotSchema } from "./conversation-state";
 
 export const pageAttachmentSchema = z.object({
   title: z.string().max(500),
@@ -107,6 +108,11 @@ export const uiRequestSchema = z.discriminatedUnion("type", [
     keepExample: z.object({ stepId: z.string().uuid(), keep: z.boolean() }).optional(),
   }),
   requestBase.extend({ type: z.literal("RECORDING_SAVE") }),
+  requestBase.extend({
+    type: z.literal("CONVERSATION_SAVE"),
+    snapshot: conversationSnapshotSchema,
+  }),
+  requestBase.extend({ type: z.literal("CONVERSATION_CLEAR") }),
 ]);
 
 export const sidebarSkillSchema = z.object({

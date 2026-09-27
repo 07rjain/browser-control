@@ -39,6 +39,7 @@ import {
   stopSkillRecording,
   updateSkillRecording,
 } from "./skill-recording-host";
+import { clearConversationStore, saveConversationSnapshot } from "./conversation-persist";
 import { captureCurrentPage, PagePermissionRequiredError } from "./page-extractor";
 import {
   currentControlOrigin,
@@ -1057,6 +1058,8 @@ async function routeRequest(input: unknown): Promise<unknown> {
       broadcast("skills.changed");
       return saved;
     }
+    case "CONVERSATION_SAVE": return saveConversationSnapshot(request.snapshot);
+    case "CONVERSATION_CLEAR": return clearConversationStore();
     case "CHAT_START": return threadResponseSchema.parse(await requestNative("chat.start", { model: request.model }));
     case "CHAT_RESUME": return threadResponseSchema.parse(await requestNative("chat.resume", { threadId: request.threadId, model: request.model }));
     case "CHAT_FORK": {

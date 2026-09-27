@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { messageTextSize, SIDEBAR_STATE_STORAGE_KEY, type ConversationSnapshot } from "../shared/conversation-state";
 import { isSafeHttpUrl, sanitizeMarkdownUrl, type PageAttachment, type SidebarEvent, type SidebarSkill, type UiResponse } from "../shared/protocol";
 import {
   BROWSER_PERMISSION_MODE_KEY,
@@ -85,7 +86,8 @@ interface RetryPayload {
 }
 
 const INITIAL_STATE: PersistedState = { threadId: null, messages: [], theme: "system", selectedModel: "", completionSoundEnabled: false };
-const STORAGE_KEY = "codexSidebarState";
+const STORAGE_KEY = SIDEBAR_STATE_STORAGE_KEY;
+const CONVERSATION_SAVE_DELAY_MS = 400;
 const PAGE_ORIGINS_KEY = "codexSidebarGrantedPageOrigins";
 const COMPANION_SUPPORT_URL = "https://07rjain.github.io/browser-control-support/support.html";
 
@@ -320,6 +322,12 @@ export default function App() {
   const turnExecutedToolRef = useRef(false);
   const stopRequestedRef = useRef(false);
   const completionSoundEnabledRef = useRef(false);
+  const conversationSaveEpoch = useRef(0);
+  const conversationSnapshotRef = useRef<ConversationSnapshot | null>(null);
+  const conversationSaveTimer = useRef<number | null>(null);
+  const conversationSaveError = useRef<string | null>(null);
+  const lastConversationSaveKey = useRef("");
+  const conversationPersistSuspended = useRef(false);
 
   const streaming = activeTurnId !== null || isSending;
   const recordingActive = recording.status !== "idle";
@@ -342,18 +350,30 @@ export default function App() {
       .get([STORAGE_KEY, BROWSER_PERMISSION_MODE_KEY, BROWSER_TASK_ACTION_LIMIT_KEY, FULL_ACCESS_HOST_GRANT_KEY])
       .then(async (stored) => {
         const state = (stored[STORAGE_KEY] as PersistedState | undefined) ?? INITIAL_STATE;
-        const restoredMessages = Array.isArray(state.messages)
-          ? state.messages.map((message) => ({ ...message, streaming: false }))
-          : [];
+        const restoredHistory = readConversationHistory(state.conversationHistory);
         const restoredConversationId = typeof state.currentConversationId === "string"
           ? state.currentConversationId
           : crypto.randomUUID();
-        setThreadId(state.threadId);
+        const stateMessages = Array.isArray(state.messages)
+          ? state.messages.map((message) => ({ ...message, streaming: false }))
+          : [];
+        const historyRecord = restoredHistory.find((item) => item.id === restoredConversationId);
+        const historyMessages = historyRecord?.messages.map((message) => ({ ...message, streaming: false })) ?? [];
+        const useHistoryTranscript = messageTextSize(historyMessages) > messageTextSize(stateMessages);
+        const restoredMessages = useHistoryTranscript ? historyMessages : stateMessages;
+        const restoredThreadId = useHistoryTranscript ? historyRecord?.threadId ?? state.threadId : state.threadId;
+        setThreadId(restoredThreadId);
         setMessages(restoredMessages);
         setCurrentConversationId(restoredConversationId);
         setConversationHistory(upsertConversation(
-          readConversationHistory(state.conversationHistory),
-          createConversationRecord(restoredConversationId, state.threadId, restoredMessages, [], Date.now()),
+          restoredHistory,
+          createConversationRecord(
+            restoredConversationId,
+            restoredThreadId,
+            restoredMessages,
+            useHistoryTranscript ? historyRecord?.toolStatuses ?? [] : [],
+            historyRecord?.updatedAt ?? Date.now(),
+          ),
         ));
         setTheme(state.theme ?? "system");
         setSelectedModel(state.selectedModel ?? "");
@@ -395,8 +415,22 @@ export default function App() {
       .catch(() => setModels([]));
   }, [authState]);
 
+  const deliverConversationSnapshot = useCallback((snapshot: ConversationSnapshot, epoch: number) => {
+    if (epoch !== conversationSaveEpoch.current) return;
+    void sendRequest({ type: "CONVERSATION_SAVE", snapshot }).then(() => {
+      conversationSaveError.current = null;
+    }).catch((cause: unknown) => {
+      if (epoch !== conversationSaveEpoch.current) return;
+      const text = cause instanceof Error ? cause.message : "This conversation could not be saved.";
+      if (conversationSaveError.current === text) return;
+      conversationSaveError.current = text;
+      setError(text);
+    });
+  }, []);
+
   useEffect(() => {
-    if (!hydrated) return;
+    if (!hydrated || conversationPersistSuspended.current) return;
+    const epoch = conversationSaveEpoch.current;
     const currentConversation = createConversationRecord(
       currentConversationId,
       threadId,
@@ -404,18 +438,59 @@ export default function App() {
       toolStatuses,
     );
     const retainedHistory = upsertConversation(conversationHistory, currentConversation);
-    void chrome.storage.local.set({
-      [STORAGE_KEY]: {
-        threadId,
-        messages: currentConversation.messages,
-        theme,
-        selectedModel,
-        completionSoundEnabled,
-        currentConversationId,
-        conversationHistory: retainedHistory,
-      } satisfies PersistedState,
-    });
-  }, [completionSoundEnabled, conversationHistory, currentConversationId, hydrated, messages, selectedModel, theme, threadId, toolStatuses]);
+    const snapshot: ConversationSnapshot = {
+      savedAt: Date.now(),
+      threadId,
+      currentConversationId,
+      messages: currentConversation.messages,
+      theme,
+      selectedModel,
+      completionSoundEnabled,
+      conversationHistory: retainedHistory,
+    };
+    conversationSnapshotRef.current = snapshot;
+    const latestUserMessageId = [...messages].reverse().find((message) => message.role === "user")?.id ?? "";
+    const saveKey = `${currentConversationId}:${latestUserMessageId}`;
+    const saveImmediately = saveKey !== lastConversationSaveKey.current;
+    lastConversationSaveKey.current = saveKey;
+    if (conversationSaveTimer.current !== null) {
+      window.clearTimeout(conversationSaveTimer.current);
+      conversationSaveTimer.current = null;
+    }
+    if (saveImmediately) {
+      deliverConversationSnapshot(snapshot, epoch);
+      return;
+    }
+    conversationSaveTimer.current = window.setTimeout(() => {
+      conversationSaveTimer.current = null;
+      deliverConversationSnapshot(snapshot, epoch);
+    }, CONVERSATION_SAVE_DELAY_MS);
+  }, [completionSoundEnabled, conversationHistory, currentConversationId, deliverConversationSnapshot, hydrated, messages, selectedModel, theme, threadId, toolStatuses]);
+
+  useEffect(() => {
+    const flushConversationSnapshot = () => {
+      if (conversationSaveTimer.current !== null) {
+        window.clearTimeout(conversationSaveTimer.current);
+        conversationSaveTimer.current = null;
+      }
+      const snapshot = conversationSnapshotRef.current;
+      if (!snapshot) return;
+      void chrome.runtime.sendMessage({
+        type: "CONVERSATION_SAVE",
+        requestId: crypto.randomUUID(),
+        snapshot,
+      });
+    };
+    const flushWhenHidden = () => {
+      if (document.visibilityState === "hidden") flushConversationSnapshot();
+    };
+    window.addEventListener("pagehide", flushConversationSnapshot);
+    document.addEventListener("visibilitychange", flushWhenHidden);
+    return () => {
+      window.removeEventListener("pagehide", flushConversationSnapshot);
+      document.removeEventListener("visibilitychange", flushWhenHidden);
+    };
+  }, []);
 
   useEffect(() => {
     completionSoundEnabledRef.current = completionSoundEnabled;
@@ -936,7 +1011,16 @@ export default function App() {
   };
 
   const clearBrowserStorage = async (cancelTask = true) => {
+    conversationSaveEpoch.current += 1;
+    conversationPersistSuspended.current = true;
+    conversationSnapshotRef.current = null;
+    lastConversationSaveKey.current = "";
+    if (conversationSaveTimer.current !== null) {
+      window.clearTimeout(conversationSaveTimer.current);
+      conversationSaveTimer.current = null;
+    }
     if (cancelTask && threadId) await sendRequest({ type: "BROWSER_TASK_CANCEL", threadId }).catch(() => undefined);
+    await sendRequest({ type: "CONVERSATION_CLEAR" }).catch(() => undefined);
     const stored = await chrome.storage.local.get([PAGE_ORIGINS_KEY, TASK_ORIGINS_KEY]);
     const attachmentOrigins = Array.isArray(stored[PAGE_ORIGINS_KEY])
       ? (stored[PAGE_ORIGINS_KEY] as string[])
@@ -956,6 +1040,7 @@ export default function App() {
   };
 
   const resetBrowserState = () => {
+    conversationPersistSuspended.current = false;
     setThreadId(null);
     threadReadyRef.current = false;
     setCurrentConversationId(crypto.randomUUID());
@@ -1108,15 +1193,15 @@ export default function App() {
             className="icon-button"
             aria-label="Open conversation history"
             aria-expanded={historyOpen}
-            title="History"
+            data-tooltip="Open conversations saved in this browser"
             disabled={streaming}
             onClick={() => {
               setHistoryOpen(!historyOpen);
               setMenuOpen(false);
             }}
           >◷</button>
-          <button className="icon-button" aria-label="Start a new chat" title="New chat" onClick={newChat}>＋</button>
-          <button className="icon-button" aria-label="Open settings" aria-expanded={menuOpen} onClick={() => {
+          <button className="icon-button" aria-label="Start a new chat" data-tooltip="Start a new conversation. This one stays in history." onClick={newChat}>＋</button>
+          <button className="icon-button" aria-label="Open settings" aria-expanded={menuOpen} data-tooltip="Theme, model, permissions, and saved skills" onClick={() => {
             setMenuOpen(!menuOpen);
             setHistoryOpen(false);
             if (!menuOpen) void refreshSkills();
@@ -1215,37 +1300,7 @@ export default function App() {
             </p>
             <div className="skill-settings">
               <p className="menu-hint">Taught skills</p>
-              <p className="menu-hint">Saved on this Mac and matched automatically when a request fits. Choosing a skill does not skip action confirmations.</p>
-              {recordComposerOpen ? (
-                <form className="record-start" onSubmit={(event) => {
-                  event.preventDefault();
-                  void startRecording();
-                }}>
-                  <label>
-                    When should the agent use this skill?
-                    <textarea
-                      value={recordWhen}
-                      maxLength={500}
-                      rows={3}
-                      onChange={(event) => setRecordWhen(event.target.value)}
-                      placeholder="Create a calendar event from the title and time in the request."
-                    />
-                  </label>
-                  <div className="recording-actions">
-                    <button type="button" onClick={() => setRecordComposerOpen(false)}>Cancel</button>
-                    <button type="submit" disabled={recordWhen.trim().length === 0 || streaming || recordingActive}>Start recording</button>
-                  </div>
-                </form>
-              ) : (
-                <button
-                  type="button"
-                  className="settings-grant-button"
-                  disabled={streaming || recordingActive}
-                  onClick={() => setRecordComposerOpen(true)}
-                >
-                  Record a skill
-                </button>
-              )}
+              <p className="menu-hint">Saved on this Mac and matched automatically when a request fits. Record a new skill from the message box. Choosing a skill does not skip action confirmations.</p>
               {skillsError && <p className="menu-hint">{skillsError}</p>}
               {taughtSkills.length === 0 ? (
                 <p className="menu-hint">No taught skills yet.</p>
@@ -1378,14 +1433,14 @@ export default function App() {
                   )}
                   {message.role === "assistant" && message.text && !message.streaming && !message.failed && (
                     <div className="message-actions" aria-label="Response actions">
-                      <button type="button" onClick={() => void copyMessage(message)} title="Copy response">
+                      <button type="button" onClick={() => void copyMessage(message)} data-tooltip="Copy this response">
                         <span aria-hidden="true">▣</span> {copiedMessageId === message.id ? "Copied" : "Copy"}
                       </button>
                       <button
                         type="button"
                         onClick={() => void forkConversation(message)}
                         disabled={!threadId || Boolean(forkingMessageId) || streaming}
-                        title="Fork conversation from this response"
+                        data-tooltip="Start a new conversation from this response"
                       >
                         <span aria-hidden="true">⑂</span> {forkingMessageId === message.id ? "Forking…" : "Fork"}
                       </button>
@@ -1524,6 +1579,27 @@ export default function App() {
             <button aria-label="Remove page attachment" onClick={() => setAttachment(null)}>×</button>
           </div>
         )}
+        {recordComposerOpen && !recordingActive && (
+          <form className="record-start composer-record" onSubmit={(event) => {
+            event.preventDefault();
+            void startRecording();
+          }}>
+            <label>
+              When should the agent use this skill?
+              <textarea
+                value={recordWhen}
+                maxLength={500}
+                rows={3}
+                onChange={(event) => setRecordWhen(event.target.value)}
+                placeholder="Create a calendar event from the title and time in the request."
+              />
+            </label>
+            <div className="recording-actions">
+              <button type="button" className="secondary-button" onClick={() => setRecordComposerOpen(false)}>Cancel</button>
+              <button type="submit" className="primary-button" disabled={recordWhen.trim().length === 0 || streaming}>Start recording</button>
+            </div>
+          </form>
+        )}
         <form className="composer" onSubmit={(event) => void submit(event)}>
           <textarea
             value={draft}
@@ -1540,13 +1616,30 @@ export default function App() {
             rows={1}
           />
           <div className="composer-toolbar">
-            <button type="button" className="attach-button" onClick={() => void attachPage()} aria-label="Attach the current page">
-              ⊕ <span>Attach page</span>
-            </button>
+            <div className="composer-tools">
+              <button type="button" className="attach-button" onClick={() => void attachPage()} aria-label="Attach the current page" data-tooltip="Share the current page with this message">
+                ⊕ <span>Attach page</span>
+              </button>
+              <button
+                type="button"
+                className="attach-button"
+                aria-label="Record a skill"
+                aria-expanded={recordComposerOpen}
+                data-tooltip="Records your clicks and typing on the page, then saves them as a skill after you review it"
+                disabled={streaming || recordingActive}
+                onClick={() => {
+                  setRecordComposerOpen((open) => !open);
+                  setMenuOpen(false);
+                  setHistoryOpen(false);
+                }}
+              >
+                <span>Record</span>
+              </button>
+            </div>
             {streaming ? (
-              <button type="button" className="stop-button" onClick={() => void stop()} aria-label="Stop response">■</button>
+              <button type="button" className="stop-button" onClick={() => void stop()} aria-label="Stop response" data-tooltip="Stop the current response">■</button>
             ) : (
-              <button type="submit" className="send-button" disabled={!canSend} aria-label="Send message">↑</button>
+              <button type="submit" className="send-button" disabled={!canSend} aria-label="Send message" data-tooltip="Send this message">↑</button>
             )}
           </div>
         </form>
