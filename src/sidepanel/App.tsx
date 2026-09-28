@@ -1173,7 +1173,7 @@ export default function App() {
         {isMissingNativeHost(error) ? (
           <section className="setup-card" aria-live="polite">
             <p className="login-label">The companion is not registered in this browser yet.</p>
-            <p>Node.js, Codex, and this extension can be installed in any order. From the Browser Control project folder, or from the extracted companion download, run:</p>
+            <p>Node.js, Codex, and this extension can be installed in any order. Run this in any folder. It downloads the companion and registers it:</p>
             <code className="setup-command">{COMPANION_INSTALL_COMMAND}</code>
             <button
               className="secondary-button"
