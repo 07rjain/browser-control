@@ -386,7 +386,7 @@ async function ensureAppServer() {
   });
 
   initialized = appRequest("initialize", {
-    clientInfo: { name: "browser-control", title: "Browser Control", version: "0.3.3" },
+    clientInfo: { name: "browser-control", title: "Browser Control", version: "0.3.4" },
     capabilities: { experimentalApi: true, requestAttestation: false },
   }).then((result) => {
     writeAppServer({ method: "initialized", params: {} });
@@ -543,7 +543,7 @@ async function handleRequest(message) {
 
   switch (message.method) {
     case "bridge.status":
-      return { connected: true, version: "0.3.3" };
+      return { connected: true, version: "0.3.4" };
     case "account.read":
       return appRequest("account/read", { refreshToken: false });
     case "auth.login":

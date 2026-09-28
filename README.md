@@ -6,7 +6,7 @@ The repository contains the implemented MVP plus the approved supervised browser
 
 ## Project status
 
-The MVP and supervised browser controls are implemented locally. A first public Chrome Web Store release is approved and in release preparation, with a public privacy/support site and separately distributed macOS native companion. It is not yet published. Manual Chrome validation and reliability hardening on dynamic applications such as Google Calendar remain release gates.
+The MVP and supervised browser controls are available on the Chrome Web Store. The macOS native companion is distributed separately from the public support site. Manual Chrome validation and reliability hardening on dynamic applications such as Google Calendar remain release gates for updates.
 
 Known limitation: `page.inspect` currently returns the first 80 visible interactive controls in document order. Dense pages can place the requested control beyond that limit, so Codex may report that it cannot see or click a control that is visibly present. Active-dialog and viewport prioritization are not implemented yet.
 

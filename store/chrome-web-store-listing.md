@@ -35,7 +35,8 @@ Key features:
   checking, keypress, scrolling, history, waiting, dragging, and form submission.
 - See chronological browser activity, use short-lived element references, set a
   per-request action limit, and stop active work.
-- Copy a completed reply or fork a conversation from an earlier response.
+- Reopen local conversation history, copy a completed reply, or fork a
+  conversation from an earlier response.
 - Record a browser demonstration, review its steps, and save it as a local skill
   for later matching requests. Settings can disable or delete saved skills.
 - Choose Ask every time for exact-site access and supported consequential-action
@@ -77,6 +78,7 @@ endorsed by OpenAI.
 ## Dashboard URLs
 
 - Homepage: https://07rjain.github.io/browser-control-support/
+- Promo video: https://www.youtube.com/watch?v=K2_ByJLRDL0
 - Privacy policy: https://07rjain.github.io/browser-control-support/privacy.html
 - Support: https://07rjain.github.io/browser-control-support/support.html
 - Companion downloads: https://github.com/07rjain/browser-control-support/releases
