@@ -1069,13 +1069,13 @@ export default function App() {
   };
 
   const clearLocalData = async () => {
-    if (!confirm("Clear browser transcripts, preferences, activity, and site permissions? Your ChatGPT sign-in and local Codex data on this Mac will be kept.")) return;
+    if (!confirm("Clear browser transcripts, preferences, activity, and site permissions? Your ChatGPT sign-in and local Codex data on this computer will be kept.")) return;
     await clearBrowserStorage();
     resetBrowserState();
   };
 
   const deleteAllLocalData = async () => {
-    if (!confirm("Delete all Browser Control data from this browser and Mac, including local conversations and the Browser Control ChatGPT sign-in? The installed companion will be kept.")) return;
+    if (!confirm("Delete all Browser Control data from this browser and computer, including local conversations and the Browser Control ChatGPT sign-in? The installed companion will be kept.")) return;
     setError(null);
     try {
       if (threadId) await sendRequest({ type: "BROWSER_TASK_CANCEL", threadId }).catch(() => undefined);
@@ -1300,7 +1300,7 @@ export default function App() {
             </p>
             <div className="skill-settings">
               <p className="menu-hint">Taught skills</p>
-              <p className="menu-hint">Saved on this Mac and matched automatically when a request fits. Record a new skill from the message box. Choosing a skill does not skip action confirmations.</p>
+              <p className="menu-hint">Saved on this computer and matched automatically when a request fits. Record a new skill from the message box. Choosing a skill does not skip action confirmations.</p>
               {skillsError && <p className="menu-hint">{skillsError}</p>}
               {taughtSkills.length === 0 ? (
                 <p className="menu-hint">No taught skills yet.</p>
@@ -1315,7 +1315,7 @@ export default function App() {
                           className="skill-delete"
                           aria-label={`Delete ${skill.name}`}
                           onClick={() => {
-                            if (!window.confirm(`Delete the skill “${skill.name}”? This removes it from this Mac.`)) return;
+                            if (!window.confirm(`Delete the skill “${skill.name}”? This removes it from this computer.`)) return;
                             void sendRequest({ type: "SKILLS_DELETE", name: skill.name })
                               .then(() => refreshSkills())
                               .catch((cause: unknown) => setSkillsError(cause instanceof Error ? cause.message : "Unable to delete that skill."));

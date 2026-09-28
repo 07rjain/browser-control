@@ -19,14 +19,14 @@
     <main>
       <p class="eyebrow">Support</p>
       <h1>Install safely, verify the connection, and stay in control.</h1>
-      <p class="lede">Browser Control currently supports Google Chrome and Brave on macOS and needs a local companion because Chromium extensions cannot start Codex CLI directly.</p>
+      <p class="lede">Browser Control supports Google Chrome and Brave on macOS, Linux, and Windows. It needs a local companion because Chromium extensions cannot start Codex CLI directly.</p>
 
       <section id="requirements">
         <h2>Requirements</h2>
         <ul>
-          <li>macOS and current stable Google Chrome or Brave.</li>
+          <li>macOS, Linux, or Windows, with current stable Google Chrome or Brave. Chromium on Linux is best-effort. Snap and Flatpak Chrome are not supported.</li>
           <li>Node.js 20 or newer.</li>
-          <li>A compatible Codex CLI available as <code>codex</code>.</li>
+          <li>A compatible Codex CLI. On Windows, the installer needs <code>codex.exe</code> rather than the npm <code>.cmd</code> shim. Windows also needs the .NET Framework C# compiler (<code>csc.exe</code>) to build the launcher.</li>
           <li>An eligible ChatGPT/Codex account. Browser Control does not ask for an API key.</li>
         </ul>
         <pre><code>node --version
@@ -38,12 +38,12 @@ codex --version</code></pre>
         <ol>
           <li>Install Browser Control from its Chrome Web Store listing.</li>
           <li>Download the companion ZIP and matching <code>SHA256SUMS</code> from the <a href="https://github.com/07rjain/browser-control-support/releases">official GitHub Releases page</a>. Do not download a repackaged copy from another site.</li>
-          <li>Extract the ZIP. In Terminal, change to that extracted directory.</li>
+          <li>Extract the ZIP. In a terminal, change to that extracted directory.</li>
           <li>Verify the archive contents using the checksum instructions included with the release.</li>
           <li>Run <code>node scripts/install-native-host.mjs</code>. The installer prints the Chrome extension ID and registered host path.</li>
           <li>Restart Chrome, open Browser Control, and choose <strong>Sign in with ChatGPT</strong>.</li>
         </ol>
-        <p>The installer copies the host into <code>~/Library/Application Support/Browser Control/</code> and registers <code>com.codex.sidebar</code> with Chrome. It does not install an unrelated app, browser extension, analytics service, or background login item.</p>
+        <p>The installer registers <code>com.codex.sidebar</code> for the current user. On macOS the runtime is <code>~/Library/Application Support/Browser Control/</code>. On Linux it is <code>~/.local/share/browser-control/</code>. On Windows it is <code>%LOCALAPPDATA%\Browser Control\</code>. It does not install an unrelated app, browser extension, analytics service, or background login item.</p>
       </section>
 
       <section id="update">
@@ -56,7 +56,7 @@ codex --version</code></pre>
         <h3>“Native host not found”</h3>
         <p>Install or reinstall the companion, confirm the installer reports success, fully quit and reopen the browser, and run <code>node scripts/smoke-installed-host.mjs</code> from the extracted release. A companion built for a different Store extension ID will be refused.</p>
         <h3>“Codex not found”</h3>
-        <p>Run <code>codex --version</code> in Terminal. Install or repair Codex CLI, then reinstall the companion so it records the correct executable.</p>
+        <p>Run <code>codex --version</code> in a terminal. Install or repair Codex CLI, then reinstall the companion so it records the correct executable. On Windows, set <code>CODEX_BIN</code> to the full path of <code>codex.exe</code> if only a <code>.cmd</code> shim is found.</p>
         <h3>Sign-in does not finish</h3>
         <p>Keep the sign-in tab open until the Codex callback completes, then return to the side panel. If necessary, cancel and retry. Browser Control never reads ChatGPT cookies.</p>
         <h3>A site asks for access</h3>
@@ -68,7 +68,7 @@ codex --version</code></pre>
       <section id="data-deletion">
         <h2>Clear or delete data</h2>
         <h3>Clear browser data and permissions</h3>
-        <p>In Browser Control settings, choose <strong>Clear browser data and permissions</strong>. This removes Chrome-side transcripts, activity, preferences, temporary task state, and retained site grants. It keeps the dedicated Codex login and persistent Codex threads on the Mac.</p>
+        <p>In Browser Control settings, choose <strong>Clear browser data and permissions</strong>. This removes Chrome-side transcripts, activity, preferences, temporary task state, and retained site grants. It keeps the dedicated Codex login and persistent Codex threads on this computer.</p>
         <h3>Delete all Browser Control data and sign out</h3>
         <p>Choose <strong>Delete all Browser Control data and sign out</strong> and confirm the warning. Browser Control stops active work, clears Chrome-side data and permissions, signs out, and removes its dedicated <code>~/.codex-sidebar</code> data. The companion stays installed so the extension can be used again later.</p>
         <h3>Manual deletion</h3>

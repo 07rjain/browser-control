@@ -2,7 +2,7 @@
 
 - Status: MVP and supervised browser control implemented; first public Chrome Web Store release approved and in preparation, Chrome validation pending
 - Owner: `codex-chrome-extension-manager`
-- Last updated: 2026-08-22
+- Last updated: 2026-09-28
 - Target platform: Chromium browsers supporting Manifest V3 and `chrome.sidePanel`
 
 ## 1. Executive summary
@@ -24,7 +24,7 @@ The original MVP is a local, user-driven chat, attachment, and tab-tool experien
 ### Target users
 
 - Primary: existing Codex/ChatGPT users who want assistance while researching or working in Chromium.
-- Secondary: technical macOS early adopters willing to install the separately distributed local Codex companion required by the first public release.
+- Secondary: technical desktop early adopters willing to install the separately distributed local Codex companion required by the first public release.
 
 ### MVP success metrics
 
@@ -354,9 +354,9 @@ Do not request persistent required `<all_urls>`, `history`, `bookmarks`, `downlo
 
 ### Compatibility
 
-- MVP support target: current stable Google Chrome on macOS first.
-- Chromium-based browser support is best-effort until each browser's side-panel and local-bridge behavior is tested.
-- Windows, Linux, ChromeOS, mobile, Firefox, and Safari packaging are post-MVP unless required to validate the chosen bridge.
+- Desktop Google Chrome and Brave on macOS, Linux, and Windows. Chromium on Linux is best-effort until its side-panel and native-messaging behavior is tested on that build.
+- ChromeOS, mobile browsers, Firefox, and Safari are out of scope.
+- Snap and Flatpak Chrome may be unable to start the companion. A normal desktop Chrome or Brave install is required.
 
 ## 8. Delivery plan
 
@@ -404,7 +404,7 @@ Do not request persistent required `<all_urls>`, `history`, `bookmarks`, `downlo
 
 - Discover taught skills already stored under `~/.codex-sidebar/skills`.
 - Show name and description to the model on each thread, and load the full `SKILL.md` only after the model selects a skill.
-- Let Settings list, disable, and delete those skills on this Mac.
+- Let Settings list, disable, and delete those skills on this computer.
 - Keep `~/.codex` and `~/.agents/skills` out of Browser Control.
 
 ### Phase 7 — Record a demonstration
@@ -416,7 +416,7 @@ Do not request persistent required `<all_urls>`, `history`, `bookmarks`, `downlo
 - Refuse to start while a browser task is active, and refuse chat or browser tools while a recording is open.
 - Show a review before anything is written. The user can delete steps, add notes, and choose which typed examples to keep.
 - Save `~/.codex-sidebar/skills/<name>/SKILL.md` through the companion, then refresh the existing catalog.
-- Privacy: recordings stay on this Mac. Passwords, one-time codes, payment fields, and purchase controls are skipped. Other typed values are omitted unless the user keeps them in review. Saved skills are sent to the model only when a later request matches.
+- Privacy: recordings stay on this computer. Passwords, one-time codes, payment fields, and purchase controls are skipped. Other typed values are omitted unless the user keeps them in review. Saved skills are sent to the model only when a later request matches.
 
 ### MVP release criterion
 

@@ -1,13 +1,19 @@
-import { spawn, execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync, spawn } from "node:child_process";
+import { existsSync, mkdtempSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { join, resolve, dirname } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { encodeNativeMessage, LengthPrefixedJsonDecoder } from "../bridge/protocol.mjs";
+import { resolveCodexBinary } from "./host-paths.mjs";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const temporaryHome = mkdtempSync(join(tmpdir(), "codex-sidebar-smoke-"));
-const codexBinary = execFileSync("which", ["codex"], { encoding: "utf8" }).trim();
+const codexBinary = resolveCodexBinary({
+  platform: process.platform,
+  execFileSync,
+  realpathSync,
+  statSync,
+});
 const unsafeHost = spawn(process.execPath, [join(repositoryRoot, "bridge", "native-host.mjs")], {
   env: {
     ...process.env,

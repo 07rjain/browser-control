@@ -1,16 +1,20 @@
 import { spawn } from "node:child_process";
 import { homedir } from "node:os";
-import { join } from "node:path";
 import { encodeNativeMessage, LengthPrefixedJsonDecoder } from "../bridge/protocol.mjs";
+import { chromeLikePath, companionLayout } from "./host-paths.mjs";
 
-const launcher = join(homedir(), "Library", "Application Support", "Browser Control", "bin", "native-host");
+const launcher = companionLayout(process.platform, homedir(), process.env, "0.0.0").launcherPath;
 const host = spawn(launcher, [], {
   env: {
     HOME: homedir(),
-    PATH: "/usr/bin:/bin:/usr/sbin:/sbin",
-    TMPDIR: process.env.TMPDIR ?? "/tmp",
+    USERPROFILE: homedir(),
+    PATH: chromeLikePath(process.platform),
+    TMPDIR: process.env.TMPDIR ?? process.env.TEMP ?? "/tmp",
+    TEMP: process.env.TEMP,
+    SystemRoot: process.env.SystemRoot,
   },
   stdio: ["pipe", "pipe", "pipe"],
+  windowsHide: true,
 });
 const decoder = new LengthPrefixedJsonDecoder();
 const pending = new Map();

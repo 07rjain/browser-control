@@ -37,6 +37,10 @@ describe("recorded skill documents", () => {
       name: "Calendar: event",
       description: "Create an event from the current request.",
     });
+    expect(parseSkillDocument(`\uFEFF${hidden.markdown.replaceAll("\n", "\r\n")}`)).toMatchObject({
+      name: "Calendar: event",
+      description: "Create an event from the current request.",
+    });
 
     if (fill.kind !== "fill") throw new Error("Expected a fill step.");
     const kept = buildSkillDocument({

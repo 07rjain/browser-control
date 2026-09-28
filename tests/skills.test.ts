@@ -33,6 +33,13 @@ afterEach(() => {
 });
 
 describe("sidebar skill discovery", () => {
+  it("stores a Windows reserved skill name in a safe folder", () => {
+    const root = skillRoot();
+    writeNamedSkill(root, "---\r\nname: Con\r\ndescription: Keep a reserved Windows name usable.\r\n---\r\nOpen the page.\r\n");
+    const discovered = discoverSkillsOnDisk(root);
+    expect(discovered.skills.map((skill) => skill.name)).toEqual(["Con"]);
+    expect(discovered.skills[0]?.path).toContain(`${join("con-skill", "SKILL.md")}`);
+  });
   it("reads name and description from skills under the sidebar home", () => {
     const root = skillRoot();
     writeSkill(root, "calendar-event", "calendar-event", "Add an event on Google Calendar");

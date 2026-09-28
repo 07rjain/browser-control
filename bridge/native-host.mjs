@@ -357,6 +357,7 @@ async function ensureAppServer() {
   const server = spawn(codexBinary, ["app-server", "--stdio"], {
     env: { ...process.env, CODEX_HOME: sidebarHome },
     stdio: ["pipe", "pipe", "pipe"],
+    windowsHide: true,
   });
   appServer = server;
   server.stdout.on("data", (chunk) => {
@@ -396,6 +397,20 @@ async function ensureAppServer() {
   return initialized;
 }
 
+function terminateChild(child, force = false) {
+  if (!child?.pid || child.exitCode !== null) return;
+  if (process.platform === "win32") {
+    const killer = spawn("taskkill", ["/PID", String(child.pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" });
+    killer.on("error", () => child.kill());
+    return;
+  }
+  try {
+    child.kill(force ? "SIGKILL" : "SIGTERM");
+  } catch {
+    // The child already exited.
+  }
+}
+
 async function stopAppServer() {
   const runningServer = appServer;
   if (!runningServer) {
@@ -403,7 +418,7 @@ async function stopAppServer() {
     return;
   }
   await new Promise((resolveStop, rejectStop) => {
-    const forceTimeout = setTimeout(() => runningServer.kill("SIGKILL"), 3_000);
+    const forceTimeout = setTimeout(() => terminateChild(runningServer, true), 3_000);
     const failureTimeout = setTimeout(() => {
       rejectStop(new Error("Codex App Server did not stop before local data deletion."));
     }, 6_000);
@@ -412,7 +427,7 @@ async function stopAppServer() {
       clearTimeout(failureTimeout);
       resolveStop(undefined);
     });
-    runningServer.kill("SIGTERM");
+    terminateChild(runningServer);
   });
   initialized = null;
   appServer = null;
@@ -683,11 +698,10 @@ process.stdin.on("data", (chunk) => {
   }
 });
 
-process.stdin.on("end", () => {
-  appServer?.kill("SIGTERM");
-});
-
-process.on("SIGTERM", () => {
-  appServer?.kill("SIGTERM");
+function shutdownHost() {
+  terminateChild(appServer);
   process.exit(0);
-});
+}
+
+process.stdin.on("end", shutdownHost);
+process.on("SIGTERM", shutdownHost);

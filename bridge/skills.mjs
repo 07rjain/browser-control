@@ -22,12 +22,15 @@ function singleLine(value) {
   return value.replace(/\s+/g, " ").trim();
 }
 
+const WINDOWS_RESERVED_SLUG = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
+
 export function parseSkillDocument(text) {
-  if (!text.startsWith("---")) return null;
-  const end = text.indexOf("\n---", 3);
+  const normalized = text.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  if (!normalized.startsWith("---")) return null;
+  const end = normalized.indexOf("\n---", 3);
   if (end < 0) return null;
   const fields = {};
-  for (const line of text.slice(3, end).split("\n")) {
+  for (const line of normalized.slice(3, end).split("\n")) {
     const match = /^([A-Za-z0-9_-]+):\s*(.*)$/.exec(line);
     if (!match) continue;
     let value = match[2].trim();
@@ -187,7 +190,7 @@ export function readSkillInstructions(skills, name, relativePath = "SKILL.md") {
 function skillDirectorySlug(name) {
   const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80);
   if (!slug) throw new Error("The skill name cannot be used as a folder.");
-  return slug;
+  return WINDOWS_RESERVED_SLUG.test(slug) ? `${slug}-skill` : slug;
 }
 
 export function writeNamedSkill(root, markdown) {
