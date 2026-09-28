@@ -200,7 +200,7 @@ No host access is granted at installation. Full access can request the manifest'
 
 ## Troubleshooting
 
-**Native host not found:** run `npm run install:host`, confirm the extension ID above, then fully reload the extension.
+**Native host not found:** from the project folder, or from the extracted companion download, run `node scripts/install-native-host.mjs`. Node, Codex, and the extension can be installed in any order. Then choose **Retry connection** in the side panel.
 
 **Codex not found:** set `CODEX_BIN` to the Codex executable or make sure `which codex` (macOS/Linux) or `where codex` (Windows) succeeds before running the host installer. On Windows, `CODEX_BIN` must be `codex.exe`, not the npm `.cmd` shim. The installer records the resolved absolute path.
 

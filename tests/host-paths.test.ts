@@ -28,10 +28,16 @@ describe("companion layout", () => {
     expect(layout.applicationRoot).toBe("/data/browser-control");
     expect(layout.launcherPath).toBe("/data/browser-control/bin/native-host");
     expect(layout.manifestTargets.map((target) => target.path)).toEqual([
-      "/cfg/google-chrome/NativeMessagingHosts/com.codex.sidebar.json",
-      "/cfg/chromium/NativeMessagingHosts/com.codex.sidebar.json",
-      "/cfg/BraveSoftware/Brave-Browser/NativeMessagingHosts/com.codex.sidebar.json",
-    ]);
+      "/home/ada/.config",
+      "/cfg",
+    ].flatMap((configHome) => [
+      "google-chrome",
+      "google-chrome-beta",
+      "google-chrome-unstable",
+      "chromium",
+      "chromium-browser",
+      "BraveSoftware/Brave-Browser",
+    ].map((browser) => `${configHome}/${browser}/NativeMessagingHosts/com.codex.sidebar.json`)));
   });
 
   it("registers Windows hosts in the current-user registry", () => {
@@ -64,6 +70,14 @@ describe("companion layout", () => {
     });
     expect(script).toContain("#!/bin/sh");
     expect(script).toContain("export CODEX_BIN='/opt/codex'");
+    expect(script).toContain("command -v codex");
+    expect(posixLauncherScript({
+      nodePath: "/usr/bin/node",
+      nodeDir: "/usr/bin",
+      hostScript: "/opt/native-host.mjs",
+      codexPath: "",
+      sidebarHome: "/home/ada/.codex-sidebar",
+    })).toContain("command -v codex");
     expect(script).toContain("'/opt/browser control/native-host.mjs'");
 
     const source = windowsLauncherSource({
@@ -74,7 +88,8 @@ describe("companion layout", () => {
     });
     expect(source).toContain('start.FileName = @"C:\\Program Files\\nodejs\\node.exe"');
     expect(source).toContain('start.Arguments = "\\"C:\\\\Users\\\\ada\\\\native-host.mjs\\""');
-    expect(source).toContain('start.EnvironmentVariables["CODEX_BIN"] = @"C:\\Tools\\codex.exe"');
+    expect(source).toContain('var pinnedCodex = @"C:\\Tools\\codex.exe"');
+    expect(source).toContain('if (pinnedCodex.Length > 0 && File.Exists(pinnedCodex)) start.EnvironmentVariables["CODEX_BIN"] = pinnedCodex;');
   });
 
   it("prefers a Windows exe and rejects a cmd shim", () => {

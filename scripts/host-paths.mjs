@@ -30,7 +30,6 @@ export function companionLayout(platform, home, env = {}, version = "0.0.0") {
   }
   if (platform === "linux") {
     const dataHome = env.XDG_DATA_HOME || paths.join(home, ".local", "share");
-    const configHome = env.XDG_CONFIG_HOME || paths.join(home, ".config");
     const applicationRoot = paths.join(dataHome, "browser-control");
     return {
       platform,
@@ -39,11 +38,7 @@ export function companionLayout(platform, home, env = {}, version = "0.0.0") {
       launcherPath: paths.join(applicationRoot, "bin", "native-host"),
       sidebarHome,
       browsers: "Chrome, Chromium, and Brave",
-      manifestTargets: [
-        { kind: "file", path: paths.join(configHome, "google-chrome", "NativeMessagingHosts", `${HOST_NAME}.json`) },
-        { kind: "file", path: paths.join(configHome, "chromium", "NativeMessagingHosts", `${HOST_NAME}.json`) },
-        { kind: "file", path: paths.join(configHome, "BraveSoftware", "Brave-Browser", "NativeMessagingHosts", `${HOST_NAME}.json`) },
-      ],
+      manifestTargets: linuxManifestTargets(paths, home, env),
     };
   }
   if (platform === "win32") {
@@ -69,6 +64,24 @@ function manifestFile(paths, home, ...parts) {
   return { kind: "file", path: paths.join(home, ...parts, `${HOST_NAME}.json`) };
 }
 
+const LINUX_BROWSER_DIRS = [
+  ["google-chrome"],
+  ["google-chrome-beta"],
+  ["google-chrome-unstable"],
+  ["chromium"],
+  ["chromium-browser"],
+  ["BraveSoftware", "Brave-Browser"],
+];
+
+function linuxManifestTargets(paths, home, env) {
+  const homes = [paths.join(home, ".config")];
+  if (env.XDG_CONFIG_HOME && env.XDG_CONFIG_HOME !== homes[0]) homes.push(env.XDG_CONFIG_HOME);
+  return homes.flatMap((configHome) => LINUX_BROWSER_DIRS.map((parts) => ({
+    kind: "file",
+    path: paths.join(configHome, ...parts, "NativeMessagingHosts", `${HOST_NAME}.json`),
+  })));
+}
+
 export function nativeMessagingManifest(launcherPath) {
   return `${JSON.stringify({
     name: HOST_NAME,
@@ -81,11 +94,16 @@ export function nativeMessagingManifest(launcherPath) {
 
 export function posixLauncherScript({ nodePath, nodeDir, hostScript, codexPath, sidebarHome }) {
   const quote = (value) => `'${String(value).replaceAll("'", `'\\''`)}'`;
+  const pinned = codexPath ? quote(codexPath) : "''";
   return [
     "#!/bin/sh",
-    `export PATH=${quote(nodeDir)}:"$PATH"`,
-    `export CODEX_BIN=${quote(codexPath)}`,
+    `export PATH=${quote(nodeDir)}:"$HOME/.local/bin:$HOME/.npm-global/bin:/usr/local/bin:/opt/homebrew/bin:$PATH"`,
     `export CODEX_SIDEBAR_HOME=${quote(sidebarHome)}`,
+    `if [ -x ${pinned} ]; then export CODEX_BIN=${pinned}; fi`,
+    `if [ -z "\${CODEX_BIN}" ]; then`,
+    `  found=$(command -v codex 2>/dev/null || true)`,
+    `  if [ -n "$found" ]; then export CODEX_BIN="$found"; fi`,
+    `fi`,
     `exec ${quote(nodePath)} ${quote(hostScript)}`,
     "",
   ].join("\n");
@@ -111,11 +129,14 @@ static class Program {
     start.RedirectStandardInput = true;
     start.RedirectStandardOutput = true;
     start.RedirectStandardError = true;
-    start.EnvironmentVariables["CODEX_BIN"] = @"${csharp(codexPath)}";
     start.EnvironmentVariables["CODEX_SIDEBAR_HOME"] = @"${csharp(sidebarHome)}";
+    var pinnedCodex = @"${csharp(codexPath)}";
+    if (pinnedCodex.Length > 0 && File.Exists(pinnedCodex)) start.EnvironmentVariables["CODEX_BIN"] = pinnedCodex;
     var nodeDir = @"${csharp(path.win32.dirname(nodePath))}";
+    var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+    var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
     var currentPath = Environment.GetEnvironmentVariable("PATH") ?? "";
-    start.EnvironmentVariables["PATH"] = nodeDir + ";" + currentPath;
+    start.EnvironmentVariables["PATH"] = nodeDir + ";" + userProfile + "\\.local\\bin;" + localAppData + ";" + currentPath;
     var child = Process.Start(start);
     var input = new Thread(() => Copy(Console.OpenStandardInput(), child.StandardInput.BaseStream, true));
     var output = new Thread(() => Copy(child.StandardOutput.BaseStream, Console.OpenStandardOutput(), false));

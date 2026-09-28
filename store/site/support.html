@@ -40,8 +40,8 @@ codex --version</code></pre>
           <li>Download the companion ZIP and matching <code>SHA256SUMS</code> from the <a href="https://github.com/07rjain/browser-control-support/releases">official GitHub Releases page</a>. Do not download a repackaged copy from another site.</li>
           <li>Extract the ZIP. In a terminal, change to that extracted directory.</li>
           <li>Verify the archive contents using the checksum instructions included with the release.</li>
-          <li>Run <code>node scripts/install-native-host.mjs</code>. The installer prints the Chrome extension ID and registered host path.</li>
-          <li>Restart Chrome, open Browser Control, and choose <strong>Sign in with ChatGPT</strong>.</li>
+          <li>Run <code>node scripts/install-native-host.mjs</code>. Node.js, Codex, and the extension can be installed in any order. The installer registers the companion even if Codex is not installed yet.</li>
+          <li>Return to Browser Control and choose <strong>Retry connection</strong>. You can leave the side panel open while installing.</li>
         </ol>
         <p>The installer registers <code>com.codex.sidebar</code> for the current user. On macOS the runtime is <code>~/Library/Application Support/Browser Control/</code>. On Linux it is <code>~/.local/share/browser-control/</code>. On Windows it is <code>%LOCALAPPDATA%\Browser Control\</code>. It does not install an unrelated app, browser extension, analytics service, or background login item.</p>
       </section>

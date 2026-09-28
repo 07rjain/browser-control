@@ -29,7 +29,11 @@ const defaultSidebarHome = resolve(join(homedir(), ".codex-sidebar"));
 const sidebarHome = resolve(process.env.CODEX_SIDEBAR_HOME ?? defaultSidebarHome);
 const workspace = join(sidebarHome, "workspace");
 const dataRootMarker = join(sidebarHome, ".browser-control-data-root");
-const codexBinary = process.env.CODEX_BIN ?? "codex";
+function codexCommand() {
+  const requested = process.env.CODEX_BIN?.trim();
+  if (requested && existsSync(requested)) return requested;
+  return process.platform === "win32" ? "codex.exe" : "codex";
+}
 
 const allowedTestHome = process.env.BROWSER_CONTROL_TEST_HOME === "1" &&
   dirname(sidebarHome) === resolve(tmpdir()) &&
@@ -354,7 +358,7 @@ function handleAppServerMessage(message) {
 async function ensureAppServer() {
   if (initialized) return initialized;
 
-  const server = spawn(codexBinary, ["app-server", "--stdio"], {
+  const server = spawn(codexCommand(), ["app-server", "--stdio"], {
     env: { ...process.env, CODEX_HOME: sidebarHome },
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,

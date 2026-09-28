@@ -30,7 +30,7 @@ When Chrome disconnects, the host stops Codex and exits. On Windows it stops the
 
 ## Consequences
 
-- `npm run install:host` and `npm run uninstall:host` follow the current operating system. The `:mac` script names remain aliases.
+- `npm run install:host` and `npm run uninstall:host` follow the current operating system. The `:mac` script names remain aliases. Codex may be installed before or after the companion. The launcher looks up Codex again each time Chrome starts the host.
 - Uninstall removes the host registration and companion files. It still leaves `~/.codex-sidebar` in place.
 - Skill files saved on Windows accept CRLF, and reserved device names such as `con` are stored as `con-skill`.
 - Snap and Flatpak Chrome can see the manifest and still fail to launch a program outside the sandbox. The Linux installer warns when `google-chrome` is on one of those paths.

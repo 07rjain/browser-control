@@ -36,12 +36,18 @@ accessSync(sourceHostScript, constants.R_OK);
 accessSync(sourceProtocolScript, constants.R_OK);
 accessSync(sourceSkillsScript, constants.R_OK);
 
-const codexBinary = resolveCodexBinary({
-  platform: process.platform,
-  execFileSync,
-  realpathSync,
-  statSync,
-});
+let codexBinary = "";
+try {
+  codexBinary = resolveCodexBinary({
+    platform: process.platform,
+    execFileSync,
+    realpathSync,
+    statSync,
+  });
+} catch (error) {
+  const message = error instanceof Error ? error.message : "Codex CLI was not found.";
+  process.stderr.write(`${message}\nThe companion is still being registered. Install Codex whenever you like, then choose Retry connection in the side panel.\n`);
+}
 
 mkdirSync(layout.runtimeDir, { recursive: true, mode: 0o700 });
 mkdirSync(dirname(layout.launcherPath), { recursive: true, mode: 0o700 });
@@ -95,6 +101,7 @@ process.stdout.write([
   `Runtime: ${layout.runtimeDir}`,
   `Browsers: ${layout.browsers}`,
   `Extension IDs: mpdfhhhjgbpdpfnkjbnboebdjokfjglf, fodoakcimglhplkoohggjdggdffhkdam`,
+  "Next: open Browser Control and choose Retry connection. Node, Codex, and the extension can be installed in any order.",
   "",
 ].join("\n"));
 

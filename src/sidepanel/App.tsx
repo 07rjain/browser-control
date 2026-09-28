@@ -18,6 +18,7 @@ import {
   type BrowserPermissionMode,
 } from "../shared/page-tools";
 import { IDLE_RECORDING_VIEW, recordingStepSummary, type RecordingView } from "../shared/skill-recording";
+import { COMPANION_INSTALL_COMMAND, isMissingNativeHost } from "../shared/companion-setup";
 import { activityStepLabel, groupToolStatuses, hasBrowserActivityForTurn, summarizeToolStatuses, visibleActivityFormFields, type ToolStatus } from "./activity";
 import { settleCanceledMessages, type ChatMessage } from "./chat-state";
 import {
@@ -288,6 +289,7 @@ export default function App() {
   const [activeTurnId, setActiveTurnId] = useState<string | null>(null);
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [desktopOs, setDesktopOs] = useState("");
   const [theme, setTheme] = useState<Theme>("system");
   const [selectedModel, setSelectedModel] = useState("");
   const [browserPermissionMode, setBrowserPermissionMode] = useState<BrowserPermissionMode>(DEFAULT_BROWSER_PERMISSION_MODE);
@@ -343,6 +345,10 @@ export default function App() {
       setAuthState("offline");
       setError(cause instanceof Error ? cause.message : "The local companion is unavailable.");
     }
+  }, []);
+
+  useEffect(() => {
+    void chrome.runtime.getPlatformInfo().then((info) => setDesktopOs(info.os)).catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -1164,13 +1170,30 @@ export default function App() {
           </button>
         )}
 
-        {error && <div className="error-banner" role="alert">{error}</div>}
+        {isMissingNativeHost(error) ? (
+          <section className="setup-card" aria-live="polite">
+            <p className="login-label">The companion is not registered in this browser yet.</p>
+            <p>Node.js, Codex, and this extension can be installed in any order. From the Browser Control project folder, or from the extracted companion download, run:</p>
+            <code className="setup-command">{COMPANION_INSTALL_COMMAND}</code>
+            <button
+              className="secondary-button"
+              type="button"
+              onClick={() => {
+                void navigator.clipboard?.writeText(COMPANION_INSTALL_COMMAND).catch(() => undefined);
+              }}
+            >Copy command</button>
+            {desktopOs === "linux" && <p>Use a normal Chrome or Brave package. Snap and Flatpak builds cannot start the companion.</p>}
+            <p>Leave this panel open, then choose Retry connection.</p>
+          </section>
+        ) : error && <div className="error-banner" role="alert">{error}</div>}
         {(authState === "offline" || authState === "error") && (
           <div className="connection-actions">
             <button className="secondary-button" onClick={() => void refreshAccount()}>Retry connection</button>
-            <button className="text-button" onClick={() => void sendRequest({ type: "OPEN_EXTERNAL", url: COMPANION_SUPPORT_URL })}>
-              Install or update companion
-            </button>
+            {!isMissingNativeHost(error) && (
+              <button className="text-button" onClick={() => void sendRequest({ type: "OPEN_EXTERNAL", url: COMPANION_SUPPORT_URL })}>
+                Install or update companion
+              </button>
+            )}
           </div>
         )}
         <p className="privacy-note">No page content is shared until you choose Attach page.</p>
