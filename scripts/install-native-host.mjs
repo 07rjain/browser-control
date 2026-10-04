@@ -21,29 +21,27 @@ import {
   resolveCodexBinary,
   windowsLauncherSource,
 } from "./host-paths.mjs";
+import { codexInvocation } from "../bridge/codex-launch.mjs";
 
 const companionVersion = "0.3.4";
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const sourceHostScript = realpathSync(join(repositoryRoot, "bridge", "native-host.mjs"));
-const sourceProtocolScript = realpathSync(join(repositoryRoot, "bridge", "protocol.mjs"));
-const sourceSkillsScript = realpathSync(join(repositoryRoot, "bridge", "skills.mjs"));
 const layout = companionLayout(process.platform, homedir(), process.env, companionVersion);
 const installedHostScript = join(layout.runtimeDir, "native-host.mjs");
-const installedProtocolScript = join(layout.runtimeDir, "protocol.mjs");
-const installedSkillsScript = join(layout.runtimeDir, "skills.mjs");
-
-accessSync(sourceHostScript, constants.R_OK);
-accessSync(sourceProtocolScript, constants.R_OK);
-accessSync(sourceSkillsScript, constants.R_OK);
+const bridgeFiles = ["native-host.mjs", "protocol.mjs", "skills.mjs", "codex-launch.mjs", "login-proxy.mjs"];
 
 let codexBinary = "";
 try {
-  codexBinary = resolveCodexBinary({
-    platform: process.platform,
-    execFileSync,
-    realpathSync,
-    statSync,
-  });
+  if (process.platform === "win32") {
+    const invocation = codexInvocation();
+    if (invocation.args[0] === "app-server" && existsSync(invocation.command)) codexBinary = invocation.command;
+  } else {
+    codexBinary = resolveCodexBinary({
+      platform: process.platform,
+      execFileSync,
+      realpathSync,
+      statSync,
+    });
+  }
 } catch (error) {
   const message = error instanceof Error ? error.message : "Codex CLI was not found.";
   process.stderr.write(`${message}\nThe companion is still being registered. Install Codex whenever you like, then choose Retry connection in the side panel.\n`);
@@ -51,12 +49,13 @@ try {
 
 mkdirSync(layout.runtimeDir, { recursive: true, mode: 0o700 });
 mkdirSync(dirname(layout.launcherPath), { recursive: true, mode: 0o700 });
-copyFileSync(sourceHostScript, installedHostScript);
-copyFileSync(sourceProtocolScript, installedProtocolScript);
-copyFileSync(sourceSkillsScript, installedSkillsScript);
-chmodSync(installedHostScript, 0o700);
-chmodSync(installedProtocolScript, 0o600);
-chmodSync(installedSkillsScript, 0o600);
+for (const file of bridgeFiles) {
+  const source = realpathSync(join(repositoryRoot, "bridge", file));
+  accessSync(source, constants.R_OK);
+  const destination = join(layout.runtimeDir, file);
+  copyFileSync(source, destination);
+  chmodSync(destination, file === "native-host.mjs" ? 0o700 : 0o600);
+}
 
 if (process.platform === "win32") {
   const sourcePath = join(layout.runtimeDir, "native-host-launcher.cs");

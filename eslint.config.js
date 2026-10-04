@@ -21,7 +21,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ["bridge/**/*.mjs", "scripts/**/*.mjs", "vite.config.ts", "eslint.config.js"],
+    files: ["bridge/**/*.mjs", "scripts/**/*.mjs", "experiments/**/*.mjs", "vite.config.ts", "eslint.config.js"],
     languageOptions: { ecmaVersion: 2023, globals: globals.node },
   },
 );

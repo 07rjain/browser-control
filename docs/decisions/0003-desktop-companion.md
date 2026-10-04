@@ -24,7 +24,7 @@ The side panel already talks to the companion through `chrome.runtime.connectNat
 
 The Windows launcher is a small program generated at install time and compiled with the .NET Framework C# compiler (`csc.exe`). It forwards Chrome's binary native-messaging stdio to `node.exe` and the packaged `native-host.mjs`. The manifest cannot pass arguments, so the path cannot be `node.exe` itself, and Chrome does not start `.cmd` or `.bat` hosts.
 
-The launcher records absolute paths for Node and Codex. Chrome starts the host with a short PATH, so the install must not depend on `which` or `where` at chat time. On Windows, Codex must be `codex.exe`. An npm `codex.cmd` shim is rejected. `CODEX_BIN` overrides discovery.
+The launcher records absolute paths for Node and, when it is a direct executable, Codex. Chrome starts the host with a short PATH, so the launcher also puts the OpenAI Codex bin, `%APPDATA%\npm`, and WinGet Links on PATH. At chat time the host resolves Codex itself: `CODEX_BIN` first, then those Windows locations, then `where.exe`. An npm `codex.cmd` shim is not spawned with a shell; the host reads it and starts `node` on the `codex.js` or `codex.exe` path inside the shim. On Windows, while ChatGPT sign-in is in progress, the host also accepts `http://localhost` callbacks on `::1` and forwards them to Codex on `127.0.0.1` without changing the redirect URI.
 
 When Chrome disconnects, the host stops Codex and exits. On Windows it stops the child process tree with `taskkill /T /F`.
 

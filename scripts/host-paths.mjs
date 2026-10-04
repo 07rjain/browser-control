@@ -135,8 +135,12 @@ static class Program {
     var nodeDir = @"${csharp(path.win32.dirname(nodePath))}";
     var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
     var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+    var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+    var codexBin = localAppData + "\\Programs\\OpenAI\\Codex\\bin";
+    var npmBin = appData + "\\npm";
+    var wingetBin = localAppData + "\\Microsoft\\WinGet\\Links";
     var currentPath = Environment.GetEnvironmentVariable("PATH") ?? "";
-    start.EnvironmentVariables["PATH"] = nodeDir + ";" + userProfile + "\\.local\\bin;" + localAppData + ";" + currentPath;
+    start.EnvironmentVariables["PATH"] = nodeDir + ";" + codexBin + ";" + npmBin + ";" + wingetBin + ";" + userProfile + "\\.local\\bin;" + currentPath;
     var child = Process.Start(start);
     var input = new Thread(() => Copy(Console.OpenStandardInput(), child.StandardInput.BaseStream, true));
     var output = new Thread(() => Copy(child.StandardOutput.BaseStream, Console.OpenStandardOutput(), false));

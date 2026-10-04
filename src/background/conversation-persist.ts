@@ -50,7 +50,7 @@ async function writeState(state: ConversationSnapshot, capturedEpoch: number, sa
         }
       }
       if (candidate.conversationHistory.length <= 1) {
-        throw new Error("This conversation could not be saved because browser storage is full.");
+        throw new Error("This conversation could not be saved because browser storage is full.", { cause: error });
       }
       const keep = Math.max(1, Math.floor(candidate.conversationHistory.length / 2));
       candidate = { ...candidate, conversationHistory: candidate.conversationHistory.slice(0, keep) };

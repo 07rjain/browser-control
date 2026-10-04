@@ -53,10 +53,10 @@ try {
   mkdirSync(releaseDir, { recursive: true });
   mkdirSync(join(companionStage, "bridge"), { recursive: true });
   mkdirSync(join(companionStage, "scripts"), { recursive: true });
-  for (const file of ["native-host.mjs", "protocol.mjs", "skills.mjs"]) {
+  for (const file of ["native-host.mjs", "protocol.mjs", "skills.mjs", "codex-launch.mjs", "login-proxy.mjs"]) {
     copyFileSync(join(repositoryRoot, "bridge", file), join(companionStage, "bridge", file));
   }
-  for (const file of ["install-native-host.mjs", "uninstall-native-host.mjs", "smoke-installed-host.mjs"]) {
+  for (const file of ["install-native-host.mjs", "uninstall-native-host.mjs", "smoke-installed-host.mjs", "host-paths.mjs"]) {
     copyFileSync(join(repositoryRoot, "scripts", file), join(companionStage, "scripts", file));
   }
   copyFileSync(join(repositoryRoot, "companion", "README.txt"), join(companionStage, "README.txt"));

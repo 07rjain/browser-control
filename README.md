@@ -45,7 +45,7 @@ Local Codex companion -----> Codex App Server / ChatGPT authentication
 
 - Desktop Google Chrome or Brave on macOS, Linux, or Windows
 - Node.js 20+
-- Codex CLI `0.148.0` or a compatible release available as `codex` (on Windows, `codex.exe`)
+- Codex CLI `0.148.0` or a compatible release available as `codex` (on Windows, `codex.exe` or the npm `codex.cmd` shim)
 
 ## Setup
 
@@ -202,7 +202,7 @@ No host access is granted at installation. Full access can request the manifest'
 
 **Native host not found:** from any folder, run `git clone --depth 1 -b feat/desktop-companion https://github.com/07rjain/browser-control.git "$HOME/browser-control" || git -C "$HOME/browser-control" pull --ff-only && node "$HOME/browser-control/scripts/install-native-host.mjs"`. Node, Codex, and the extension can be installed in any order. Then choose **Retry connection** in the side panel.
 
-**Codex not found:** set `CODEX_BIN` to the Codex executable or make sure `which codex` (macOS/Linux) or `where codex` (Windows) succeeds before running the host installer. On Windows, `CODEX_BIN` must be `codex.exe`, not the npm `.cmd` shim. The installer records the resolved absolute path.
+**Codex not found or Sign in with ChatGPT does nothing on Windows:** pull this branch and run the installer again so the companion is recopied. The host looks for `codex.exe` under `%LOCALAPPDATA%\Programs\OpenAI\Codex\bin`, `%USERPROFILE%\.codex\packages\standalone\current`, and WinGet Links, and it starts an npm `codex.cmd` shim through Node instead of launching the `.cmd` file. Set `CODEX_BIN` only when Codex lives somewhere else. After ChatGPT approval, Windows may prompt for a local listener on `::1`; allow it so the sign-in callback can reach Codex on `127.0.0.1`.
 
 **Cannot attach a page:** Chrome blocks scripting on internal pages such as `chrome://extensions`. Open a normal `http` or `https` page and click the toolbar icon again before attaching.
 
