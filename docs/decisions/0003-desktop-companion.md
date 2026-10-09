@@ -24,6 +24,8 @@ The side panel already talks to the companion through `chrome.runtime.connectNat
 
 The Windows launcher is a small program generated at install time and compiled with the .NET Framework C# compiler (`csc.exe`). It forwards Chrome's binary native-messaging stdio to `node.exe` and the packaged `native-host.mjs`. The manifest cannot pass arguments, so the path cannot be `node.exe` itself, and Chrome does not start `.cmd` or `.bat` hosts.
 
+Generated C# uses verbatim literals for Windows PATH suffixes. The launcher flushes each forwarded pipe chunk immediately; waiting until EOF breaks long-lived native-messaging connections. The installer must run under the browser user's normal Windows account because its registry entries are under that account's `HKCU`. A Codex CLI sandbox can use a different identity.
+
 The launcher records absolute paths for Node and, when it is a direct executable, Codex. Chrome starts the host with a short PATH, so the launcher also puts the OpenAI Codex bin, `%APPDATA%\npm`, and WinGet Links on PATH. At chat time the host resolves Codex itself: `CODEX_BIN` first, then those Windows locations, then `where.exe`. An npm `codex.cmd` shim is not spawned with a shell; the host reads it and starts `node` on the `codex.js` or `codex.exe` path inside the shim. On Windows, while ChatGPT sign-in is in progress, the host also accepts `http://localhost` callbacks on `::1` and forwards them to Codex on `127.0.0.1` without changing the redirect URI.
 
 When Chrome disconnects, the host stops Codex and exits. On Windows it stops the child process tree with `taskkill /T /F`.
@@ -35,3 +37,7 @@ When Chrome disconnects, the host stops Codex and exits. On Windows it stops the
 - Skill files saved on Windows accept CRLF, and reserved device names such as `con` are stored as `con-skill`.
 - Snap and Flatpak Chrome can see the manifest and still fail to launch a program outside the sandbox. The Linux installer warns when `google-chrome` is on one of those paths.
 - Signed installers are still future work. This change does not update the Chrome Web Store listing.
+
+## Validation snapshot (2026-10-09)
+
+A clean Windows x64 checkout at commit `5fe1987` passed eight focused tests, including an actual .NET Framework C# compile and a live pipe-forwarding test. The native-host installer and installed-host smoke test both exited successfully under the browser user's normal account. Chrome and Brave `HKCU` keys and the manifest launcher path were independently checked. After a browser restart, the user reported a successful harmless sidebar reply; that browser result was not independently captured. Linux remains untested in a real browser session.

@@ -1,14 +1,15 @@
 # Install Browser Control on a new Windows or Linux desktop
 
-This is a **test guide**, checked on 2026-10-04. It assumes your machine has a
+This is a **test guide**, updated on 2026-10-09. It assumes your machine has a
 web browser and internet access, but no Node.js, Codex CLI, Git, or development
-tools. You do **not** need Git, npm, VS Code, or this repository on the test
-machine.
+tools. You do **not** need Git, npm, or VS Code. For the pushed-source path,
+download the repository ZIP in your browser; the separate test bundle is an
+alternative.
 
 **Release status:** The Chrome Web Store extension is version 0.3.4, but its
 public companion downloads currently contain only macOS ZIPs. Windows and Linux
-are being validated from the separate test bundle named below. Do not use the
-macOS companion ZIP on Windows or Linux or advertise this as a finished public
+use the pushed source or separate test bundle below. Do not use the macOS
+companion ZIP on Windows or Linux or advertise this as a finished public
 installer. The Store listing may still say macOS-only.
 
 You need a Google Chrome or Brave desktop browser and an eligible ChatGPT/Codex
@@ -19,7 +20,7 @@ browsers are not supported by this test.
 
 ## Obtain the companion files
 
-If you are testing the pushed source on Windows, open the
+If you are testing the pushed source on Windows or Linux, open the
 [project's `feat/desktop-companion` branch][source] in your browser, choose
 **Code → Download ZIP**, and extract it into a folder under Downloads. The
 extracted repository should contain `bridge` and `scripts` folders. This does
@@ -46,8 +47,8 @@ If your copy has a different hash, stop before running the installer.
 ## Recommended Windows path: let Codex help with setup
 
 This path starts with just a browser and Windows PowerShell. Codex can inspect
-your PC, install missing prerequisites with your approval, and run the companion
-checks. You still approve Windows installers and Chrome's extension-install and
+your PC and guide missing-prerequisite installation with your approval. You run
+the companion checks in your own PowerShell and approve Chrome's install and
 ChatGPT sign-in prompts yourself.
 
 1. Open **Windows PowerShell** (Start menu → type `PowerShell`) and install
@@ -77,7 +78,7 @@ ChatGPT sign-in prompts yourself.
    Before running anything from it, confirm it contains bridge/native-host.mjs,
    bridge/codex-launch.mjs, bridge/login-proxy.mjs, and
    scripts/install-native-host.mjs. If the source is missing or looks like a
-   different project, stop. Check that codex.exe works, Node.js is version 20
+   different project, stop. Check that codex --version works, Node.js is version 20
    or newer, and at least one of these
    Windows .NET Framework C# compiler paths exists:
    $env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe
@@ -96,8 +97,9 @@ ChatGPT sign-in prompts yourself.
    commands are node .\scripts\install-native-host.mjs and then
    node .\scripts\smoke-installed-host.mjs, stopping if the first fails.
    Do not run npm install; the companion scripts use Node's built-ins.
-   Help me interpret the output I paste back. Ask before making system changes. Do not
-   disable antivirus, firewall, or security policy; do not use --full-auto;
+   Help me interpret the output I paste back. Ask before making system
+   changes. Do not disable antivirus, firewall, or security policy. Do not use
+   --full-auto;
    do not sign in for me or handle my credentials. If any step fails, stop and
    show me the error rather than claiming setup succeeded.
    ```
@@ -121,7 +123,7 @@ ChatGPT sign-in prompts yourself.
    current user's `HKCU`. A Codex Windows sandbox can run as a different user,
    so its successful install would not register the host for your browser.
 
-4. Once Codex reports that the companion smoke test passed, open the
+4. Once the companion smoke test passes, open the
    [Browser Control Chrome Web Store listing][store] in Chrome or Brave and
    click **Add to Chrome** yourself. Confirm the extension ID is
    `mpdfhhhjgbpdpfnkjbnboebdjokfjglf` in `chrome://extensions` or
@@ -178,7 +180,10 @@ the Node installer may show the usual Windows administrator prompt.
    absent, stop and report this as an installer blocker; do not disable Windows
    security features.
 
-4. **Verify the test ZIP.** Save it to Downloads. In PowerShell, run:
+4. **Choose the source.** If you downloaded the pushed GitHub branch ZIP,
+   extract it under Downloads and skip the test-bundle checksum below. If you
+   received the separate maintainer test ZIP, save it to Downloads and verify
+   it in PowerShell:
 
    ```powershell
    Get-FileHash "$env:USERPROFILE\Downloads\browser-control-companion-windows-linux-test-0.3.4.zip" -Algorithm SHA256
@@ -187,14 +192,16 @@ the Node installer may show the usual Windows administrator prompt.
    Compare the hash with the value above, character for character. If it does
    not match, do not extract or run the archive.
 
-5. **Extract and install the companion.** In File Explorer, right-click the ZIP
+5. **Extract and install the companion.** In File Explorer, right-click your ZIP
    and choose **Extract All**. Open the extracted folder. You should see
    `bridge` and `scripts` folders. Click File Explorer's address bar,
    type `powershell`, and press Enter. In the PowerShell window that opens, run:
 
    ```powershell
    node .\scripts\install-native-host.mjs
+   if ($LASTEXITCODE -ne 0) { throw "Companion installation failed; stop before smoke test." }
    node .\scripts\smoke-installed-host.mjs
+   if ($LASTEXITCODE -ne 0) { throw "Companion smoke test failed; inspect the error." }
    ```
 
    Expect `Installed com.codex.sidebar companion 0.3.4` and then
@@ -262,7 +269,11 @@ launcher. The commands below are for a POSIX-style shell such as Bash.
    Browser Control handles its own ChatGPT sign-in later; a separate CLI sign-in
    is not required for this test.
 
-4. **Verify and extract the test bundle.** Save the ZIP to Downloads, then run:
+4. **Choose the source.** If you downloaded the pushed GitHub branch ZIP,
+   extract it under Downloads, then change into the extracted repository
+   directory containing `bridge` and `scripts`; skip the test-bundle checksum
+   commands below. If you are using the separate maintainer test bundle,
+   save its ZIP to Downloads and run:
 
    ```sh
    cd "$HOME/Downloads"
@@ -279,15 +290,16 @@ launcher. The commands below are for a POSIX-style shell such as Bash.
 
    Confirm this directory contains `bridge` and `scripts`.
 
-5. **Install and smoke-test the companion:**
+5. **Install and smoke-test the companion** from the directory containing
+   `bridge` and `scripts`:
 
    ```sh
-   node scripts/install-native-host.mjs
-   node scripts/smoke-installed-host.mjs
+   node scripts/install-native-host.mjs && node scripts/smoke-installed-host.mjs
    ```
 
-   Expect the same two success messages as on Windows. Keep the extracted
-   folder until testing is complete.
+   Run the smoke test only if installation succeeds. Expect the same two
+   success messages as on Windows. Keep the extracted folder until testing is
+   complete.
 
 6. **Install and use Browser Control** from the [Chrome Web Store][store].
    Fully quit and reopen Chrome or Brave, open the side panel, choose
@@ -300,18 +312,48 @@ launcher. The commands below are for a POSIX-style shell such as Bash.
 | --- | --- |
 | `node` or `codex` is not recognized | Open a new terminal. Check `node --version` and `codex --version` before rerunning the companion installer. On Linux, keep Node's permanent folder and the `PATH` export in the same Terminal session. |
 | Windows installer says `csc.exe` is missing | Repeat the two `Test-Path` checks above; the current installer cannot proceed without one of those files. |
-| C# `CS1009: Unrecognized escape sequence` | Pull the branch containing the Windows launcher fix, then rerun the installer from your normal PowerShell. This is a generated-launcher code error, not a missing prerequisite. |
-| Smoke test times out at `bridge.status` | Pull the branch containing the live-pipe flush fix, reinstall from your normal PowerShell, and rerun the smoke test. If it still fails, capture its exact error. |
+| C# `CS1009: Unrecognized escape sequence` | Use commit `5fe1987` or later from `feat/desktop-companion`, then rerun the installer from your normal PowerShell. This was a generated-launcher code error, not a missing prerequisite. |
+| Smoke test times out at `bridge.status` | Use commit `5fe1987` or later, reinstall from your normal PowerShell, and rerun the smoke test. The fix flushes each native-message chunk while the pipe remains open. If it still fails, capture its exact error. |
 | C# `CS0016` says `native-host.exe` is in use | Save browser work and fully quit Chrome/Brave. Stop only a `native-host.exe` process whose full path matches this companion's launcher path, then reinstall. Do not kill every Node or Codex process. |
 | `Native host not found` | Confirm both installer and smoke test succeeded under the same Windows account as the browser, check the Store extension ID, then fully quit and reopen the browser. Do not use a macOS companion archive. |
 | `Codex not found` | Run `codex --version` and rerun the companion installer after repairing Codex. |
 | Sign-in stalls on Windows | Keep the auth tab open. If Windows asks about a local Codex/Node callback listener, allow only the expected local connection; do not broadly disable the firewall. Capture the exact error if it fails. |
-| Linux browser never connects | Snap/Flatpak browsers are unsupported. Confirm a native Chrome/Brave install and run `node scripts/smoke-installed-host.mjs` from the extracted bundle. |
+| Linux browser never connects | Snap/Flatpak browsers are unsupported. Confirm a native Chrome/Brave install and run `node scripts/smoke-installed-host.mjs` from the extracted source or bundle. |
 
-For your Windows test, record the Windows version, Chrome/Brave version,
+For a Windows `CS0016` retry, identify the exact companion executable before
+stopping anything. In your normal PowerShell, after closing Chrome and Brave:
+
+```powershell
+$hostPath = Join-Path $env:LOCALAPPDATA 'Browser Control\bin\native-host.exe'
+Get-Process -Name native-host -ErrorAction SilentlyContinue |
+  Where-Object { $_.Path -eq $hostPath } |
+  Select-Object Id, Path
+```
+
+If a matching process remains, stop only that PID, then rerun the installer.
+Do not stop unrelated `node.exe`, `codex.exe`, or browser processes.
+
+For your own Windows test, record the Windows version, Chrome/Brave version,
 `node --version`, `codex --version`, both compiler-check results, installer
 output, smoke-test result, sidebar result, and any exact error text. Do not
 share login codes, tokens, passwords, or private page contents in the report.
+
+## Validation status (2026-10-09)
+
+- **Windows companion: passed on one x64 Windows test machine.** A clean copy
+  of commit `5fe1987` passed eight Windows-specific/layout tests, including a
+  real .NET Framework compile and live-pipe forwarding test. Running the
+  installer from the browser user's normal PowerShell succeeded; the installed
+  host smoke test passed, and both Chrome and Brave `HKCU` manifest entries
+  were independently checked.
+- **Browser check: user-reported pass.** After the clean upstream companion
+  reinstall and browser restart, the user reported a normal reply to a
+  harmless, tool-free sidebar prompt. This was not independently observed by
+  browser automation; Store-versus-unpacked installation was not rechecked.
+- **Linux: not yet validated on a real desktop.** The Linux paths and launcher
+  have passed local static/unit checks, but a Linux browser/native-host test
+  is still required. The public companion download is not yet available for
+  Windows or Linux.
 
 To uninstall just the companion later, return to the extracted folder and run
 `node .\scripts\uninstall-native-host.mjs` in Windows PowerShell or
