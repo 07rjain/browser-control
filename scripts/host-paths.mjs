@@ -136,11 +136,11 @@ static class Program {
     var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
     var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
     var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-    var codexBin = localAppData + "\\Programs\\OpenAI\\Codex\\bin";
-    var npmBin = appData + "\\npm";
-    var wingetBin = localAppData + "\\Microsoft\\WinGet\\Links";
+    var codexBin = localAppData + @"\\Programs\\OpenAI\\Codex\\bin";
+    var npmBin = appData + @"\\npm";
+    var wingetBin = localAppData + @"\\Microsoft\\WinGet\\Links";
     var currentPath = Environment.GetEnvironmentVariable("PATH") ?? "";
-    start.EnvironmentVariables["PATH"] = nodeDir + ";" + codexBin + ";" + npmBin + ";" + wingetBin + ";" + userProfile + "\\.local\\bin;" + currentPath;
+    start.EnvironmentVariables["PATH"] = nodeDir + ";" + codexBin + ";" + npmBin + ";" + wingetBin + ";" + userProfile + @"\\.local\\bin;" + currentPath;
     var child = Process.Start(start);
     var input = new Thread(() => Copy(Console.OpenStandardInput(), child.StandardInput.BaseStream, true));
     var output = new Thread(() => Copy(child.StandardOutput.BaseStream, Console.OpenStandardOutput(), false));
@@ -157,7 +157,10 @@ static class Program {
   static void Copy(Stream source, Stream destination, bool closeDestination) {
     var buffer = new byte[8192];
     int read;
-    while ((read = source.Read(buffer, 0, buffer.Length)) > 0) destination.Write(buffer, 0, read);
+    while ((read = source.Read(buffer, 0, buffer.Length)) > 0) {
+      destination.Write(buffer, 0, read);
+      destination.Flush();
+    }
     destination.Flush();
     if (closeDestination) destination.Close();
   }

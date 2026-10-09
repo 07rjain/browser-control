@@ -89,12 +89,14 @@ ChatGPT sign-in prompts yourself.
    prerequisite and guide me to Microsoft's official .NET Framework 4.x
    download; do not substitute an unrelated SDK or bypass the check.
 
-   When prerequisites pass, run these commands from the extracted repository
-   root (do not run npm install; the companion scripts use Node's built-ins):
-   node .\scripts\install-native-host.mjs
-   node .\scripts\smoke-installed-host.mjs
-   Tell me exactly where you extracted it, what changed on my machine, and
-   whether the smoke test passed. Ask before making system changes. Do not
+   When prerequisites pass, give me the exact commands to run myself from the
+   extracted repository root in my normal, non-administrator PowerShell.
+   Do not run the companion installer from your Codex sandbox: it may use a
+   different Windows account, and native-host registration uses HKCU. The
+   commands are node .\scripts\install-native-host.mjs and then
+   node .\scripts\smoke-installed-host.mjs, stopping if the first fails.
+   Do not run npm install; the companion scripts use Node's built-ins.
+   Help me interpret the output I paste back. Ask before making system changes. Do not
    disable antivirus, firewall, or security policy; do not use --full-auto;
    do not sign in for me or handle my credentials. If any step fails, stop and
    show me the error rather than claiming setup succeeded.
@@ -104,6 +106,20 @@ ChatGPT sign-in prompts yourself.
    ZIP path and expected SHA-256 from **Obtain the companion files**. Require
    it to verify the hash *before* extracting or running anything, then use the
    extracted bundle's root for the same two `node` commands.
+
+   Run those commands in **your own ordinary PowerShell**, not inside the
+   Codex sandbox. From the verified repository root:
+
+   ```powershell
+   node .\scripts\install-native-host.mjs
+   if ($LASTEXITCODE -ne 0) { throw "Companion installation failed; stop before smoke test." }
+   node .\scripts\smoke-installed-host.mjs
+   if ($LASTEXITCODE -ne 0) { throw "Companion smoke test failed; inspect the error." }
+   ```
+
+   The installer writes Chrome and Brave native-host registration under your
+   current user's `HKCU`. A Codex Windows sandbox can run as a different user,
+   so its successful install would not register the host for your browser.
 
 4. Once Codex reports that the companion smoke test passed, open the
    [Browser Control Chrome Web Store listing][store] in Chrome or Brave and
@@ -284,7 +300,10 @@ launcher. The commands below are for a POSIX-style shell such as Bash.
 | --- | --- |
 | `node` or `codex` is not recognized | Open a new terminal. Check `node --version` and `codex --version` before rerunning the companion installer. On Linux, keep Node's permanent folder and the `PATH` export in the same Terminal session. |
 | Windows installer says `csc.exe` is missing | Repeat the two `Test-Path` checks above; the current installer cannot proceed without one of those files. |
-| `Native host not found` | Confirm both installer and smoke test succeeded, check the Store extension ID, then fully quit and reopen the browser. Do not use a macOS companion archive. |
+| C# `CS1009: Unrecognized escape sequence` | Pull the branch containing the Windows launcher fix, then rerun the installer from your normal PowerShell. This is a generated-launcher code error, not a missing prerequisite. |
+| Smoke test times out at `bridge.status` | Pull the branch containing the live-pipe flush fix, reinstall from your normal PowerShell, and rerun the smoke test. If it still fails, capture its exact error. |
+| C# `CS0016` says `native-host.exe` is in use | Save browser work and fully quit Chrome/Brave. Stop only a `native-host.exe` process whose full path matches this companion's launcher path, then reinstall. Do not kill every Node or Codex process. |
+| `Native host not found` | Confirm both installer and smoke test succeeded under the same Windows account as the browser, check the Store extension ID, then fully quit and reopen the browser. Do not use a macOS companion archive. |
 | `Codex not found` | Run `codex --version` and rerun the companion installer after repairing Codex. |
 | Sign-in stalls on Windows | Keep the auth tab open. If Windows asks about a local Codex/Node callback listener, allow only the expected local connection; do not broadly disable the firewall. Capture the exact error if it fails. |
 | Linux browser never connects | Snap/Flatpak browsers are unsupported. Confirm a native Chrome/Brave install and run `node scripts/smoke-installed-host.mjs` from the extracted bundle. |

@@ -90,6 +90,11 @@ describe("companion layout", () => {
     expect(source).toContain('start.Arguments = "\\"C:\\\\Users\\\\ada\\\\native-host.mjs\\""');
     expect(source).toContain('var pinnedCodex = @"C:\\Tools\\codex.exe"');
     expect(source).toContain('if (pinnedCodex.Length > 0 && File.Exists(pinnedCodex)) start.EnvironmentVariables["CODEX_BIN"] = pinnedCodex;');
+    expect(source).toContain('var codexBin = localAppData + @"\\Programs\\OpenAI\\Codex\\bin";');
+    expect(source).toContain('var npmBin = appData + @"\\npm";');
+    expect(source).toContain('var wingetBin = localAppData + @"\\Microsoft\\WinGet\\Links";');
+    expect(source).toContain('userProfile + @"\\.local\\bin;"');
+    expect(source).toMatch(/while \(\(read = source\.Read\(buffer, 0, buffer\.Length\)\) > 0\) \{\s*destination\.Write\(buffer, 0, read\);\s*destination\.Flush\(\);/);
   });
 
   it("prefers a Windows exe and rejects a cmd shim", () => {

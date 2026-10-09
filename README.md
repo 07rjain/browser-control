@@ -55,6 +55,12 @@ npm run build
 npm run install:host
 ```
 
+For a fresh Windows or Linux desktop using the Store extension, follow the
+[companion installation guide](docs/INSTALL_WINDOWS_LINUX.md) instead of building
+the extension locally. On Windows, run the native-host installer and smoke test
+from your own normal PowerShell session, not a Codex sandbox account: host
+registration is written to that user's `HKCU`.
+
 Then open `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**, and select this repository's `dist` directory.
 
 The manifest has a fixed public key, so the development extension ID should be:
