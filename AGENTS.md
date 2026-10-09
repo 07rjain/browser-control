@@ -137,7 +137,7 @@ The complete extension does not run as an ordinary localhost website. Vite build
 
 1. Install dependencies with `npm install`.
 2. Build the extension with `npm run build`.
-3. Install or refresh the macOS native-messaging companion with `npm run install:host:mac`. The installer records the local Codex executable and permits Chrome Web Store extension ID `mpdfhhhjgbpdpfnkjbnboebdjokfjglf` (plus the legacy development ID during migration).
+3. Install or refresh the native-messaging companion with `npm run install:host`. The installer records the local Codex executable and permits Chrome Web Store extension ID `mpdfhhhjgbpdpfnkjbnboebdjokfjglf` (plus the legacy development ID during migration). On macOS and Linux the host is a shell launcher. On Windows it compiles `native-host.exe` with the .NET Framework C# compiler and registers the host under `HKCU`.
 4. Open `chrome://extensions`, enable **Developer mode**, select **Load unpacked**, and choose this repository's `dist/` directory.
 5. Confirm Chrome shows extension ID `mpdfhhhjgbpdpfnkjbnboebdjokfjglf`. A different ID cannot connect to the installed native host unless it is the temporarily supported legacy development ID.
 6. Pin or open **Browser Control**, then use the toolbar icon to open its side panel.
@@ -146,7 +146,7 @@ The complete extension does not run as an ordinary localhost website. Vite build
 
 Use `npm run dev` only for fast visual work on the React page served by Vite. Treat it as a UI preview: localhost does not provide real `chrome.sidePanel`, extension service-worker, optional host-permission, content-script, or native-messaging behavior. Validate those features through the unpacked `dist/` build.
 
-Run `npm run test:installed-host` after host installation to verify the Chrome-style native-host launch environment. If sign-in reports that the Codex App Server stopped, first rebuild and reload the extension, rerun the host installer, confirm `which codex` succeeds, and inspect both consoles before changing authentication code.
+Run `npm run test:installed-host` after host installation to verify the Chrome-style native-host launch environment. If sign-in reports that the Codex App Server stopped, first rebuild and reload the extension, rerun the host installer, confirm Codex is on PATH (`which codex` on macOS or Linux, `where codex` on Windows), and inspect both consoles before changing authentication code.
 
 ## Manual testing protocol
 

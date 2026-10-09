@@ -4,6 +4,8 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
+import { codexInvocation } from "./codex-launch.mjs";
+import { localhostCallbackPort, startIpv4LoginProxy } from "./login-proxy.mjs";
 import {
   encodeNativeMessage,
   JsonLineDecoder,
@@ -29,7 +31,7 @@ const defaultSidebarHome = resolve(join(homedir(), ".codex-sidebar"));
 const sidebarHome = resolve(process.env.CODEX_SIDEBAR_HOME ?? defaultSidebarHome);
 const workspace = join(sidebarHome, "workspace");
 const dataRootMarker = join(sidebarHome, ".browser-control-data-root");
-const codexBinary = process.env.CODEX_BIN ?? "codex";
+let loginProxy = null;
 
 const allowedTestHome = process.env.BROWSER_CONTROL_TEST_HOME === "1" &&
   dirname(sidebarHome) === resolve(tmpdir()) &&
@@ -348,15 +350,18 @@ function handleAppServerMessage(message) {
 
   if (message.method === "skills/changed") invalidateSkillCatalog();
   const normalized = normalizeAppServerNotification(message);
+  if (normalized?.event === "auth.loginCompleted") closeLoginProxy();
   if (normalized) sendEvent(normalized.event, normalized.data);
 }
 
 async function ensureAppServer() {
   if (initialized) return initialized;
 
-  const server = spawn(codexBinary, ["app-server", "--stdio"], {
+  const invocation = codexInvocation();
+  const server = spawn(invocation.command, invocation.args, {
     env: { ...process.env, CODEX_HOME: sidebarHome },
     stdio: ["pipe", "pipe", "pipe"],
+    windowsHide: true,
   });
   appServer = server;
   server.stdout.on("data", (chunk) => {
@@ -373,7 +378,8 @@ async function ensureAppServer() {
   server.on("error", (error) => {
     if (appServer !== server) return;
     initialized = null;
-    sendEvent("bridge.error", { message: `Unable to start Codex: ${error.message}` });
+    lastAppServerError = `Unable to start Codex (${invocation.command}): ${error.message}`;
+    sendEvent("bridge.error", { message: lastAppServerError });
   });
   server.on("exit", (code, signal) => {
     if (appServer !== server) return;
@@ -396,6 +402,20 @@ async function ensureAppServer() {
   return initialized;
 }
 
+function terminateChild(child, force = false) {
+  if (!child?.pid || child.exitCode !== null) return;
+  if (process.platform === "win32") {
+    const killer = spawn("taskkill", ["/PID", String(child.pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" });
+    killer.on("error", () => child.kill());
+    return;
+  }
+  try {
+    child.kill(force ? "SIGKILL" : "SIGTERM");
+  } catch {
+    // The child already exited.
+  }
+}
+
 async function stopAppServer() {
   const runningServer = appServer;
   if (!runningServer) {
@@ -403,7 +423,7 @@ async function stopAppServer() {
     return;
   }
   await new Promise((resolveStop, rejectStop) => {
-    const forceTimeout = setTimeout(() => runningServer.kill("SIGKILL"), 3_000);
+    const forceTimeout = setTimeout(() => terminateChild(runningServer, true), 3_000);
     const failureTimeout = setTimeout(() => {
       rejectStop(new Error("Codex App Server did not stop before local data deletion."));
     }, 6_000);
@@ -412,7 +432,7 @@ async function stopAppServer() {
       clearTimeout(failureTimeout);
       resolveStop(undefined);
     });
-    runningServer.kill("SIGTERM");
+    terminateChild(runningServer);
   });
   initialized = null;
   appServer = null;
@@ -546,9 +566,13 @@ async function handleRequest(message) {
       return { connected: true, version: "0.3.4" };
     case "account.read":
       return appRequest("account/read", { refreshToken: false });
-    case "auth.login":
-      return appRequest("account/login/start", { type: "chatgpt" });
+    case "auth.login": {
+      const login = await appRequest("account/login/start", { type: "chatgpt" });
+      openLoginProxy(login?.authUrl);
+      return login;
+    }
     case "auth.cancel":
+      closeLoginProxy();
       return appRequest("account/login/cancel", { loginId: message.params?.loginId });
     case "auth.logout":
       return appRequest("account/logout", undefined);
@@ -683,11 +707,27 @@ process.stdin.on("data", (chunk) => {
   }
 });
 
-process.stdin.on("end", () => {
-  appServer?.kill("SIGTERM");
-});
+function openLoginProxy(authUrl) {
+  if (process.platform !== "win32" || loginProxy) return;
+  const port = localhostCallbackPort(authUrl);
+  if (!port) return;
+  const server = startIpv4LoginProxy(port);
+  loginProxy = server;
+  server.once("error", () => {
+    if (loginProxy === server) loginProxy = null;
+  });
+}
 
-process.on("SIGTERM", () => {
-  appServer?.kill("SIGTERM");
+function closeLoginProxy() {
+  loginProxy?.close();
+  loginProxy = null;
+}
+
+function shutdownHost() {
+  closeLoginProxy();
+  terminateChild(appServer);
   process.exit(0);
-});
+}
+
+process.stdin.on("end", shutdownHost);
+process.on("SIGTERM", shutdownHost);

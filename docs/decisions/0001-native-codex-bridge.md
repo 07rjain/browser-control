@@ -42,9 +42,8 @@ The Codex thread uses an empty companion-owned workspace, read-only sandboxing, 
 
 ## Installation
 
-The private MVP supports current Chrome on macOS. The installer creates:
+The private MVP supports current Chrome on macOS. Install locations for macOS, Linux, and Windows are recorded in ADR 0003. The macOS launcher is `~/Library/Application Support/Browser Control/bin/native-host`, not a file under `~/.codex-sidebar`. The installer also writes:
 
-- `~/.codex-sidebar/bin/native-host`; and
 - `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.codex.sidebar.json`.
 
 The host requires Node.js and the Codex CLI. Chrome Web Store distribution and packaged native installers are outside MVP scope.

@@ -1,21 +1,28 @@
 import { rmSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname } from "node:path";
+import { execFileSync } from "node:child_process";
+import { companionLayout, HOST_NAME } from "./host-paths.mjs";
 
-const hostName = "com.codex.sidebar";
-const browserManifestDirs = [
-  join(homedir(), "Library", "Application Support", "Google", "Chrome", "NativeMessagingHosts"),
-  join(homedir(), "Library", "Application Support", "BraveSoftware", "Brave-Browser", "NativeMessagingHosts"),
-];
-const applicationRoot = join(homedir(), "Library", "Application Support", "Browser Control");
+const layout = companionLayout(process.platform, homedir(), process.env, "0.0.0");
 
-for (const manifestDir of browserManifestDirs) {
-  rmSync(join(manifestDir, `${hostName}.json`), { force: true });
+for (const target of layout.manifestTargets) {
+  if (target.kind === "file") {
+    rmSync(target.path, { force: true });
+    continue;
+  }
+  try {
+    execFileSync("reg.exe", ["delete", target.key, "/f"], { stdio: "ignore" });
+  } catch {
+    // The key is already absent.
+  }
+  rmSync(target.path, { force: true });
 }
-rmSync(applicationRoot, { recursive: true, force: true });
+rmSync(layout.applicationRoot, { recursive: true, force: true });
+rmSync(dirname(layout.launcherPath), { recursive: true, force: true });
 
 process.stdout.write([
-  `Removed ${hostName} from Chrome and Brave.`,
+  `Removed ${HOST_NAME} from ${layout.browsers}.`,
   "Browser Control account and conversation data was kept in ~/.codex-sidebar.",
   "Use the extension's Delete all Browser Control data action before uninstalling if you also want that data removed.",
   "",

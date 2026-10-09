@@ -19,7 +19,8 @@ const version = packageJson.version;
 const bootstrap = process.argv.includes("--bootstrap");
 const releaseDir = join(repositoryRoot, "release");
 const temporaryRoot = mkdtempSync(join(tmpdir(), "browser-control-release-"));
-const companionName = `browser-control-companion-macos-${version}`;
+const platformName = { darwin: "macos", linux: "linux", win32: "windows" }[process.platform] ?? process.platform;
+const companionName = `browser-control-companion-${platformName}-${version}`;
 const companionStage = join(temporaryRoot, companionName);
 const extensionStage = join(temporaryRoot, "extension");
 const companionZip = join(releaseDir, `${companionName}.zip`);
@@ -30,6 +31,14 @@ const extensionZip = join(
 
 function zipDirectory(directory, output) {
   rmSync(output, { force: true });
+  if (process.platform === "win32") {
+    execFileSync("powershell.exe", [
+      "-NoProfile",
+      "-Command",
+      `Compress-Archive -Path (Join-Path '${directory.replaceAll("'", "''")}' '*') -DestinationPath '${output.replaceAll("'", "''")}'`,
+    ]);
+    return;
+  }
   execFileSync("zip", ["-q", "-r", output, "."], {
     cwd: directory,
     env: { ...process.env, COPYFILE_DISABLE: "1" },
@@ -44,10 +53,10 @@ try {
   mkdirSync(releaseDir, { recursive: true });
   mkdirSync(join(companionStage, "bridge"), { recursive: true });
   mkdirSync(join(companionStage, "scripts"), { recursive: true });
-  for (const file of ["native-host.mjs", "protocol.mjs", "skills.mjs"]) {
+  for (const file of ["native-host.mjs", "protocol.mjs", "skills.mjs", "codex-launch.mjs", "login-proxy.mjs"]) {
     copyFileSync(join(repositoryRoot, "bridge", file), join(companionStage, "bridge", file));
   }
-  for (const file of ["install-native-host.mjs", "uninstall-native-host.mjs", "smoke-installed-host.mjs"]) {
+  for (const file of ["install-native-host.mjs", "uninstall-native-host.mjs", "smoke-installed-host.mjs", "host-paths.mjs"]) {
     copyFileSync(join(repositoryRoot, "scripts", file), join(companionStage, "scripts", file));
   }
   copyFileSync(join(repositoryRoot, "companion", "README.txt"), join(companionStage, "README.txt"));

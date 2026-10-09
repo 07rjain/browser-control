@@ -6,7 +6,7 @@ The repository contains the implemented MVP plus the approved supervised browser
 
 ## Project status
 
-The MVP and supervised browser controls are available on the Chrome Web Store. The macOS native companion is distributed separately from the public support site. Manual Chrome validation and reliability hardening on dynamic applications such as Google Calendar remain release gates for updates.
+The MVP and supervised browser controls are available on the Chrome Web Store. The desktop native companion is distributed separately from the public support site. Manual Chrome validation and reliability hardening on dynamic applications such as Google Calendar remain release gates for updates.
 
 Known limitation: `page.inspect` currently returns the first 80 visible interactive controls in document order. Dense pages can place the requested control beyond that limit, so Codex may report that it cannot see or click a control that is visibly present. Active-dialog and viewport prioritization are not implemented yet.
 
@@ -38,21 +38,21 @@ Local Codex companion -----> Codex App Server / ChatGPT authentication
 - `src/content/page-executor.ts` performs allowlisted DOM actions using short-lived opaque references.
 - `src/shared/` contains runtime-validated protocol and tool schemas.
 - `bridge/` contains the native-messaging companion and Codex App Server transport.
-- `scripts/` installs and smoke-tests the macOS native host.
+- `scripts/` installs and smoke-tests the desktop native host.
 - `tests/` covers protocol validation, action policy, activity grouping, and page execution.
 
 ## Requirements
 
-- macOS and current stable Google Chrome or Brave
+- Desktop Google Chrome or Brave on macOS, Linux, or Windows
 - Node.js 20+
-- Codex CLI `0.148.0` or a compatible release available as `codex`
+- Codex CLI `0.148.0` or a compatible release available as `codex` (on Windows, `codex.exe` or the npm `codex.cmd` shim)
 
 ## Setup
 
 ```sh
 npm install
 npm run build
-npm run install:host:mac
+npm run install:host
 ```
 
 Then open `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**, and select this repository's `dist` directory.
@@ -65,6 +65,16 @@ mpdfhhhjgbpdpfnkjbnboebdjokfjglf
 
 If Chrome shows a different ID, native messaging will be rejected. Confirm that Chrome loaded `dist/manifest.json`, then rebuild and reload.
 
+For a fresh Windows or Linux desktop using the Store extension, follow the
+[companion installation guide](docs/INSTALL_WINDOWS_LINUX.md) instead of building
+the extension locally. On Windows, run the native-host installer and smoke test
+from your own normal PowerShell session, not a Codex sandbox account: host
+registration is written to that user's `HKCU`. A clean Windows x64 checkout at
+`5fe1987` passed the launcher tests, installer, installed-host smoke test, and
+Chrome/Brave registration checks. A working sidebar reply was user-reported,
+not independently captured. Linux still needs real-desktop validation; neither
+platform has a public companion download yet.
+
 ## First sign-in
 
 1. Click the extension toolbar icon to open the side panel.
@@ -73,7 +83,7 @@ If Chrome shows a different ID, native messaging will be rejected. Confirm that 
 4. Finish authentication; Codex App Server receives the localhost callback.
 5. Return to the side panel. It will display the email and plan information returned by Codex App Server.
 
-The companion uses the legacy compatibility path `~/.codex-sidebar` as an isolated Codex home. Taught skills live in `~/.codex-sidebar/skills` and are offered automatically when a request matches. Settings can record a demonstration on pages Browser Control is already allowed to use; review it, then save it on this Mac. The companion does not reuse the normal `~/.codex` configuration or place reusable credentials in Chrome storage. The path and native-host identifier `com.codex.sidebar` intentionally remain unchanged so existing development installations keep their authentication and extension connection.
+The companion uses the legacy compatibility path `~/.codex-sidebar` as an isolated Codex home. Taught skills live in `~/.codex-sidebar/skills` and are offered automatically when a request matches. Settings can record a demonstration on pages Browser Control is already allowed to use; review it, then save it on this computer. The companion does not reuse the normal `~/.codex` configuration or place reusable credentials in Chrome storage. The path and native-host identifier `com.codex.sidebar` intentionally remain unchanged so existing development installations keep their authentication and extension connection.
 
 ## Commands
 
@@ -85,8 +95,8 @@ npm test                # Unit tests
 npm run test:bridge     # Real native-host/App Server signed-out smoke test
 npm run test:installed-host # Verify Chrome-style launch environment after host installation
 npm run build           # Production extension in dist/
-npm run install:host:mac
-npm run uninstall:host:mac
+npm run install:host
+npm run uninstall:host
 ```
 
 After rebuilding, select **Reload** for the extension on `chrome://extensions`.
@@ -118,7 +128,7 @@ Manual testing is required for browser-visible or browser-action changes because
 ### Prepare the build
 
 1. Run the automated validation commands above.
-2. Run `npm run install:host:mac` if the host or extension ID changed.
+2. Run `npm run install:host` if the host or extension ID changed.
 3. Open `chrome://extensions`, enable **Developer mode**, and load `dist/` unpacked.
 4. Confirm the extension ID is `mpdfhhhjgbpdpfnkjbnboebdjokfjglf` and select **Reload** after every rebuild.
 5. Open the extension service-worker inspector and keep the Console visible while testing.
@@ -165,7 +175,7 @@ Inspection prioritizes usable in-viewport controls ahead of off-screen controls 
 
 ### Record the result
 
-For every manual pass, record Chrome version, macOS version, extension commit, test URL/origin, expected result, observed result, console errors, and screenshots for visual failures. Mark each scenario **pass**, **fail**, or **blocked**. A browser-visible feature is not complete solely because the automated gate passes.
+For every manual pass, record Chrome version, operating-system version, extension commit, test URL/origin, expected result, observed result, console errors, and screenshots for visual failures. Mark each scenario **pass**, **fail**, or **blocked**. A browser-visible feature is not complete solely because the automated gate passes.
 
 ## Supervised browser actions
 
@@ -200,9 +210,9 @@ No host access is granted at installation. Full access can request the manifest'
 
 ## Troubleshooting
 
-**Native host not found:** run `npm run install:host:mac`, confirm the extension ID above, then fully reload the extension.
+**Native host not found:** from any folder, run `git clone --depth 1 -b feat/desktop-companion https://github.com/07rjain/browser-control.git "$HOME/browser-control" || git -C "$HOME/browser-control" pull --ff-only && node "$HOME/browser-control/scripts/install-native-host.mjs"`. Node, Codex, and the extension can be installed in any order. Then choose **Retry connection** in the side panel.
 
-**Codex not found:** set `CODEX_BIN` to the Codex executable or make sure `which codex` succeeds before running the host installer. The installer records the resolved absolute path.
+**Codex not found or Sign in with ChatGPT does nothing on Windows:** pull this branch and run the installer again so the companion is recopied. The host looks for `codex.exe` under `%LOCALAPPDATA%\Programs\OpenAI\Codex\bin`, `%USERPROFILE%\.codex\packages\standalone\current`, and WinGet Links, and it starts an npm `codex.cmd` shim through Node instead of launching the `.cmd` file. Set `CODEX_BIN` only when Codex lives somewhere else. After ChatGPT approval, Windows may prompt for a local listener on `::1`; allow it so the sign-in callback can reach Codex on `127.0.0.1`.
 
 **Cannot attach a page:** Chrome blocks scripting on internal pages such as `chrome://extensions`. Open a normal `http` or `https` page and click the toolbar icon again before attaching.
 

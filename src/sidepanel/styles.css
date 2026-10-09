@@ -132,6 +132,29 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .text-button { justify-self: start; padding: 0; border: 0; background: none; color: var(--muted); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
 .login-cancel { grid-column: 2; margin-top: 4px; }
 .connection-actions { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
+.setup-card {
+  width: 100%;
+  max-width: 410px;
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--panel);
+  text-align: left;
+}
+.setup-card p { margin: 0; color: var(--muted); line-height: 1.45; }
+.setup-command {
+  display: block;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--panel-solid);
+  color: var(--text);
+  font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  overflow-wrap: break-word;
+  white-space: pre-wrap;
+}
 
 .app-shell { height: 100%; min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; overflow: hidden; }
 .app-header { position: relative; z-index: 20; display: flex; align-items: center; justify-content: space-between; min-height: 62px; padding: 12px 14px; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--bg) 86%, transparent); backdrop-filter: blur(18px); }
