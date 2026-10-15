@@ -53,6 +53,7 @@ import {
   describeCloseTarget,
   dynamicToolCallSchema,
   executeTabTool,
+  parseToolArguments,
   type DynamicToolCall,
 } from "./tab-tools";
 
@@ -64,6 +65,8 @@ const TASK_KEY = "codexSidebarBrowserTasks";
 const THREAD_TARGETS_KEY = "codexSidebarThreadWorkingTabs";
 const COMPLETION_NOTICE_KEY = "codexSidebarCompletionNotice";
 const PENDING_PROMPTS_KEY = "codexSidebarPendingBrowserPrompts";
+const KNOWN_URLS_KEY = "codexSidebarThreadKnownUrls";
+const MAX_KNOWN_URLS_PER_THREAD = 300;
 const TASK_TOMBSTONE_TTL_MS = 10 * 60 * 1_000;
 const accountResponseSchema = z.object({ account: accountSchema, requiresOpenaiAuth: z.boolean() });
 const loginResponseSchema = z.object({
@@ -120,6 +123,12 @@ interface BrowserTaskState {
 interface ThreadWorkingTab {
   threadId: string;
   tabId: number;
+  updatedAt: number;
+}
+
+interface ThreadKnownUrls {
+  threadId: string;
+  urls: string[];
   updatedAt: number;
 }
 
@@ -278,6 +287,54 @@ async function setThreadWorkingTab(threadId: string, tabId: number): Promise<voi
   const targets = (await storedList<ThreadWorkingTab>(THREAD_TARGETS_KEY)).filter((item) => item.threadId !== threadId);
   targets.push({ threadId, tabId, updatedAt: Date.now() });
   await chrome.storage.session.set({ [THREAD_TARGETS_KEY]: targets.slice(-40) });
+}
+
+function normalizedHttpUrl(value: unknown): string | null {
+  return typeof value === "string" && isSafeHttpUrl(value) ? new URL(value).href : null;
+}
+
+function urlsInText(text: string): string[] {
+  return (text.match(/https?:\/\/[^\s<>"'`]+/gi) ?? []).map((url) => url.replace(/[.,;:!?)\]}]+$/, ""));
+}
+
+function inspectedUrls(result: unknown): unknown[] {
+  if (!result || typeof result !== "object") return [];
+  const { url, elements } = result as { url?: unknown; elements?: unknown };
+  const hrefs = Array.isArray(elements)
+    ? elements.map((element) => (element && typeof element === "object" ? (element as { href?: unknown }).href : undefined))
+    : [];
+  return [url, ...hrefs];
+}
+
+// Model-built addresses can carry page or tab data to another site, so
+// tabs.open runs unprompted only for exact URLs that reached the thread from
+// the user, an open tab, or an inspected page.
+async function rememberThreadUrls(threadId: string, values: unknown[]): Promise<void> {
+  const urls = values.map(normalizedHttpUrl).filter((url): url is string => url !== null);
+  if (urls.length === 0) return;
+  const entries = await storedList<ThreadKnownUrls>(KNOWN_URLS_KEY);
+  const existing = entries.find((entry) => entry.threadId === threadId)?.urls ?? [];
+  const merged = [...new Set([...existing, ...urls])].slice(-MAX_KNOWN_URLS_PER_THREAD);
+  const others = entries.filter((entry) => entry.threadId !== threadId);
+  await chrome.storage.session.set({
+    [KNOWN_URLS_KEY]: [...others, { threadId, urls: merged, updatedAt: Date.now() }].slice(-40),
+  });
+}
+
+async function isKnownThreadUrl(threadId: string, value: string): Promise<boolean> {
+  const url = normalizedHttpUrl(value);
+  if (!url) return false;
+  const entries = await storedList<ThreadKnownUrls>(KNOWN_URLS_KEY);
+  if (entries.find((entry) => entry.threadId === threadId)?.urls.includes(url)) return true;
+  const tasks = await storedList<BrowserTaskState>(TASK_KEY);
+  if (tasks.some((task) => task.threadId === threadId && normalizedHttpUrl(task.recoveryUrl) === url)) return true;
+  const tabs = await chrome.tabs.query({});
+  return tabs.some((tab) => normalizedHttpUrl(tab.url) === url || normalizedHttpUrl(tab.pendingUrl) === url);
+}
+
+async function copyThreadKnownUrls(sourceThreadId: string, targetThreadId: string): Promise<void> {
+  const source = (await storedList<ThreadKnownUrls>(KNOWN_URLS_KEY)).find((entry) => entry.threadId === sourceThreadId);
+  if (source) await rememberThreadUrls(targetThreadId, source.urls);
 }
 
 async function copyThreadWorkingTab(sourceThreadId: string, targetThreadId: string): Promise<void> {
@@ -576,9 +633,38 @@ async function handleTabCall(call: DynamicToolCall, announce: boolean): Promise<
       target: { label: target.title, url: target.url },
     };
   }
+  if (call.tool === "open") {
+    const url = new URL(parseToolArguments(call).url as string).href;
+    if (!(await isKnownThreadUrl(call.threadId, url))) {
+      await storeActivity(call, "awaiting confirmation", { target: { url } });
+      const prompt = {
+        callId: call.callId,
+        namespace: call.namespace,
+        tool: call.tool,
+        title: "Open this page?",
+        description: "This address did not come from your message, an open tab, or a link on an inspected page. Opening it sends everything in the address to that site.",
+        target: { label: new URL(url).host, url },
+        approveLabel: "Open page",
+        rejectLabel: "Cancel",
+        danger: false,
+      };
+      await activeTask(call);
+      pendingApprovals.set(call.callId, { call });
+      pendingPrompts.set(call.callId, { type: "approval", data: prompt });
+      await persistPendingPrompt({ callId: call.callId, type: "approval", data: prompt, approval: { call } });
+      broadcast("tool.approval", prompt);
+      return;
+    }
+  }
   await recordAction(call);
   await storeActivity(call, "running", bypassedApproval);
+  const result = await executeTabToolForThread(call);
+  await finishTool(call, true, result, "succeeded");
+}
+
+async function executeTabToolForThread(call: DynamicToolCall): Promise<unknown> {
   let result = await executeTabTool(call);
+  if (call.tool === "open") await rememberThreadUrls(call.threadId, [parseToolArguments(call).url]);
   if (call.tool === "list" && Array.isArray(result)) {
     const workingTabId = await getThreadWorkingTab(call.threadId);
     result = result.map((tab) => tab && typeof tab === "object"
@@ -598,7 +684,7 @@ async function handleTabCall(call: DynamicToolCall, announce: boolean): Promise<
       await syncTaskIndicator(tabId);
     }
   }
-  await finishTool(call, true, result, "succeeded");
+  return result;
 }
 
 async function executePageCallForTask(
@@ -792,6 +878,7 @@ async function handlePageCall(call: PageToolCall, announce: boolean): Promise<vo
       }
     : undefined);
   const result = await executePageCallForTask(call, task, target);
+  if (call.tool === "inspect") await rememberThreadUrls(call.threadId, inspectedUrls(result));
   const actionFailed = actionResultFailed(result);
   await finishTool(call, !actionFailed, result, actionFailed ? "failed" : "succeeded");
 }
@@ -900,7 +987,7 @@ async function decideTool(callId: string, approved: boolean): Promise<unknown> {
     await recordAction(call);
     await storeActivity(call, "running");
     const task = await getTask(call);
-    const result = call.namespace === "tabs" ? await executeTabTool(call) : await executePageCallForTask(call, task, pending.target);
+    const result = call.namespace === "tabs" ? await executeTabToolForThread(call) : await executePageCallForTask(call, task, pending.target);
     const actionFailed = actionResultFailed(result);
     await finishTool(call, !actionFailed, result, actionFailed ? "failed" : "succeeded");
     return result;
@@ -1074,11 +1161,13 @@ async function routeRequest(input: unknown): Promise<unknown> {
         lastTurnId: request.lastTurnId,
       }));
       await copyThreadWorkingTab(request.threadId, result.threadId);
+      await copyThreadKnownUrls(request.threadId, result.threadId);
       return result;
     }
     case "CHAT_SEND": {
       if (await recordingBlocksBrowserWork()) throw new Error("Finish or cancel skill recording before sending a message.");
       const tabId = await ensureThreadWorkingTab(request.threadId);
+      await rememberThreadUrls(request.threadId, urlsInText(request.text));
       const result = turnResponseSchema.parse(await requestNative("chat.send", { threadId: request.threadId, text: request.text, clientMessageId: request.clientMessageId, model: request.model }));
       await initializeBrowserTask(request.threadId, result.turnId, tabId);
       return result;

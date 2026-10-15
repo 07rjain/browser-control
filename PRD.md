@@ -172,7 +172,7 @@ Chrome documents `activeTab` as temporary access granted after a user gesture an
 
 - `tabs.list`: return tab ID, window ID, active state, title, and URL when permission permits.
 - `tabs.activate`: select an existing task working tab in the background by default; foreground only with explicit user intent.
-- `tabs.open`: create a task working tab for an `http` or `https` URL in the background by default; foreground only with explicit user intent.
+- `tabs.open`: create a task working tab for an `http` or `https` URL in the background by default; foreground only with explicit user intent. The exact address opens without a prompt only when it appeared in the user's message, matches an open tab or the task's recovery page, came from an inspected page's address or links, or was approved earlier in the same thread. Any other address shows an "Open this page?" confirmation in both permission modes, because a model-built address can carry page or tab data to another site.
 - `tabs.reload`: reload a specified tab.
 - `tabs.group`: organize one or more existing unpinned tabs from the same window into a named, optionally colored/collapsed Chrome tab group.
 - `tabs.ungroup`: remove grouping from selected tabs while keeping every tab open.

