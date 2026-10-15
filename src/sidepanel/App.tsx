@@ -21,6 +21,7 @@ import { IDLE_RECORDING_VIEW, recordingStepSummary, type RecordingView } from ".
 import { COMPANION_INSTALL_COMMAND, isLegacyThreadError, isMissingNativeHost } from "../shared/companion-setup";
 import { activityStepLabel, groupToolStatuses, hasBrowserActivityForTurn, summarizeToolStatuses, visibleActivityFormFields, type ToolStatus } from "./activity";
 import { settleCanceledMessages, type ChatMessage } from "./chat-state";
+import { greetingFor, setupSteps, STARTER_TASKS, type AuthState, type StarterTask } from "./welcome";
 import {
   createConversationRecord,
   readConversationHistory,
@@ -28,7 +29,6 @@ import {
   type ConversationRecord,
 } from "./conversation-history";
 
-type AuthState = "checking" | "signed-out" | "authenticating" | "ready" | "offline" | "error";
 type Theme = "system" | "light" | "dark";
 
 interface Account {
@@ -278,6 +278,30 @@ function RecordingReview({
   );
 }
 
+function OrbMark({ size }: { size?: "large" }) {
+  return (
+    <div className={size === "large" ? "orb orb-large" : "orb"} aria-hidden="true">
+      <span className="orb-wave orb-wave-outer" />
+      <span className="orb-wave orb-wave-inner" />
+      <span className="orb-core" />
+    </div>
+  );
+}
+
+function StarterIcon({ id }: { id: StarterTask["id"] }) {
+  const paths: Record<StarterTask["id"], string> = {
+    summarize: "M5 4h10l4 4v12H5zM14 4v5h5M8 13h8M8 17h5",
+    tabs: "M3 7h7l2 2h9v10H3zM3 7V5h6l2 2",
+    find: "M11 18a7 7 0 1 1 0-14 7 7 0 0 1 0 14zM16 16l5 5",
+    checklist: "M4 6l2 2 3-3M4 13l2 2 3-3M12 7h8M12 14h8M12 20h8",
+  };
+  return (
+    <svg className="starter-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <path d={paths[id]} />
+    </svg>
+  );
+}
+
 export default function App() {
   const [authState, setAuthState] = useState<AuthState>("checking");
   const [account, setAccount] = useState<Account | null>(null);
@@ -312,6 +336,7 @@ export default function App() {
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [forkingMessageId, setForkingMessageId] = useState<string | null>(null);
   const [taughtSkills, setTaughtSkills] = useState<SidebarSkill[]>([]);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
   const [skillsError, setSkillsError] = useState<string | null>(null);
   const [recording, setRecording] = useState<RecordingView>(IDLE_RECORDING_VIEW);
   const [recordingError, setRecordingError] = useState<string | null>(null);
@@ -1151,7 +1176,8 @@ export default function App() {
   };
 
   const canSend = draft.trim().length > 0 && !streaming && !recordingActive && authState === "ready";
-  const emptyTitle = "Ready when you are";
+  const greeting = greetingFor(new Date().getHours());
+  const enabledSkillCount = taughtSkills.filter((skill) => skill.enabled).length;
   const activitiesByTurn = useMemo(() => groupToolStatuses(toolStatuses), [toolStatuses]);
   const visibleConversationHistory = useMemo(() => upsertConversation(
     conversationHistory,
@@ -1161,12 +1187,26 @@ export default function App() {
   if (authState !== "ready") {
     return (
       <main className="welcome-shell">
-        <div className="brand-mark" aria-hidden="true">B</div>
-        <p className="eyebrow">Browser Control</p>
-        <h1>Think with the page beside you.</h1>
-        <p className="welcome-copy">
-          Sign in with ChatGPT to use your Codex subscription. Credentials stay in the local Codex companion.
-        </p>
+        <div className="welcome-hero rise">
+          <OrbMark size="large" />
+          <p className="eyebrow">Browser Control</p>
+          <h1>Codex, right beside your tabs.</h1>
+          <p className="welcome-copy">
+            Ask about what you're reading, tidy your tabs, or hand off supervised page work. You see every step and can stop at any time.
+          </p>
+        </div>
+
+        <ol className="setup-steps rise" aria-label="Setup progress">
+          {setupSteps(authState, isMissingNativeHost(error)).map((step, index) => (
+            <li key={step.id} className={`setup-step setup-step-${step.state}`} aria-current={step.state === "current" ? "step" : undefined}>
+              <span className="setup-step-marker" aria-hidden="true">{step.state === "done" ? "✓" : step.state === "attention" ? "!" : index + 1}</span>
+              <span className="setup-step-text">
+                <strong>{step.label}</strong>
+                <small>{step.detail}</small>
+              </span>
+            </li>
+          ))}
+        </ol>
 
         {authState === "authenticating" && login ? (
           <section className="login-card" aria-live="polite">
@@ -1180,8 +1220,8 @@ export default function App() {
             </div>
             <button className="text-button login-cancel" onClick={() => void cancelLogin()}>Cancel</button>
           </section>
-        ) : (
-          <button className="primary-button welcome-action" onClick={() => void signIn()} disabled={authState === "checking"}>
+        ) : authState !== "offline" && (
+          <button className="primary-button welcome-action rise" onClick={() => void signIn()} disabled={authState === "checking"}>
             {authState === "checking" ? "Connecting…" : "Sign in with ChatGPT"}
           </button>
         )}
@@ -1212,7 +1252,12 @@ export default function App() {
             )}
           </div>
         )}
-        <p className="privacy-note">No page content is shared until you choose Attach page.</p>
+        <ul className="welcome-features rise">
+          <li><strong>You choose what it sees.</strong> Pages are shared only when you attach them.</li>
+          <li><strong>Every action is visible.</strong> Watch each step in the activity list and press Stop any time.</li>
+          <li><strong>Teach it once.</strong> Record a task and reuse it as a local skill.</li>
+        </ul>
+        <p className="privacy-note">Your ChatGPT sign-in stays in the local Codex companion, not in the extension.</p>
       </main>
     );
   }
@@ -1414,23 +1459,33 @@ export default function App() {
       <div className="transcript" ref={transcriptRef} aria-live="polite">
         {messages.length === 0 ? (
           <section className="empty-state">
-            <div className="orb" aria-hidden="true">
-              <span className="orb-wave orb-wave-outer" />
-              <span className="orb-wave orb-wave-inner" />
-              <span className="orb-core" />
-            </div>
-            <h1>{emptyTitle}</h1>
-            <p>Ask about what you’re reading, attach the page, or navigate the current site with supervised browser actions.</p>
+            <OrbMark />
+            <p className="eyebrow rise">{greeting}</p>
+            <h1 className="rise">What should we work on?</h1>
+            <p className="rise">Ask about a page, organize your tabs, or hand off a supervised task in the working tab.</p>
             {browserPermissionMode === "full" && !fullSiteAccessGranted && (
               <button className="full-access-setup" onClick={() => void requestFullSiteAccess()}>
                 <strong>Enable Full access</strong>
                 <span>Approve Chrome once so browser tasks do not pause site by site.</span>
               </button>
             )}
-            <div className="prompt-grid">
-              <button onClick={() => setDraft("Summarize the page I attach in five bullets.")}>Summarize a page</button>
-              <button onClick={() => setDraft("List my open tabs and group them by topic.")}>Organize my tabs</button>
+            <div className="prompt-grid rise">
+              {STARTER_TASKS.map((task) => (
+                <button key={task.id} onClick={() => {
+                  setDraft(task.prompt);
+                  composerRef.current?.focus();
+                }}>
+                  <StarterIcon id={task.id} />
+                  <strong>{task.title}</strong>
+                  <span>{task.detail}</span>
+                </button>
+              ))}
             </div>
+            <p className="home-status rise">
+              <span>{browserPermissionMode === "full" ? "Full access" : "Ask every time"}</span>
+              {enabledSkillCount > 0 && <span>{enabledSkillCount === 1 ? "1 taught skill" : `${enabledSkillCount} taught skills`}</span>}
+              <span>Stop any time</span>
+            </p>
           </section>
         ) : (
           messages.map((message) => {
@@ -1641,6 +1696,7 @@ export default function App() {
         )}
         <form className="composer" onSubmit={(event) => void submit(event)}>
           <textarea
+            ref={composerRef}
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={(event) => {
