@@ -1,9 +1,10 @@
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdtempSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { encodeNativeMessage, LengthPrefixedJsonDecoder } from "../bridge/protocol.mjs";
+import { LEGACY_THREAD_ERROR } from "../bridge/restricted-threads.mjs";
 import { resolveCodexBinary } from "./host-paths.mjs";
 import { probeCodexTools } from "./probe-codex-tools.mjs";
 
@@ -118,6 +119,21 @@ try {
   }
   const accountAfterDeletion = await request("account.read");
   if (accountAfterDeletion.account !== null) throw new Error("Deleted native data retained an account.");
+  const legacyThreadId = "00000000-0000-4000-8000-000000000000";
+  for (const [method, params] of [
+    ["chat.resume", { threadId: legacyThreadId }],
+    ["chat.fork", { threadId: legacyThreadId, lastTurnId: "turn-legacy" }],
+    ["chat.send", { threadId: legacyThreadId, text: "hello", clientMessageId: "message-legacy" }],
+  ]) {
+    const refusal = await request(method, params).then(() => null, (error) => error.message);
+    if (refusal !== LEGACY_THREAD_ERROR) throw new Error(`${method} did not refuse an unrestricted thread: ${refusal}`);
+  }
+  const started = await request("chat.start", {});
+  const registry = JSON.parse(readFileSync(join(temporaryHome, "restricted-threads.json"), "utf8"));
+  if (!registry.threadIds.includes(started.threadId)) throw new Error("chat.start did not record its restricted thread.");
+  await request("chat.resume", { threadId: started.threadId }).catch((error) => {
+    if (error.message === LEGACY_THREAD_ERROR) throw new Error("chat.resume refused a restricted thread.");
+  });
   process.stdout.write("Native bridge smoke test passed (isolated, signed-out account).\n");
   for (const result of await probeCodexTools(codexBinary)) {
     process.stdout.write(`Codex tools for ${result.label}: ${result.names.join(", ")}\n`);

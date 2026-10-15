@@ -18,7 +18,7 @@ import {
   type BrowserPermissionMode,
 } from "../shared/page-tools";
 import { IDLE_RECORDING_VIEW, recordingStepSummary, type RecordingView } from "../shared/skill-recording";
-import { COMPANION_INSTALL_COMMAND, isMissingNativeHost } from "../shared/companion-setup";
+import { COMPANION_INSTALL_COMMAND, isLegacyThreadError, isMissingNativeHost } from "../shared/companion-setup";
 import { activityStepLabel, groupToolStatuses, hasBrowserActivityForTurn, summarizeToolStatuses, visibleActivityFormFields, type ToolStatus } from "./activity";
 import { settleCanceledMessages, type ChatMessage } from "./chat-state";
 import {
@@ -803,21 +803,23 @@ export default function App() {
     void refreshSkills();
   };
 
-  const ensureThread = async (): Promise<string> => {
-    if (threadId && threadReadyRef.current) return threadId;
+  const ensureThread = async (): Promise<{ threadId: string; replacedLegacy: boolean }> => {
+    if (threadId && threadReadyRef.current) return { threadId, replacedLegacy: false };
+    let replacedLegacy = false;
     if (threadId) {
       try {
         const resumed = await sendRequest<{ threadId: string }>({ type: "CHAT_RESUME", threadId, model: selectedModel || undefined });
         threadReadyRef.current = true;
-        return resumed.threadId;
-      } catch {
+        return { threadId: resumed.threadId, replacedLegacy: false };
+      } catch (cause) {
         // The stored thread may have been cleared by Codex; start a replacement below.
+        replacedLegacy = cause instanceof Error && isLegacyThreadError(cause.message);
       }
     }
     const created = await sendRequest<{ threadId: string }>({ type: "CHAT_START", model: selectedModel || undefined });
     setThreadId(created.threadId);
     threadReadyRef.current = true;
-    return created.threadId;
+    return { threadId: created.threadId, replacedLegacy };
   };
 
   const sendChatMessage = async (payload: RetryPayload, appendUser: boolean) => {
@@ -842,7 +844,20 @@ export default function App() {
       ];
     });
     try {
-      const activeThreadId = await ensureThread();
+      const { threadId: activeThreadId, replacedLegacy } = await ensureThread();
+      if (replacedLegacy) {
+        setConversationHistory((current) => upsertConversation(
+          current,
+          createConversationRecord(currentConversationId, threadId, settleCanceledMessages(messages), toolStatuses),
+        ));
+        setCurrentConversationId(crypto.randomUUID());
+        setMessages([
+          { id: messageId, role: "user", text: payload.displayText },
+          { id: `${messageId}-assistant`, role: "assistant", text: "", streaming: true },
+        ]);
+        setToolStatuses([]);
+        setCompletionNotice("That chat was created by an older version and is now read-only in History, so your message started a new chat.");
+      }
       const result = await sendRequest<{ turnId: string }>({
         type: "CHAT_SEND",
         threadId: activeThreadId,
@@ -872,6 +887,7 @@ export default function App() {
           item.id === `${messageId}-assistant` ? { ...item, streaming: false, failed: true } : item,
         ),
       );
+      if (cause instanceof Error && isLegacyThreadError(cause.message)) threadReadyRef.current = false;
       setRetryPayload(payload);
       setError(cause instanceof Error ? cause.message : "Unable to send this message.");
     }

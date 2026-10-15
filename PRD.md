@@ -246,6 +246,7 @@ Chrome documents that `chrome.tabs` can create, modify, and rearrange tabs, whil
 - Completed assistant messages expose Copy and Fork controls. Streaming, failed, and browser-tool output blocks do not expose these actions.
 - Copy preserves the assistant's original Markdown and provides a short local success state.
 - Fork uses Codex App Server `thread/fork` with the selected response's turn ID, opens the returned persistent thread, retains the original conversation in History, and copies the original thread's working-tab pin without foregrounding it.
+- The companion continues, forks, or sends to only the threads it started or forked with Codex's built-in tools disabled, recorded in `~/.codex-sidebar/restricted-threads.json`. Codex keeps a thread's original tools when it is resumed, so chats created before that restriction stay visible in History as read-only. Sending from one files it unchanged in History and starts a new chat with the message.
 
 #### Acceptance criteria
 

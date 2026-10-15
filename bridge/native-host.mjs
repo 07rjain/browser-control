@@ -6,6 +6,7 @@ import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { codexInvocation } from "./codex-launch.mjs";
 import { localhostCallbackPort, startIpv4LoginProxy } from "./login-proxy.mjs";
+import { createRestrictedThreadRegistry } from "./restricted-threads.mjs";
 import {
   CODEX_THREAD_RESTRICTIONS,
   encodeNativeMessage,
@@ -32,6 +33,7 @@ const defaultSidebarHome = resolve(join(homedir(), ".codex-sidebar"));
 const sidebarHome = resolve(process.env.CODEX_SIDEBAR_HOME ?? defaultSidebarHome);
 const workspace = join(sidebarHome, "workspace");
 const dataRootMarker = join(sidebarHome, ".browser-control-data-root");
+const restrictedThreads = createRestrictedThreadRegistry(join(sidebarHome, "restricted-threads.json"));
 let loginProxy = null;
 
 const allowedTestHome = process.env.BROWSER_CONTROL_TEST_HOME === "1" &&
@@ -629,10 +631,12 @@ async function handleRequest(message) {
         historyMode: "legacy",
         dynamicTools,
       });
+      restrictedThreads.add(result.thread.id);
       threadSkillCatalog.set(result.thread.id, catalog.hash);
       return { threadId: result.thread.id, model: result.model };
     }
     case "chat.resume": {
+      restrictedThreads.assertRestricted(message.params?.threadId);
       const catalog = await refreshSkillCatalog();
       const result = await appRequest("thread/resume", {
         threadId: message.params?.threadId,
@@ -645,6 +649,7 @@ async function handleRequest(message) {
       return { threadId: result.thread.id, model: result.model };
     }
     case "chat.fork": {
+      restrictedThreads.assertRestricted(message.params?.threadId);
       const catalog = await refreshSkillCatalog();
       const result = await appRequest("thread/fork", {
         threadId: message.params?.threadId,
@@ -652,10 +657,12 @@ async function handleRequest(message) {
         ...threadParamsForCatalog(catalog.text),
         dynamicTools,
       });
+      restrictedThreads.add(result.thread.id);
       threadSkillCatalog.set(result.thread.id, catalog.hash);
       return { threadId: result.thread.id };
     }
     case "chat.send": {
+      restrictedThreads.assertRestricted(message.params?.threadId);
       await syncThreadSkillCatalog(message.params?.threadId);
       const result = await appRequest("turn/start", {
         threadId: message.params?.threadId,
