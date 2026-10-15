@@ -871,7 +871,9 @@ describe("service-worker browser orchestration", () => {
       },
       storage: { session: storageArea(sessionData), local: storageArea(localData) },
       tabs: {
-        get: vi.fn(async () => ({ id: 12, windowId: 1, url: "https://example.com" })),
+        get: vi.fn(async (tabId: number) => tabId === 12
+          ? { id: 12, windowId: 1, url: "https://example.com" }
+          : { id: tabId, windowId: 1, url: "", pendingUrl: tabId === 91 ? "https://example.com/late" : undefined }),
         create,
         update,
         remove,
@@ -914,10 +916,73 @@ describe("service-worker browser orchestration", () => {
     expect(create).not.toHaveBeenCalled();
     expect(update).toHaveBeenCalledWith(88, { active: false });
     expect(remove).toHaveBeenCalledWith(89);
-    expect(remove).not.toHaveBeenCalledWith(90);
+    expect(remove).toHaveBeenCalledWith(90);
     expect(result).toEqual(expect.objectContaining({
       openedPopupTabId: 88,
       openedPopupUrl: "https://example.com/workspace",
+      openedInBackground: true,
+    }));
+  });
+
+  it("adopts a popup tab whose address arrives after the click", async () => {
+    const sessionData: Record<string, unknown> = {};
+    const localData: Record<string, unknown> = {};
+    const create = vi.fn();
+    const update = vi.fn(async () => ({ id: 88, active: false }));
+    const remove = vi.fn(async () => undefined);
+    vi.stubGlobal("chrome", {
+      runtime: {
+        id: "extension-id",
+        sendMessage: vi.fn(async () => undefined),
+        onMessage: { addListener: vi.fn() },
+        onInstalled: { addListener: vi.fn() },
+        onStartup: { addListener: vi.fn() },
+      },
+      storage: { session: storageArea(sessionData), local: storageArea(localData) },
+      tabs: {
+        get: vi.fn(async (tabId: number) => tabId === 12
+          ? { id: 12, windowId: 1, url: "https://example.com" }
+          : { id: tabId, windowId: 1, url: "", pendingUrl: tabId === 91 ? "https://example.com/late" : undefined }),
+        create,
+        update,
+        remove,
+        onRemoved: { addListener: vi.fn() },
+      },
+      sidePanel: { setPanelBehavior: vi.fn(async () => undefined) },
+    });
+
+    const { serviceWorkerTestHooks } = await import("../src/background/service-worker");
+    const result = await serviceWorkerTestHooks.processCapturedPopup({
+      requestId: 14,
+      threadId: "thread-bypass",
+      turnId: "turn-bypass",
+      callId: "call-bypass",
+      namespace: "page",
+      tool: "click",
+      arguments: {
+        idempotencyKey: "click-bypass-00001",
+        ref: { id: "e1", snapshotId: "snapshot-bypass", tabId: 12, origin: "https://example.com" },
+      },
+    }, {
+      key: "thread-bypass:turn-bypass",
+      threadId: "thread-bypass",
+      turnId: "turn-bypass",
+      actionCount: 0,
+      canceled: false,
+      authorizedTabId: 12,
+      updatedAt: Date.now(),
+    }, {
+      clicked: true,
+      popupAttempts: 0,
+      popupUrls: [],
+      createdTabs: [{ id: 91, url: "", active: false }],
+    });
+
+    expect(create).not.toHaveBeenCalled();
+    expect(remove).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      openedPopupTabId: 91,
+      openedPopupUrl: "https://example.com/late",
       openedInBackground: true,
     }));
   });

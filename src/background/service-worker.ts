@@ -644,9 +644,12 @@ async function processCapturedPopup(
     : [];
   const safeCreated: Array<{ id: number; url: string }> = [];
   for (const tab of createdTabs) {
-    const url = typeof tab.url === "string" ? tab.url : "";
-    if (!url) continue;
-    if (!isSafeHttpUrl(url)) {
+    let url = typeof tab.url === "string" ? tab.url : "";
+    if (!url) {
+      const current = await chrome.tabs.get(tab.id).catch(() => undefined);
+      url = current?.pendingUrl || current?.url || "";
+    }
+    if (!url || !isSafeHttpUrl(url)) {
       await chrome.tabs.remove(tab.id).catch(() => undefined);
       continue;
     }
