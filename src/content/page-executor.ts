@@ -6,7 +6,8 @@ type ExecutorCommand =
   | { type: "CODEX_PAGE_EXECUTOR"; action: "INSPECT" }
   | { type: "CODEX_PAGE_EXECUTOR"; action: "DESCRIBE"; snapshotId: string; refId: string }
   | { type: "CODEX_PAGE_EXECUTOR"; action: "REVALIDATE"; snapshotId: string; refId: string }
-  | { type: "CODEX_PAGE_EXECUTOR"; action: "CLICK"; snapshotId: string; refId: string }
+  | { type: "CODEX_PAGE_EXECUTOR"; action: "POPUP_GUARD_READY"; guardId: string }
+  | { type: "CODEX_PAGE_EXECUTOR"; action: "CLICK"; snapshotId: string; refId: string; popupGuardId?: string }
   | { type: "CODEX_PAGE_EXECUTOR"; action: "FILL"; snapshotId: string; refId: string; value: string; mode: "replace" | "append" | "clear" }
   | { type: "CODEX_PAGE_EXECUTOR"; action: "SELECT"; snapshotId: string; refId: string; value: string }
   | { type: "CODEX_PAGE_EXECUTOR"; action: "CHECK"; snapshotId: string; refId: string; checked: boolean }
@@ -53,6 +54,7 @@ if (!executorGlobal.__codexPageExecutorInstalled) {
     "[role='treeitem']",
   ].join(",");
   const REFERENCED_SELECTOR = `${INTERACTIVE_SELECTOR},${DRAG_SELECTOR}`;
+  const POPUP_GUARD_READY_ATTRIBUTE = "data-codex-popup-guard";
   const refs = new Map<string, { element: Element; fingerprint: string }>();
   let snapshotId = "";
   let snapshotCreatedAt = 0;
@@ -539,6 +541,10 @@ if (!executorGlobal.__codexPageExecutorInstalled) {
     element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType, data: value || null }));
   }
 
+  function isPopupGuardId(value: unknown): value is string {
+    return typeof value === "string" && /^[\w-]{1,64}$/.test(value);
+  }
+
   function handle(command: ExecutorCommand): unknown {
     switch (command.action) {
       case "PING":
@@ -555,14 +561,22 @@ if (!executorGlobal.__codexPageExecutorInstalled) {
         const element = assertFresh(command.refId, command.snapshotId, true);
         return describe(element, command.refId);
       }
+      case "POPUP_GUARD_READY":
+        return { ready: isPopupGuardId(command.guardId) && document.documentElement.getAttribute(POPUP_GUARD_READY_ATTRIBUTE) === command.guardId };
       case "CLICK": {
-        const element = assertFresh(command.refId, command.snapshotId);
-        assertInteractable(element);
-        if (isSensitive(element)) throw new Error("Browser Control will not interact with sensitive fields.");
-        const before = location.href;
-        (element as HTMLElement).focus({ preventScroll: true });
-        (element as HTMLElement).click();
-        return { clicked: true, beforeUrl: before, label: labelFor(element) };
+        try {
+          const element = assertFresh(command.refId, command.snapshotId);
+          assertInteractable(element);
+          if (isSensitive(element)) throw new Error("Browser Control will not interact with sensitive fields.");
+          const before = location.href;
+          (element as HTMLElement).focus({ preventScroll: true });
+          (element as HTMLElement).click();
+          return { clicked: true, beforeUrl: before, label: labelFor(element) };
+        } finally {
+          if (isPopupGuardId(command.popupGuardId)) {
+            document.documentElement.dispatchEvent(new Event(`codex-popup-guard-clicked-${command.popupGuardId}`));
+          }
+        }
       }
       case "FILL": {
         const element = assertFresh(command.refId, command.snapshotId);

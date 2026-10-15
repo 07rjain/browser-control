@@ -15,6 +15,7 @@ import {
   type ElementRef,
   type PageToolCall,
 } from "../shared/page-tools";
+import { isSafeHttpUrl } from "../shared/protocol";
 import type { PageTargetDescription } from "./page-policy";
 
 export class PageControlPermissionRequiredError extends Error {
@@ -60,71 +61,34 @@ interface PopupGuardReport {
   collectionFailed?: boolean;
 }
 
-type PopupGuardControl = (
-  action: "wait" | "release" | "replace",
-  requestedGuardId: string,
-  timing?: { quietMs: number; afterAttemptMs: number; maxMs: number },
-) => { attempted: number; urls: string[] } | Promise<{ attempted: number; urls: string[] }> | null;
-
 const POPUP_QUIET_WINDOW_MS = 350;
 const POPUP_AFTER_ATTEMPT_MS = 50;
 const POPUP_MAX_WINDOW_MS = 1_000;
 const POPUP_RESTORE_MARGIN_MS = 1_000;
+const POPUP_READY_TIMEOUT_MS = 1_000;
+const POPUP_READY_POLL_MS = 20;
+const POPUP_REPORT_TIMEOUT_MS = POPUP_MAX_WINDOW_MS + POPUP_RESTORE_MARGIN_MS + 500;
+const popupClickLocks = new Map<number, Promise<unknown>>();
 
-export function installPopupGuardInPage(guardId: string, restoreAfterMs = 2_000): void {
-  const controlPrefix = "__codexSidebarPopupGuardControlV3_";
-  const previousOpen = window.open as unknown as Record<string, unknown>;
-  const previousKey = Object.getOwnPropertyNames(window.open).find((key) => key.startsWith(controlPrefix));
-  const previousControl = previousKey ? previousOpen[previousKey] : undefined;
-  if (typeof previousControl === "function") {
-    previousControl("replace", previousKey?.slice(controlPrefix.length) ?? "");
-  }
-
-  const originalOpen = window.open;
+// Injected into the page's MAIN world, so it must stay self-contained. The
+// attempt list lives only in this closure; nothing callable is attached to
+// window.open, and the page can at most forge the returned report.
+export function runPopupGuardInPage(
+  guardId: string,
+  quietMs: number,
+  afterAttemptMs: number,
+  maxMs: number,
+  restoreAfterMs: number,
+): Promise<{ attempted: number; urls: string[] }> | null {
+  const readyAttribute = "data-codex-popup-guard";
+  const originalKey = "__codexSidebarPopupGuardOriginalOpen";
+  const clickEvent = `codex-popup-guard-clicked-${guardId}`;
+  const root = document.documentElement;
+  const currentOpen = window.open as typeof window.open & Record<string, unknown>;
+  const wrappedOpen = currentOpen[originalKey];
+  const originalOpen = typeof wrappedOpen === "function" ? (wrappedOpen as typeof window.open) : currentOpen;
   const attempts: Array<string | null> = [];
-  let timeoutId = 0;
-  let notifyAttempt: (() => void) | undefined;
-  let finishPendingWait: (() => void) | undefined;
-  const report = () => ({
-    attempted: attempts.length,
-    urls: attempts.filter((url): url is string => url !== null),
-  });
-  const control: PopupGuardControl = (action, requestedGuardId, timing) => {
-    if (action !== "replace" && requestedGuardId !== guardId) return null;
-    if (action === "wait") {
-      if (!timing) return null;
-      return new Promise((resolve) => {
-        let afterAttemptTimeoutId: number | undefined;
-        let quietTimeoutId = 0;
-        const maxTimeoutId = window.setTimeout(() => finish(), timing.maxMs);
-        const finish = () => {
-          window.clearTimeout(quietTimeoutId);
-          window.clearTimeout(maxTimeoutId);
-          if (afterAttemptTimeoutId !== undefined) window.clearTimeout(afterAttemptTimeoutId);
-          notifyAttempt = undefined;
-          finishPendingWait = undefined;
-          resolve(report());
-        };
-        notifyAttempt = () => {
-          window.clearTimeout(quietTimeoutId);
-          if (afterAttemptTimeoutId !== undefined) window.clearTimeout(afterAttemptTimeoutId);
-          afterAttemptTimeoutId = window.setTimeout(finish, timing.afterAttemptMs);
-        };
-        finishPendingWait = finish;
-        quietTimeoutId = window.setTimeout(
-          finish,
-          attempts.length > 0 ? timing.afterAttemptMs : timing.quietMs,
-        );
-      });
-    }
-    const currentReport = report();
-    if (action === "release" || action === "replace") {
-      finishPendingWait?.();
-      window.clearTimeout(timeoutId);
-      if (window.open === guardedOpen) window.open = originalOpen;
-    }
-    return currentReport;
-  };
+  let onAttempt = (): void => undefined;
   const guardedOpen = (url?: string | URL): WindowProxy | null => {
     let safeUrl: string | null = null;
     const rawUrl = url === undefined ? "" : String(url).trim();
@@ -137,61 +101,164 @@ export function installPopupGuardInPage(guardId: string, restoreAfterMs = 2_000)
       }
     }
     attempts.push(safeUrl);
-    notifyAttempt?.();
+    onAttempt();
     return null;
   };
-  Object.defineProperty(guardedOpen, `${controlPrefix}${guardId}`, {
-    configurable: false,
-    enumerable: false,
-    writable: false,
-    value: control,
+  Object.defineProperty(guardedOpen, originalKey, { value: originalOpen });
+  try {
+    window.open = guardedOpen as typeof window.open;
+  } catch {
+    return null;
+  }
+  if (window.open !== guardedOpen) return null;
+  root.setAttribute(readyAttribute, guardId);
+
+  const restore = (): void => {
+    if (window.open === guardedOpen) window.open = originalOpen;
+    if (root.getAttribute(readyAttribute) === guardId) root.removeAttribute(readyAttribute);
+  };
+  window.setTimeout(restore, restoreAfterMs);
+  return new Promise((resolve) => {
+    let quietTimeoutId: number | undefined;
+    let maxTimeoutId: number | undefined;
+    let settled = false;
+    const finish = (): void => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(quietTimeoutId);
+      window.clearTimeout(maxTimeoutId);
+      window.clearTimeout(failsafeTimeoutId);
+      root.removeEventListener(clickEvent, onClicked);
+      onAttempt = () => undefined;
+      resolve({
+        attempted: attempts.length,
+        urls: attempts.filter((url): url is string => url !== null),
+      });
+    };
+    const onClicked = (): void => {
+      root.removeEventListener(clickEvent, onClicked);
+      maxTimeoutId = window.setTimeout(finish, maxMs);
+      quietTimeoutId = window.setTimeout(finish, attempts.length > 0 ? afterAttemptMs : quietMs);
+      onAttempt = () => {
+        window.clearTimeout(quietTimeoutId);
+        quietTimeoutId = window.setTimeout(finish, afterAttemptMs);
+      };
+    };
+    root.addEventListener(clickEvent, onClicked);
+    const failsafeTimeoutId = window.setTimeout(finish, restoreAfterMs);
   });
-  window.open = guardedOpen as typeof window.open;
-  // The closure owns originalOpen; the longer page timer is only a
-  // service-worker interruption failsafe.
-  timeoutId = window.setTimeout(() => control("release", guardId), restoreAfterMs);
 }
 
-export async function waitForPopupGuardQuietInPage(
-  guardId: string,
-  quietMs: number,
-  afterAttemptMs: number,
-  maxMs: number,
-): Promise<{ attempted: number; urls: string[] } | null> {
-  const key = `__codexSidebarPopupGuardControlV3_${guardId}`;
-  const control = (window.open as unknown as Record<string, unknown>)[key];
-  if (typeof control !== "function") return null;
-  return (control as PopupGuardControl)("wait", guardId, { quietMs, afterAttemptMs, maxMs });
-}
-
-export function releasePopupGuardInPage(guardId: string): { attempted: number; urls: string[] } | null {
-  const key = `__codexSidebarPopupGuardControlV3_${guardId}`;
-  const control = (window.open as unknown as Record<string, unknown>)[key];
-  if (typeof control !== "function") return null;
-  return (control as PopupGuardControl)("release", guardId) as { attempted: number; urls: string[] } | null;
-}
-
-async function installPopupGuard(tabId: number, guardId: string): Promise<void> {
-  await chrome.scripting.executeScript({
+function startPopupGuard(tabId: number, guardId: string): Promise<unknown> {
+  return chrome.scripting.executeScript({
     target: { tabId },
     world: "MAIN",
-    func: installPopupGuardInPage,
-    args: [guardId, POPUP_MAX_WINDOW_MS + POPUP_RESTORE_MARGIN_MS],
-  });
+    func: runPopupGuardInPage,
+    args: [guardId, POPUP_QUIET_WINDOW_MS, POPUP_AFTER_ATTEMPT_MS, POPUP_MAX_WINDOW_MS, POPUP_MAX_WINDOW_MS + POPUP_RESTORE_MARGIN_MS],
+  }).then((results) => results[0]?.result, () => undefined);
 }
 
-async function waitForPopupGuardQuiet(tabId: number, guardId: string): Promise<PopupGuardReport> {
-  try {
-    const results = await chrome.scripting.executeScript({
-      target: { tabId },
-      world: "MAIN",
-      func: waitForPopupGuardQuietInPage,
-      args: [guardId, POPUP_QUIET_WINDOW_MS, POPUP_AFTER_ATTEMPT_MS, POPUP_MAX_WINDOW_MS],
-    });
-    return results[0]?.result ?? { attempted: 0, urls: [], collectionFailed: true };
-  } catch {
-    return { attempted: 0, urls: [], collectionFailed: true };
+async function waitForPopupGuardReady(tabId: number, guardId: string, guard: Promise<unknown>): Promise<boolean> {
+  let guardSettled = false;
+  void guard.then(() => {
+    guardSettled = true;
+  });
+  const deadline = Date.now() + POPUP_READY_TIMEOUT_MS;
+  while (!guardSettled) {
+    const ready = await sendExecutor<{ ready?: unknown }>(tabId, { action: "POPUP_GUARD_READY", guardId })
+      .then((result) => result?.ready === true, () => false);
+    if (ready) return true;
+    if (Date.now() >= deadline) return false;
+    await new Promise((resolve) => setTimeout(resolve, POPUP_READY_POLL_MS));
   }
+  return false;
+}
+
+function popupReportFrom(value: unknown): PopupGuardReport {
+  // A navigation that replaces the document resolves or rejects the injection
+  // without a report; that is an ordinary click, not a blocked popup.
+  if (value === undefined || value === null) return { attempted: 0, urls: [] };
+  const failed = { attempted: 0, urls: [], collectionFailed: true };
+  if (typeof value !== "object") return failed;
+  const { attempted, urls } = value as { attempted?: unknown; urls?: unknown };
+  if (typeof attempted !== "number" || !Number.isSafeInteger(attempted) || attempted < 0) return failed;
+  if (!Array.isArray(urls) || urls.length > attempted) return failed;
+  const safeUrl = urls.find((url): url is string => typeof url === "string" && isSafeHttpUrl(url));
+  return { attempted, urls: safeUrl ? [safeUrl] : [] };
+}
+
+async function collectPopupReport(guard: Promise<unknown>): Promise<PopupGuardReport> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timedOut = Symbol("timed out");
+  const outcome = await Promise.race([
+    guard,
+    new Promise<typeof timedOut>((resolve) => {
+      timeoutId = setTimeout(() => resolve(timedOut), POPUP_REPORT_TIMEOUT_MS);
+    }),
+  ]);
+  clearTimeout(timeoutId);
+  if (outcome === timedOut) return { attempted: 0, urls: [], collectionFailed: true };
+  return popupReportFrom(outcome);
+}
+
+async function withPopupClickLock<T>(tabId: number, run: () => Promise<T>): Promise<T> {
+  const previous = popupClickLocks.get(tabId) ?? Promise.resolve();
+  const current = previous.then(run);
+  const tail = current.catch(() => undefined);
+  popupClickLocks.set(tabId, tail);
+  try {
+    return await current;
+  } finally {
+    if (popupClickLocks.get(tabId) === tail) popupClickLocks.delete(tabId);
+  }
+}
+
+async function clickWithPopupGuard(ref: ElementRef, taskTabId?: number): Promise<Record<string, unknown>> {
+  if (taskTabId !== undefined && ref.tabId !== taskTabId) {
+    throw new Error("The page element does not belong to this task's working tab. Inspect the working tab again.");
+  }
+  const target = await authorizedTarget(ref.tabId);
+  assertRefTarget(ref, target);
+  await ensureExecutor(target);
+  const existingTabIds = new Set(
+    (await chrome.tabs.query({})).flatMap((tab) => (tab.id === undefined ? [] : [tab.id])),
+  );
+  const guardId = crypto.randomUUID();
+  const guard = startPopupGuard(target.tabId, guardId);
+  if (!(await waitForPopupGuardReady(target.tabId, guardId, guard))) {
+    throw new Error("Browser Control could not prepare this click safely. Inspect the page and try again.");
+  }
+  let result: Record<string, unknown> = {};
+  let clickError: unknown;
+  try {
+    result = await sendExecutor<Record<string, unknown>>(target.tabId, {
+      action: "CLICK",
+      snapshotId: ref.snapshotId,
+      refId: ref.id,
+      popupGuardId: guardId,
+    });
+  } catch (error) {
+    clickError = error;
+  }
+  const popup = await collectPopupReport(guard);
+  if (clickError) throw clickError;
+  const createdTabs = (await chrome.tabs.query({})).flatMap((tab) => {
+    if (tab.id === undefined || existingTabIds.has(tab.id) || tab.openerTabId !== target.tabId) return [];
+    return [{ id: tab.id, url: tab.pendingUrl || tab.url || "", title: tab.title ?? "", active: tab.active === true }];
+  });
+  const tab = await chrome.tabs.get(target.tabId).catch(() => undefined);
+  return {
+    ...result,
+    url: tab?.url ?? "",
+    title: tab?.title ?? "",
+    status: tab?.status ?? "unavailable",
+    tabUnavailable: tab === undefined,
+    popupAttempts: Math.max(popup.attempted, createdTabs.length),
+    popupUrls: popup.urls,
+    createdTabs,
+    popupBlocked: popup.collectionFailed === true || popup.attempted > popup.urls.length,
+    popupCollectionFailed: popup.collectionFailed === true,
+  };
 }
 
 async function activeTarget(tabId?: number): Promise<PageTarget> {
@@ -314,46 +381,7 @@ export async function executePageTool(call: PageToolCall, taskTabId?: number): P
       return inspectActivePage(call, taskTabId);
     case "click": {
       const args = clickArgumentsSchema.parse(call.arguments);
-      if (taskTabId !== undefined && args.ref.tabId !== taskTabId) {
-        throw new Error("The page element does not belong to this task's working tab. Inspect the working tab again.");
-      }
-      const guardId = crypto.randomUUID();
-      const existingTabIds = new Set(
-        (await chrome.tabs.query({})).flatMap((tab) => (tab.id === undefined ? [] : [tab.id])),
-      );
-      await installPopupGuard(args.ref.tabId, guardId);
-      let result: Record<string, unknown>;
-      let popup: PopupGuardReport;
-      let clickError: unknown;
-      try {
-        result = await withRef<Record<string, unknown>>(args.ref, "CLICK", undefined, taskTabId);
-      } catch (error) {
-        clickError = error;
-        result = {
-          clicked: false,
-          actionError: error instanceof Error ? error.message : "The page click failed.",
-        };
-      } finally {
-        popup = await waitForPopupGuardQuiet(args.ref.tabId, guardId);
-      }
-      const createdTabs = (await chrome.tabs.query({})).flatMap((tab) => {
-        if (tab.id === undefined || existingTabIds.has(tab.id)) return [];
-        return [{ id: tab.id, url: tab.url ?? "", title: tab.title ?? "", active: tab.active === true }];
-      });
-      if (clickError && popup.attempted === 0 && createdTabs.length === 0 && !popup.collectionFailed) throw clickError;
-      const tab = await chrome.tabs.get(args.ref.tabId).catch(() => undefined);
-      return {
-        ...result,
-        url: tab?.url ?? "",
-        title: tab?.title ?? "",
-        status: tab?.status ?? "unavailable",
-        tabUnavailable: tab === undefined,
-        popupAttempts: Math.max(popup.attempted, createdTabs.length),
-        popupUrls: popup.urls,
-        createdTabs,
-        popupBlocked: popup.collectionFailed === true || popup.attempted > popup.urls.length,
-        popupCollectionFailed: popup.collectionFailed === true,
-      };
+      return withPopupClickLock(args.ref.tabId, () => clickWithPopupGuard(args.ref, taskTabId));
     }
     case "fill": {
       const args = fillArgumentsSchema.parse(call.arguments);

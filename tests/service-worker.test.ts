@@ -317,6 +317,7 @@ describe("service-worker browser orchestration", () => {
     const sendMessage = vi.fn(async (_tabId: number, command: Record<string, unknown>) => {
       if (command.action === "PING") return { ok: true, data: { origin: "https://example.com" } };
       if (command.action === "DESCRIBE") return { ok: true, data: targetFor(command.refId) };
+      if (command.action === "POPUP_GUARD_READY") return { ok: true, data: { ready: true } };
       if (["SUBMIT", "CLICK", "KEYPRESS"].includes(String(command.action))) {
         executorActions.push(String(command.action));
         return { ok: true, data: { completed: true } };
@@ -715,7 +716,7 @@ describe("service-worker browser orchestration", () => {
 
   });
 
-  it("opens a captured popup in the background even when the click reports an error", async () => {
+  it("does not retarget the task to a popup when the click fails", async () => {
     const sessionData: Record<string, unknown> = {};
     const localData: Record<string, unknown> = {};
     const create = vi.fn(async (properties: chrome.tabs.CreateProperties) => ({
@@ -772,17 +773,85 @@ describe("service-worker browser orchestration", () => {
       popupUrls: ["https://example.com/deferred-workspace"],
     });
 
+    expect(create).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      clicked: false,
+      actionError: "Executor response failed after dispatch.",
+      popupAttempts: 1,
+      popupUrls: ["https://example.com/deferred-workspace"],
+    });
+    expect(serviceWorkerTestHooks.actionResultFailed(result)).toBe(true);
+    expect(serviceWorkerTestHooks.actionResultFailed({ clicked: true })).toBe(false);
+    await expect(serviceWorkerTestHooks.getThreadWorkingTab("thread-popup")).resolves.toBeUndefined();
+  });
+
+  it("opens a page-chosen popup URL only in the background and without inheriting page access", async () => {
+    const sessionData: Record<string, unknown> = {};
+    const localData: Record<string, unknown> = {};
+    const create = vi.fn(async (properties: chrome.tabs.CreateProperties) => ({
+      id: 77,
+      windowId: properties.windowId ?? 1,
+      url: properties.url,
+      title: "Deferred workspace",
+      active: properties.active ?? true,
+    }));
+    vi.stubGlobal("chrome", {
+      runtime: {
+        id: "extension-id",
+        sendMessage: vi.fn(async () => undefined),
+        onMessage: { addListener: vi.fn() },
+        onInstalled: { addListener: vi.fn() },
+        onStartup: { addListener: vi.fn() },
+      },
+      storage: { session: storageArea(sessionData), local: storageArea(localData) },
+      tabs: {
+        get: vi.fn(async (tabId: number) => {
+          if (tabId === 12) throw new Error("No tab with id");
+          return { id: 77, windowId: 1, url: "https://example.com/deferred-workspace" };
+        }),
+        create,
+        onRemoved: { addListener: vi.fn() },
+      },
+      sidePanel: { setPanelBehavior: vi.fn(async () => undefined) },
+    });
+
+    const { serviceWorkerTestHooks } = await import("../src/background/service-worker");
+    let task: Parameters<typeof serviceWorkerTestHooks.processCapturedPopup>[1];
+    const result = await serviceWorkerTestHooks.processCapturedPopup({
+      requestId: 13,
+      threadId: "thread-popup",
+      turnId: "turn-popup",
+      callId: "call-popup",
+      namespace: "page",
+      tool: "click",
+      arguments: {
+        idempotencyKey: "click-popup-00001",
+        ref: { id: "e1", snapshotId: "snapshot-popup", tabId: 12, origin: "https://calendar.google.com" },
+      },
+    }, task = {
+      key: "thread-popup:turn-popup",
+      threadId: "thread-popup",
+      turnId: "turn-popup",
+      actionCount: 0,
+      canceled: false,
+      authorizedTabId: 12,
+      updatedAt: Date.now(),
+    }, {
+      clicked: true,
+      popupAttempts: 1,
+      popupUrls: ["https://example.com/deferred-workspace"],
+    });
+
     expect(create).toHaveBeenCalledWith({
       url: "https://example.com/deferred-workspace",
       active: false,
     });
     expect(result).toEqual(expect.objectContaining({
-      actionError: "Executor response failed after dispatch.",
       openedPopupTabId: 77,
       openedInBackground: true,
     }));
-    expect(serviceWorkerTestHooks.actionResultFailed(result)).toBe(true);
-    expect(serviceWorkerTestHooks.actionResultFailed({ clicked: true })).toBe(false);
+    expect(task.authorizedTabId).toBe(77);
+    expect(task.authorizedOrigin).toBeUndefined();
     await expect(serviceWorkerTestHooks.getThreadWorkingTab("thread-popup")).resolves.toBe(77);
   });
 
@@ -838,12 +907,14 @@ describe("service-worker browser orchestration", () => {
       createdTabs: [
         { id: 88, url: "https://example.com/workspace", active: true },
         { id: 89, url: "javascript:alert(1)" },
+        { id: 90, url: "" },
       ],
     });
 
     expect(create).not.toHaveBeenCalled();
     expect(update).toHaveBeenCalledWith(88, { active: false });
     expect(remove).toHaveBeenCalledWith(89);
+    expect(remove).not.toHaveBeenCalledWith(90);
     expect(result).toEqual(expect.objectContaining({
       openedPopupTabId: 88,
       openedPopupUrl: "https://example.com/workspace",

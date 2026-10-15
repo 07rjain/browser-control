@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { installPopupGuardInPage, releasePopupGuardInPage } from "../src/background/page-executor-host";
+import { runPopupGuardInPage } from "../src/background/page-executor-host";
 
 type Listener = (message: unknown, sender: chrome.runtime.MessageSender, sendResponse: (response: unknown) => void) => boolean;
 
@@ -278,7 +278,7 @@ describe("packaged page executor", () => {
     hitTest.mockRestore();
   });
 
-  it("blocks a JavaScript-created popup during a real button click and records its URL", () => {
+  it("blocks a JavaScript-created popup during a real button click and records its URL", async () => {
     document.body.innerHTML = `<button id="launch">Open workspace</button>`;
     const button = document.getElementById("launch") as HTMLButtonElement;
     const originalOpen = window.open;
@@ -286,27 +286,31 @@ describe("packaged page executor", () => {
     const inspection = command<{ snapshotId: string; elements: Array<{ refId: string; label: string }> }>({ action: "INSPECT" });
     const launch = inspection.elements.find((item) => item.label === "Open workspace");
 
-    installPopupGuardInPage("popup-test");
-    expect(command({ action: "CLICK", snapshotId: inspection.snapshotId, refId: launch?.refId })).toEqual(
+    const report = runPopupGuardInPage("popup-test", 350, 10, 1_000, 60);
+    expect(command({ action: "POPUP_GUARD_READY", guardId: "popup-test" })).toEqual({ ready: true });
+    expect(command({ action: "CLICK", snapshotId: inspection.snapshotId, refId: launch?.refId, popupGuardId: "popup-test" })).toEqual(
       expect.objectContaining({ clicked: true }),
     );
-    expect(releasePopupGuardInPage("popup-test")).toEqual({
+    await expect(report).resolves.toEqual({
       attempted: 1,
       urls: ["http://localhost:3000/workspace"],
     });
+    await new Promise((resolve) => setTimeout(resolve, 80));
     expect(window.open).toBe(originalOpen);
+    expect(command({ action: "POPUP_GUARD_READY", guardId: "popup-test" })).toEqual({ ready: false });
   });
 
-  it("blocks a JavaScript-created popup with no URL instead of duplicating the current page", () => {
+  it("blocks a JavaScript-created popup with no URL instead of duplicating the current page", async () => {
     document.body.innerHTML = `<button id="launch-blank">Open blank popup</button>`;
     const button = document.getElementById("launch-blank") as HTMLButtonElement;
     button.addEventListener("click", () => window.open());
     const inspection = command<{ snapshotId: string; elements: Array<{ refId: string; label: string }> }>({ action: "INSPECT" });
     const launch = inspection.elements.find((item) => item.label === "Open blank popup");
 
-    installPopupGuardInPage("blank-popup-test");
-    command({ action: "CLICK", snapshotId: inspection.snapshotId, refId: launch?.refId });
-    expect(releasePopupGuardInPage("blank-popup-test")).toEqual({ attempted: 1, urls: [] });
+    const report = runPopupGuardInPage("blank-popup-test", 350, 10, 1_000, 60);
+    command({ action: "CLICK", snapshotId: inspection.snapshotId, refId: launch?.refId, popupGuardId: "blank-popup-test" });
+    await expect(report).resolves.toEqual({ attempted: 1, urls: [] });
+    await new Promise((resolve) => setTimeout(resolve, 80));
   });
 
   it("fails closed when a changed target cannot be rebound unambiguously", () => {

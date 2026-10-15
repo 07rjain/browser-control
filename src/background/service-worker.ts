@@ -635,7 +635,7 @@ async function processCapturedPopup(
   task: BrowserTaskState,
   result: unknown,
 ): Promise<unknown> {
-  if (call.tool !== "click" || !result || typeof result !== "object") return result;
+  if (call.tool !== "click" || !result || typeof result !== "object" || actionResultFailed(result)) return result;
 
   const clickResult = result as Record<string, unknown>;
   const createdTabs = Array.isArray(clickResult.createdTabs)
@@ -645,7 +645,8 @@ async function processCapturedPopup(
   const safeCreated: Array<{ id: number; url: string }> = [];
   for (const tab of createdTabs) {
     const url = typeof tab.url === "string" ? tab.url : "";
-    if (!url || !isSafeHttpUrl(url)) {
+    if (!url) continue;
+    if (!isSafeHttpUrl(url)) {
       await chrome.tabs.remove(tab.id).catch(() => undefined);
       continue;
     }
