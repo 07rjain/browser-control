@@ -21,7 +21,7 @@ browsers are not supported by this test.
 ## Obtain the companion files
 
 If you are testing the pushed source on Windows or Linux, open the
-[project's `feat/desktop-companion` branch][source] in your browser, choose
+[project's `main` branch][source] in your browser, choose
 **Code → Download ZIP**, and extract it into a folder under Downloads. The
 extracted repository should contain `bridge` and `scripts` folders. This does
 not require Git. Keep that folder in place until the companion test finishes.
@@ -71,8 +71,8 @@ ChatGPT sign-in prompts yourself.
 3. Paste the following into the **Codex CLI conversation** (not PowerShell):
 
    ```text
-   Help me set up Browser Control 0.3.4 on this Windows PC. I downloaded the
-   feat/desktop-companion branch from
+   Help me set up Browser Control on this Windows PC. I downloaded the
+   main branch from
    https://github.com/07rjain/browser-control and extracted its ZIP under my
    Downloads folder. Find that extracted folder and show me its full path.
    Before running anything from it, confirm it contains bridge/native-host.mjs,
@@ -367,4 +367,4 @@ data removed.
 [node-archive]: https://nodejs.org/en/download/archive/v24.21.0
 [codex]: https://learn.chatgpt.com/docs/codex/cli#getting-started
 [dotnet]: https://dotnet.microsoft.com/en-us/download/dotnet-framework
-[source]: https://github.com/07rjain/browser-control/tree/feat/desktop-companion
+[source]: https://github.com/07rjain/browser-control/tree/main

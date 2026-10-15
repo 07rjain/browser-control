@@ -23,7 +23,8 @@ Chat with Codex and run user-initiated, supervised tab and page actions from Chr
 
 Browser Control puts Codex in Chrome's side panel so you can chat, explicitly
 attach the page you are reading, organize tabs, and request a fixed set of
-supervised browser actions without switching applications.
+supervised browser actions without switching applications. Available on macOS,
+Windows, and Linux with a separately installed local companion.
 
 Key features:
 
@@ -51,12 +52,14 @@ authentication codes, private keys, CAPTCHAs, and security bypasses.
 
 Requirements:
 
-- macOS and current stable Google Chrome or Brave
+- macOS, Windows, or Linux with current stable Google Chrome or Brave
 - Node.js 20 or newer
 - A compatible Codex CLI installation
 - An eligible ChatGPT/Codex account
 - The free Browser Control native companion, installed separately from the
   official support page
+- Windows: the .NET Framework C# compiler required by the companion installer
+- Linux: a standard browser installation; Snap and Flatpak browsers are unsupported
 
 The companion is required because a Chrome extension cannot start Codex CLI
 directly. It runs locally through Chrome Native Messaging. Browser Control does
@@ -71,6 +74,8 @@ not remote or unattended automation.
 Privacy policy: https://07rjain.github.io/browser-control-support/privacy.html
 
 Installation and support: https://07rjain.github.io/browser-control-support/support.html
+
+Windows and Linux installation guide: https://github.com/07rjain/browser-control/blob/main/docs/INSTALL_WINDOWS_LINUX.md
 
 Browser Control is an independent extension and is not affiliated with or
 endorsed by OpenAI.
