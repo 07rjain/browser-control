@@ -86,3 +86,43 @@ export function isAllowedDynamicTool(namespace, tool) {
 export function isHostSkillTool(namespace, tool) {
   return namespace === "skills" && tool === "read";
 }
+
+// Codex built-in tools run inside the app-server, outside the dynamic-tool
+// allowlist above, so they are switched off for every thread. Codex ignores
+// unknown keys without failing; scripts/probe-codex-tools.mjs checks the tool
+// list Codex actually sends to the model.
+export const CODEX_THREAD_RESTRICTIONS = Object.freeze({
+  environments: [],
+  config: Object.freeze({
+    web_search: "disabled",
+    mcp_servers: {},
+    "features.shell_tool": false,
+    "features.unified_exec": false,
+    "features.view_image": false,
+    "features.image_generation": false,
+    "features.goals": false,
+    "features.multi_agent": false,
+    "features.apps": false,
+    "features.plugins": false,
+    "features.remote_plugin": false,
+    "features.browser_use": false,
+    "features.browser_use_external": false,
+    "features.in_app_browser": false,
+    "features.computer_use": false,
+    "features.tool_suggest": false,
+    "features.hooks": false,
+  }),
+});
+
+function tomlValue(value) {
+  if (typeof value === "string") return JSON.stringify(value);
+  if (typeof value === "boolean") return String(value);
+  if (value && typeof value === "object" && Object.keys(value).length === 0) return "{}";
+  throw new Error("Unsupported Codex config override value.");
+}
+
+// Thread-level config does not replace feature state a resumed thread was
+// created with, so the same overrides also apply to the whole app-server.
+export function codexConfigArgs(config = CODEX_THREAD_RESTRICTIONS.config) {
+  return Object.entries(config).flatMap(([key, value]) => ["-c", `${key}=${tomlValue(value)}`]);
+}

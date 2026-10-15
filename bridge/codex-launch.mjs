@@ -2,8 +2,9 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
+import { codexConfigArgs } from "./protocol.mjs";
 
-const APP_SERVER_ARGS = ["app-server", "--stdio"];
+export const APP_SERVER_ARGS = Object.freeze(["app-server", ...codexConfigArgs(), "--stdio"]);
 
 export function codexInvocation({
   platform = process.platform,
@@ -23,16 +24,16 @@ export function codexInvocation({
   if (platform === "win32") {
     const found = findWindowsCodex({ env, home, paths, fileExists, readFile, execFile, nodePath });
     if (found) return found;
-    return { command: "codex.exe", args: APP_SERVER_ARGS };
+    return { command: "codex.exe", args: [...APP_SERVER_ARGS] };
   }
-  return { command: "codex", args: APP_SERVER_ARGS };
+  return { command: "codex", args: [...APP_SERVER_ARGS] };
 }
 
 function invocationFor(filePath, { paths, fileExists, readFile, nodePath }) {
   if (!filePath || !fileExists(filePath)) return null;
   const lower = filePath.toLowerCase();
   if (lower.endsWith(".cmd") || lower.endsWith(".bat")) return unwrapWindowsShim(filePath, { paths, fileExists, readFile, nodePath });
-  return { command: filePath, args: APP_SERVER_ARGS };
+  return { command: filePath, args: [...APP_SERVER_ARGS] };
 }
 
 function findWindowsCodex({ env, home, paths, fileExists, readFile, execFile, nodePath }) {
@@ -78,7 +79,7 @@ function unwrapWindowsShim(shimPath, { paths, fileExists, readFile, nodePath }) 
   const exe = expanded.match(/["']([^"'\r\n]+codex\.exe)["']/i);
   if (exe) {
     const executable = paths.normalize(exe[1]);
-    if (fileExists(executable)) return { command: executable, args: APP_SERVER_ARGS };
+    if (fileExists(executable)) return { command: executable, args: [...APP_SERVER_ARGS] };
   }
   const script = expanded.match(/["']([^"'\r\n]+codex\.(?:js|mjs|cjs))["']/i);
   if (script) {

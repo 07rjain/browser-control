@@ -7,6 +7,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { codexInvocation } from "./codex-launch.mjs";
 import { localhostCallbackPort, startIpv4LoginProxy } from "./login-proxy.mjs";
 import {
+  CODEX_THREAD_RESTRICTIONS,
   encodeNativeMessage,
   JsonLineDecoder,
   LengthPrefixedJsonDecoder,
@@ -466,6 +467,7 @@ function threadParamsForCatalog(catalogText) {
     runtimeWorkspaceRoots: [workspace],
     approvalPolicy: "never",
     sandbox: "read-only",
+    ...CODEX_THREAD_RESTRICTIONS,
     baseInstructions,
     developerInstructions: `${developerInstructionPrefix}\n\n${catalogText}`,
   };

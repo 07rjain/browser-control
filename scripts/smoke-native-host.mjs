@@ -5,6 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { encodeNativeMessage, LengthPrefixedJsonDecoder } from "../bridge/protocol.mjs";
 import { resolveCodexBinary } from "./host-paths.mjs";
+import { probeCodexTools } from "./probe-codex-tools.mjs";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const temporaryHome = mkdtempSync(join(tmpdir(), "codex-sidebar-smoke-"));
@@ -118,6 +119,9 @@ try {
   const accountAfterDeletion = await request("account.read");
   if (accountAfterDeletion.account !== null) throw new Error("Deleted native data retained an account.");
   process.stdout.write("Native bridge smoke test passed (isolated, signed-out account).\n");
+  for (const result of await probeCodexTools(codexBinary)) {
+    process.stdout.write(`Codex tools for ${result.label}: ${result.names.join(", ")}\n`);
+  }
 } catch (error) {
   process.stderr.write(`${stderr}\n`);
   throw error;

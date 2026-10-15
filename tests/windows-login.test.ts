@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { codexInvocation } from "../bridge/codex-launch.mjs";
+import { APP_SERVER_ARGS, codexInvocation } from "../bridge/codex-launch.mjs";
 import { localhostCallbackPort } from "../bridge/login-proxy.mjs";
 
 describe("Windows Codex launch", () => {
@@ -14,7 +14,7 @@ describe("Windows Codex launch", () => {
       execFileSync: () => { throw new Error("where should not run"); },
       nodePath: "C:\\node.exe",
     });
-    expect(invocation).toEqual({ command: executable, args: ["app-server", "--stdio"] });
+    expect(invocation).toEqual({ command: executable, args: [...APP_SERVER_ARGS] });
   });
 
   it("starts an npm Codex shim through node", () => {
@@ -29,7 +29,7 @@ describe("Windows Codex launch", () => {
       execFileSync: () => { throw new Error("where should not run"); },
       nodePath: "C:\\node.exe",
     });
-    expect(invocation).toEqual({ command: "C:\\node.exe", args: [script, "app-server", "--stdio"] });
+    expect(invocation).toEqual({ command: "C:\\node.exe", args: [script, ...APP_SERVER_ARGS] });
   });
 });
 

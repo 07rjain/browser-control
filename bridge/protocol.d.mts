@@ -17,3 +17,10 @@ export function normalizeAppServerNotification(message: {
 export function isAllowedDynamicTool(namespace: unknown, tool: unknown): boolean;
 
 export function isHostSkillTool(namespace: unknown, tool: unknown): boolean;
+
+export const CODEX_THREAD_RESTRICTIONS: Readonly<{
+  environments: never[];
+  config: Readonly<Record<string, unknown>>;
+}>;
+
+export function codexConfigArgs(config?: Readonly<Record<string, unknown>>): string[];

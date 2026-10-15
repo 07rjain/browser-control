@@ -1,3 +1,5 @@
+export const APP_SERVER_ARGS: readonly string[];
+
 export function codexInvocation(options?: {
   platform?: string;
   env?: Record<string, string | undefined>;
