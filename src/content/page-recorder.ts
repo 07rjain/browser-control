@@ -131,23 +131,25 @@ if (!recorderGlobal.__codexPageRecorderInstalled) {
     if (labelledBy) {
       const label = labelledBy
         .split(/\s+/)
-        .map((id) => document.getElementById(id)?.textContent ?? "")
+        .map((id) => element.ownerDocument.getElementById(id)?.textContent ?? "")
         .join(" ");
       if (label.trim()) return label;
     }
-    if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement) {
-      const associated = element.labels
-        ? Array.from(element.labels).map((label) => label.textContent ?? "").join(" ")
+    if (isCrossFrame(element, "HTMLInputElement") || isCrossFrame(element, "HTMLTextAreaElement") || isCrossFrame(element, "HTMLSelectElement")) {
+      const field = element as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
+      const associated = field.labels
+        ? Array.from(field.labels).map((label) => label.textContent ?? "").join(" ")
         : "";
       if (associated.trim()) return associated;
-      if ((element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) && element.placeholder) return element.placeholder;
+      const placeholder = field.getAttribute("placeholder");
+      if (!isCrossFrame(element, "HTMLSelectElement") && placeholder) return placeholder;
     }
     return element.textContent || element.getAttribute("title") || element.getAttribute("alt") || element.getAttribute("name") || "";
   }
 
   function fieldHaystack(element: Element): string {
     return [
-      element instanceof HTMLInputElement ? element.type : "",
+      isCrossFrame(element, "HTMLInputElement") ? (element as HTMLInputElement).type : "",
       element.getAttribute("autocomplete") ?? "",
       element.getAttribute("name") ?? "",
       element.id,

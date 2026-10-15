@@ -74,6 +74,22 @@ describe("page skill recorder", () => {
     expect(steps.map((message) => message.step.label)).toContain("Send");
   });
 
+  it("skips a frame field that is sensitive only through its label", async () => {
+    posted.length = 0;
+    document.body.replaceChildren();
+    portListener({ type: "START", nonce: crypto.randomUUID() });
+    const frame = document.createElement("iframe");
+    document.body.append(frame);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const frameDocument = frame.contentDocument as Document;
+    frameDocument.body.innerHTML = `<span id="code-label">Verification code</span><input id="field-1" aria-labelledby="code-label" value="frame-code-value">`;
+    trustedClick(frameDocument.getElementById("field-1") as HTMLInputElement);
+
+    const steps = posted.filter((message) => (message as { type?: string }).type === "STEP") as Array<{ step: { kind: string; reason?: string } }>;
+    expect(steps.map((message) => message.step.reason)).toContain("sensitive");
+    expect(JSON.stringify(posted)).not.toContain("frame-code-value");
+  });
+
   it("records the email chip inside a recipient combobox", async () => {
     posted.length = 0;
     document.body.replaceChildren();

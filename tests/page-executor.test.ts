@@ -2,6 +2,8 @@
 
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { runPopupGuardInPage } from "../src/background/page-executor-host";
+import { decidePageAction, type PageTargetDescription } from "../src/background/page-policy";
+import type { PageToolCall } from "../src/shared/page-tools";
 
 type Listener = (message: unknown, sender: chrome.runtime.MessageSender, sendResponse: (response: unknown) => void) => boolean;
 
@@ -57,6 +59,38 @@ function command<T>(message: Record<string, unknown>): T {
   const envelope = response as { ok: boolean; data: T; error?: string };
   if (!envelope.ok) throw new Error(envelope.error);
   return envelope.data;
+}
+
+
+type Inspection = { snapshotId: string; elements: Array<{ refId: string; label: string; sensitive: boolean; value?: string }> };
+
+function frameDocument(html: string): Document {
+  document.body.innerHTML = `<iframe id="frame"></iframe>`;
+  const frame = document.getElementById("frame") as HTMLIFrameElement;
+  const frameWindow = frame.contentWindow as Window & typeof globalThis;
+  Object.defineProperty(frameWindow.HTMLElement.prototype, "getBoundingClientRect", {
+    configurable: true,
+    value: () => ({ x: 0, y: 0, top: 0, left: 0, right: 120, bottom: 30, width: 120, height: 30, toJSON: () => ({}) }),
+  });
+  const frameDoc = frame.contentDocument as Document;
+  frameDoc.body.innerHTML = html;
+  return frameDoc;
+}
+
+function describeLabel(label: string): PageTargetDescription {
+  const inspection = command<Inspection>({ action: "INSPECT" });
+  const element = inspection.elements.find((item) => item.label === label);
+  expect(element).toBeDefined();
+  return command<PageTargetDescription>({ action: "DESCRIBE", snapshotId: inspection.snapshotId, refId: element?.refId });
+}
+
+function policyFor(tool: "click" | "fill" | "keypress" | "submit", target: PageTargetDescription, mode: "full" | "ask" = "full") {
+  const args = tool === "fill"
+    ? { value: "x", mode: "replace" }
+    : tool === "keypress"
+      ? { key: "Enter" }
+      : {};
+  return decidePageAction({ tool, arguments: args } as unknown as PageToolCall, target, mode);
 }
 
 describe("packaged page executor", () => {
@@ -394,5 +428,151 @@ describe("packaged page executor", () => {
     expect(inspection.unsupportedFrames).toBe(0);
     expect(inspection.elements[0]?.label).toBe("Send");
     expect(inspection.elements.map((element) => element.label)).toContain("Message Body");
+  });
+  it("classifies a password field inside a same-origin frame as sensitive in both modes", () => {
+    frameDocument(`
+      <form action="/login">
+        <label for="pw">Password</label><input id="pw" type="password" value="frame-secret-value">
+        <button type="submit">Continue</button>
+      </form>
+    `);
+    const inspection = command<Inspection>({ action: "INSPECT" });
+    const field = inspection.elements.find((item) => item.label === "Password");
+    expect(field).toMatchObject({ sensitive: true });
+    expect(field?.value).toBeUndefined();
+    expect(JSON.stringify(inspection)).not.toContain("frame-secret-value");
+
+    const target = command<PageTargetDescription>({ action: "DESCRIBE", snapshotId: inspection.snapshotId, refId: field?.refId });
+    for (const mode of ["full", "ask"] as const) {
+      expect(policyFor("fill", target, mode).decision).toBe("refuse");
+      expect(policyFor("click", target, mode).decision).toBe("refuse");
+    }
+    expect(() => command({ action: "FILL", snapshotId: inspection.snapshotId, refId: field?.refId, value: "x", mode: "replace" })).toThrow(/sensitive/i);
+    expect(() => command({ action: "CLICK", snapshotId: inspection.snapshotId, refId: field?.refId })).toThrow(/sensitive/i);
+
+    const submit = describeLabel("Continue");
+    expect(submit.submitter).toBe(true);
+    expect(submit.form?.action).toBe("http://localhost:3000/login");
+    expect(submit.form?.fields).toEqual([{ name: "pw", value: "[sensitive value hidden]", sensitive: true }]);
+    expect(JSON.stringify(submit)).not.toContain("frame-secret-value");
+    expect(policyFor("submit", submit).decision).toBe("refuse");
+    expect(policyFor("click", submit).decision).toBe("refuse");
+  });
+
+  it("treats a field as sensitive from its visible label text alone", () => {
+    document.body.innerHTML = `<label for="field-1">Verification code</label><input id="field-1" name="field1" value="123456">`;
+    const inspection = command<Inspection>({ action: "INSPECT" });
+    expect(inspection.elements.find((item) => item.label === "Verification code")).toMatchObject({ sensitive: true });
+    expect(JSON.stringify(inspection)).not.toContain("123456");
+  });
+
+  it("still refuses a download link inside a same-origin frame", () => {
+    frameDocument(`<a href="/report.pdf" download>Download report</a>`);
+    const target = describeLabel("Download report");
+    expect(target.download).toBe(true);
+    expect(policyFor("click", target)).toMatchObject({ decision: "refuse" });
+  });
+
+  it("describes the destination a submitter's formaction actually uses", () => {
+    document.body.innerHTML = `
+      <form action="/save" method="post">
+        <input name="title" aria-label="Title" value="Event">
+        <button type="submit" formaction="/checkout">Save</button>
+        <button type="submit" formaction="">Save here</button>
+        <button type="submit">Save default</button>
+        <input type="image" alt="Pay now" formaction="/payment/start">
+      </form>
+    `;
+    const checkout = describeLabel("Save");
+    expect(checkout.form?.action).toBe("http://localhost:3000/checkout");
+    expect(policyFor("click", checkout)).toMatchObject({ decision: "refuse" });
+    expect(policyFor("submit", checkout)).toMatchObject({ decision: "refuse" });
+
+    expect(describeLabel("Save here").form?.action).toBe(location.href);
+    expect(describeLabel("Save default").form?.action).toBe("http://localhost:3000/save");
+    const image = describeLabel("Pay now");
+    expect(image.submitter).toBe(true);
+    expect(image.form?.action).toBe("http://localhost:3000/payment/start");
+    expect(policyFor("click", image)).toMatchObject({ decision: "refuse" });
+  });
+
+  it("uses the document URL for a form without an action and ignores clobbering controls", () => {
+    document.body.innerHTML = `
+      <form><input name="action" aria-label="Action name" value="x"><button type="submit">Go</button></form>
+    `;
+    expect(describeLabel("Go").form?.action).toBe(location.href);
+  });
+
+  it("resolves the form owner and submitter for indirect activations", () => {
+    document.body.innerHTML = `
+      <form id="other" action="/other"></form>
+      <form action="/main">
+        <button type="submit" form="other">Send elsewhere</button>
+        <button type="submit" formaction="/nested"><span role="button">Nested label</span></button>
+        <button id="go" type="submit" formaction="/labelled" aria-label="Hidden go"></button>
+        <label for="go" role="button">Label go</label>
+      </form>
+    `;
+    expect(describeLabel("Send elsewhere").form?.action).toBe("http://localhost:3000/other");
+    const nested = describeLabel("Nested label");
+    expect(nested.submitter).toBe(true);
+    expect(nested.form?.action).toBe("http://localhost:3000/nested");
+    const label = describeLabel("Label go");
+    expect(label.submitter).toBe(true);
+    expect(label.form?.action).toBe("http://localhost:3000/labelled");
+  });
+
+  it("detects a submitter inside a same-origin frame", () => {
+    frameDocument(`<form action="/frame-save"><button type="submit" formaction="/purchase">Continue</button></form>`);
+    const target = describeLabel("Continue");
+    expect(target.submitter).toBe(true);
+    expect(target.form?.action).toBe("http://localhost:3000/purchase");
+    expect(policyFor("click", target)).toMatchObject({ decision: "refuse" });
+  });
+
+  it("submits through the submitter on Enter and SUBMIT and reports the effective action", () => {
+    document.body.innerHTML = `
+      <form action="/save"><button id="send" type="submit" formaction="/send" formmethod="post">Send update</button></form>
+    `;
+    const form = document.querySelector("form") as HTMLFormElement;
+    const button = document.getElementById("send") as HTMLButtonElement;
+    const requestSubmit = vi.spyOn(form, "requestSubmit").mockImplementation(() => undefined);
+    const inspection = command<Inspection>({ action: "INSPECT" });
+    const ref = inspection.elements.find((item) => item.label === "Send update");
+
+    command({ action: "KEYPRESS", snapshotId: inspection.snapshotId, refId: ref?.refId, key: "Enter" });
+    expect(requestSubmit).toHaveBeenLastCalledWith(button);
+    expect(command({ action: "SUBMIT", snapshotId: inspection.snapshotId, refId: ref?.refId })).toEqual({
+      submitted: true,
+      action: "http://localhost:3000/send",
+      method: "POST",
+    });
+    expect(requestSubmit).toHaveBeenLastCalledWith(button);
+  });
+
+  it("fails closed when formaction changes between review and execution", () => {
+    document.body.innerHTML = `<form action="/save"><button id="save" type="submit">Save draft</button></form>`;
+    const inspection = command<Inspection>({ action: "INSPECT" });
+    const ref = inspection.elements.find((item) => item.label === "Save draft");
+    expect(command<PageTargetDescription>({ action: "DESCRIBE", snapshotId: inspection.snapshotId, refId: ref?.refId }).form?.action)
+      .toBe("http://localhost:3000/save");
+    document.getElementById("save")?.setAttribute("formaction", "/checkout");
+
+    expect(() => command({ action: "REVALIDATE", snapshotId: inspection.snapshotId, refId: ref?.refId })).toThrow(/changed/i);
+    expect(() => command({ action: "CLICK", snapshotId: inspection.snapshotId, refId: ref?.refId })).toThrow(/changed/i);
+  });
+
+  it("surfaces a new-tab form target in the description and confirmation", () => {
+    document.body.innerHTML = `<form action="/save"><button type="submit" formtarget="_blank">Publish post</button></form>`;
+    const target = describeLabel("Publish post");
+    expect(target.form?.target).toBe("_blank");
+    expect(policyFor("submit", target, "ask")).toMatchObject({
+      decision: "confirm",
+      description: "Send the reviewed form to http://localhost:3000/save in a new tab or window.",
+    });
+    expect(policyFor("click", target, "ask")).toMatchObject({
+      decision: "confirm",
+      description: expect.stringContaining("http://localhost:3000/save in a new tab or window"),
+    });
   });
 });

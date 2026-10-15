@@ -878,19 +878,21 @@ async function decideTool(callId: string, approved: boolean): Promise<unknown> {
     if (call.namespace === "page" && pending.target) {
       const approvalTask = await getTask(call);
       const currentTarget = await describePageTarget(call, true, approvalTask.authorizedTabId);
-      const expected = JSON.stringify({
-        label: pending.target.label,
-        href: pending.target.href,
-        form: pending.target.form,
-        snapshotId: pending.target.snapshotId,
+      const reviewed = (target: PageTargetDescription) => JSON.stringify({
+        label: target.label,
+        href: target.href,
+        form: target.form,
+        submitter: target.submitter,
+        sensitive: target.sensitive,
+        newTab: target.newTab,
+        download: target.download,
+        snapshotId: target.snapshotId,
       });
-      const current = JSON.stringify({
-        label: currentTarget.label,
-        href: currentTarget.href,
-        form: currentTarget.form,
-        snapshotId: currentTarget.snapshotId,
-      });
-      if (expected !== current) throw new Error("The page or reviewed form changed. Inspect it again before approving.");
+      if (reviewed(pending.target) !== reviewed(currentTarget)) {
+        throw new Error("The page or reviewed form changed. Inspect it again before approving.");
+      }
+      const recheck = decidePageAction(call, currentTarget, await getTaskPermissionMode(approvalTask));
+      if (recheck.decision === "refuse") throw new Error(recheck.reason);
     }
     await recordAction(call);
     await storeActivity(call, "running");

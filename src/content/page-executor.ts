@@ -117,22 +117,48 @@ if (!executorGlobal.__codexPageExecutorInstalled) {
     return typeof constructor === "function" && element instanceof (constructor as new () => Node);
   }
 
+  const isInput = (node: Node): node is HTMLInputElement => isCrossFrame(node, "HTMLInputElement");
+  const isTextArea = (node: Node): node is HTMLTextAreaElement => isCrossFrame(node, "HTMLTextAreaElement");
+  const isSelect = (node: Node): node is HTMLSelectElement => isCrossFrame(node, "HTMLSelectElement");
+  const isButton = (node: Node): node is HTMLButtonElement => isCrossFrame(node, "HTMLButtonElement");
+  const isAnchor = (node: Node): node is HTMLAnchorElement => isCrossFrame(node, "HTMLAnchorElement");
+  const isLabel = (node: Node): node is HTMLLabelElement => isCrossFrame(node, "HTMLLabelElement");
+
   function isContentEditable(element: Element): boolean {
     if (!isCrossFrame(element, "HTMLElement")) return false;
     const attribute = element.getAttribute("contenteditable");
     return (element as HTMLElement).isContentEditable || attribute === "" || attribute === "true" || attribute === "plaintext-only";
   }
 
+  function labelledByText(element: Element): string {
+    const labelledBy = element.getAttribute("aria-labelledby");
+    if (!labelledBy) return "";
+    return text(
+      labelledBy
+        .split(/\s+/)
+        .map((id) => element.ownerDocument.getElementById(id)?.textContent ?? "")
+        .join(" "),
+    );
+  }
+
+  function associatedLabelText(element: Element): string {
+    if (!(isInput(element) || isTextArea(element) || isSelect(element)) || !element.labels) return "";
+    return text(Array.from(element.labels).map((label) => label.textContent ?? "").join(" "));
+  }
+
   function isSensitive(element: Element): boolean {
-    if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || isContentEditable(element))) return false;
-    if (element instanceof HTMLInputElement && element.type === "file") return true;
+    const input = isInput(element) ? element : null;
+    if (!(input || isTextArea(element) || isContentEditable(element))) return false;
+    if (input?.type === "file") return true;
     const haystack = [
-      element instanceof HTMLInputElement ? element.type : "",
+      input?.type ?? "",
       element.getAttribute("autocomplete") ?? "",
       element.getAttribute("name") ?? "",
       element.id,
       element.getAttribute("aria-label") ?? "",
       element.getAttribute("placeholder") ?? "",
+      labelledByText(element),
+      associatedLabelText(element),
     ].join(" ");
     return /(password|passcode|one.?time|otp|verification.?code|credit.?card|card.?number|cc-|cvv|cvc|security.?code|private.?key|secret|recovery|social.?security|ssn|aadhaar|pan.?number|api[-_]?key|access[-_]?token|refresh[-_]?token|id[-_]?token|auth[-_]?token|bearer|authorization)/i.test(haystack);
   }
@@ -189,7 +215,11 @@ if (!executorGlobal.__codexPageExecutorInstalled) {
       if (seen.has(root)) return;
       seen.add(root);
       for (const frame of Array.from(root.querySelectorAll("iframe"))) {
-        if (!(frame instanceof HTMLIFrameElement)) continue;
+        // querySelectorAllDeep only walks frames owned by the top document.
+        if (!(frame instanceof HTMLIFrameElement)) {
+          count += 1;
+          continue;
+        }
         const child = sameOriginDocument(frame);
         if (child) visit(child);
         else count += 1;
@@ -202,35 +232,23 @@ if (!executorGlobal.__codexPageExecutorInstalled) {
   function labelFor(element: Element): string {
     const aria = text(element.getAttribute("aria-label"));
     if (aria) return aria;
-    const labelledBy = element.getAttribute("aria-labelledby");
-    if (labelledBy) {
-      const label = text(
-        labelledBy
-          .split(/\s+/)
-          .map((id) => document.getElementById(id)?.textContent ?? "")
-          .join(" "),
-      );
-      if (label) return label;
-    }
-    if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement) {
-      const associated = element.labels ? text(Array.from(element.labels).map((label) => label.textContent ?? "").join(" ")) : "";
-      if (associated) return associated;
-      if ((element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) && element.placeholder) {
-        return text(element.placeholder);
-      }
-    }
+    const labelledBy = labelledByText(element);
+    if (labelledBy) return labelledBy;
+    const associated = associatedLabelText(element);
+    if (associated) return associated;
+    if ((isInput(element) || isTextArea(element)) && element.placeholder) return text(element.placeholder);
     return text(element.textContent || element.getAttribute("title") || element.getAttribute("alt") || element.getAttribute("name"), 300);
   }
 
   function roleFor(element: Element): string {
     const explicit = element.getAttribute("role");
     if (explicit) return explicit;
-    if (element instanceof HTMLAnchorElement) return "link";
-    if (element instanceof HTMLButtonElement) return "button";
-    if (element instanceof HTMLTextAreaElement) return "textbox";
-    if (element instanceof HTMLSelectElement) return "combobox";
+    if (isAnchor(element)) return "link";
+    if (isButton(element)) return "button";
+    if (isTextArea(element)) return "textbox";
+    if (isSelect(element)) return "combobox";
     if (isContentEditable(element)) return "textbox";
-    if (element instanceof HTMLInputElement) {
+    if (isInput(element)) {
       if (element.type === "checkbox") return "checkbox";
       if (element.type === "radio") return "radio";
       if (["button", "submit", "reset"].includes(element.type)) return "button";
@@ -240,35 +258,75 @@ if (!executorGlobal.__codexPageExecutorInstalled) {
   }
 
   function elementForm(element: Element): HTMLFormElement | null {
-    if (element instanceof HTMLButtonElement || element instanceof HTMLInputElement || element instanceof HTMLSelectElement || element instanceof HTMLTextAreaElement) {
-      return element.form;
-    }
+    if (isButton(element) || isInput(element) || isSelect(element) || isTextArea(element)) return element.form;
+    const submitter = submitterFor(element);
+    if (submitter) return submitter.form;
     return element.closest("form");
   }
 
-  function safeHref(element: Element): string | undefined {
-    if (!(element instanceof HTMLAnchorElement) || !element.href) return undefined;
+  function isSubmitControl(element: Element): element is HTMLButtonElement | HTMLInputElement {
+    if (isButton(element)) return element.type === "submit";
+    return isInput(element) && ["submit", "image"].includes(element.type);
+  }
+
+  // The control whose activation behavior a click on this element triggers:
+  // the element itself, an enclosing button, or a label's labeled control.
+  function submitterFor(element: Element): HTMLButtonElement | HTMLInputElement | null {
+    if (isSubmitControl(element)) return element;
+    if (isButton(element) || isInput(element)) return null;
+    const button = element.parentElement?.closest("button");
+    if (button) return isSubmitControl(button) ? button : null;
+    const label = element.closest("label");
+    const control = label && isLabel(label) ? label.control : null;
+    return control && isSubmitControl(control) ? control : null;
+  }
+
+  function formMethod(value: string | null): string {
+    const method = (value ?? "").trim().toLowerCase();
+    return method === "post" || method === "dialog" ? method.toUpperCase() : "GET";
+  }
+
+  // Mirrors the HTML form submission algorithm from attributes rather than
+  // IDL getters, which form controls named "action" or "method" can shadow.
+  function formDestination(form: HTMLFormElement, submitter: HTMLButtonElement | HTMLInputElement | null): { action: string; method: string; target: string } {
+    const formDocument = form.ownerDocument;
+    const rawAction = submitter?.hasAttribute("formaction")
+      ? submitter.getAttribute("formaction") ?? ""
+      : form.getAttribute("action") ?? "";
+    let action = "";
     try {
-      const url = new URL(element.href, location.href);
+      const resolved = new URL(rawAction.trim() || formDocument.URL, formDocument.baseURI);
+      if (resolved.protocol === "http:" || resolved.protocol === "https:") action = resolved.href;
+    } catch {
+      action = "";
+    }
+    const method = formMethod(submitter?.hasAttribute("formmethod") ? submitter.getAttribute("formmethod") : form.getAttribute("method"));
+    const target = submitter?.hasAttribute("formtarget")
+      ? submitter.getAttribute("formtarget") ?? ""
+      : form.getAttribute("target") ?? formDocument.querySelector("base[target]")?.getAttribute("target") ?? "";
+    return { action, method, target: text(target, 120) };
+  }
+
+  function safeHref(element: Element): string | undefined {
+    if (!isAnchor(element) || !element.href) return undefined;
+    try {
+      const url = new URL(element.href, element.ownerDocument.baseURI);
       return url.protocol === "http:" || url.protocol === "https:" ? url.href : undefined;
     } catch {
       return undefined;
     }
   }
 
-  function formPreview(form: HTMLFormElement | null): { action: string; method: string; fields: Array<{ name: string; value: string; sensitive: boolean }> } | null {
+  function formPreview(
+    form: HTMLFormElement | null,
+    submitter: HTMLButtonElement | HTMLInputElement | null,
+  ): { action: string; method: string; target: string; fields: Array<{ name: string; value: string; sensitive: boolean }> } | null {
     if (!form) return null;
-    let action = "";
-    try {
-      const target = new URL(form.action || location.href, location.href);
-      if (target.protocol === "http:" || target.protocol === "https:") action = target.href;
-    } catch {
-      action = "";
-    }
+    const { action, method, target } = formDestination(form, submitter);
     const fields: Array<{ name: string; value: string; sensitive: boolean }> = [];
     const seen = new Set<Element>();
     for (const control of Array.from(form.elements)) {
-      if (!(control instanceof HTMLInputElement || control instanceof HTMLTextAreaElement || control instanceof HTMLSelectElement)) continue;
+      if (!(isInput(control) || isTextArea(control) || isSelect(control))) continue;
       if (!isSensitive(control)) continue;
       fields.push({
         name: text(control.name || control.id || labelFor(control), 120) || "sensitive field",
@@ -279,9 +337,9 @@ if (!executorGlobal.__codexPageExecutorInstalled) {
     }
     for (const control of Array.from(form.elements)) {
       if (fields.length >= 30) break;
-      if (!(control instanceof HTMLInputElement || control instanceof HTMLTextAreaElement || control instanceof HTMLSelectElement)) continue;
+      if (!(isInput(control) || isTextArea(control) || isSelect(control))) continue;
       if (seen.has(control)) continue;
-      if (control instanceof HTMLInputElement && control.type === "hidden") continue;
+      if (isInput(control) && control.type === "hidden") continue;
       if (!isVisible(control)) continue;
       const name = text(control.name || control.id || labelFor(control), 120);
       if (!name) continue;
@@ -291,11 +349,13 @@ if (!executorGlobal.__codexPageExecutorInstalled) {
         sensitive: false,
       });
     }
-    return { action, method: (form.method || "get").toUpperCase(), fields };
+    return { action, method, target, fields };
   }
 
   function describe(element: Element, refId: string) {
-    const input = element instanceof HTMLInputElement ? element : null;
+    const input = isInput(element) ? element : null;
+    const href = safeHref(element);
+    const submitter = submitterFor(element);
     return {
       refId,
       snapshotId,
@@ -307,21 +367,20 @@ if (!executorGlobal.__codexPageExecutorInstalled) {
         ("disabled" in element && Boolean((element as HTMLButtonElement).disabled)) ||
         element.getAttribute("aria-disabled") === "true",
       sensitive: isSensitive(element),
-      href: safeHref(element),
-      sameOrigin: safeHref(element) ? new URL(safeHref(element) as string).origin === location.origin : false,
-      newTab: element instanceof HTMLAnchorElement && element.target === "_blank",
-      download: element instanceof HTMLAnchorElement && element.hasAttribute("download"),
+      href,
+      sameOrigin: href ? new URL(href).origin === location.origin : false,
+      newTab: isAnchor(element) && element.target === "_blank",
+      download: isAnchor(element) && element.hasAttribute("download"),
       formAssociated: elementForm(element) !== null,
-      submitter:
-        (element instanceof HTMLButtonElement && (element.type || "submit") === "submit") ||
-        (element instanceof HTMLInputElement && ["submit", "image"].includes(element.type)),
-      form: formPreview(elementForm(element)),
+      submitter: submitter !== null,
+      form: formPreview(elementForm(element), submitter),
     };
   }
 
   function fingerprint(element: Element): string {
-    const input = element instanceof HTMLInputElement ? element : null;
+    const input = isInput(element) ? element : null;
     const form = elementForm(element);
+    const destination = form ? formDestination(form, submitterFor(element)) : null;
     return JSON.stringify({
       tag: element.tagName.toLowerCase(),
       role: roleFor(element),
@@ -331,8 +390,9 @@ if (!executorGlobal.__codexPageExecutorInstalled) {
       ariaLabel: element.getAttribute("aria-label") ?? "",
       inputType: input?.type ?? null,
       href: safeHref(element) ?? null,
-      formAction: form?.action ?? null,
-      formMethod: form ? (form.method || "get").toUpperCase() : null,
+      formAction: destination?.action ?? null,
+      formMethod: destination?.method ?? null,
+      formTarget: destination?.target ?? null,
     });
   }
 
@@ -498,7 +558,7 @@ if (!executorGlobal.__codexPageExecutorInstalled) {
       const { form: _form, ...details } = describe(element, refId);
       void _form;
       const value =
-        element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement
+        isInput(element) || isTextArea(element) || isSelect(element)
           ? isSensitive(element)
             ? undefined
             : text(element.value, 500)
@@ -586,7 +646,7 @@ if (!executorGlobal.__codexPageExecutorInstalled) {
           throw new Error("The target is not a text field.");
         }
         if (isSensitive(element)) throw new Error("Browser Control will not read or fill sensitive fields.");
-        if (element instanceof HTMLInputElement && ["checkbox", "radio", "file", "button", "submit", "reset", "image"].includes(element.type)) {
+        if (isInput(element) && ["checkbox", "radio", "file", "button", "submit", "reset", "image"].includes(element.type)) {
           throw new Error("Use the matching page control tool for this field type.");
         }
         const current = contentEditable ? element.textContent ?? "" : (element as HTMLInputElement | HTMLTextAreaElement).value;
@@ -648,7 +708,7 @@ if (!executorGlobal.__codexPageExecutorInstalled) {
           focusable[(index + 1) % focusable.length]?.focus();
         } else if (command.key === "Enter") {
           const form = elementForm(element);
-          if (form) form.requestSubmit();
+          if (form) form.requestSubmit(submitterFor(element) ?? undefined);
           else element.click();
         } else {
           element.dispatchEvent(new KeyboardEvent("keydown", { key: command.key, bubbles: true }));
@@ -677,13 +737,10 @@ if (!executorGlobal.__codexPageExecutorInstalled) {
           const invalid = Array.from(form.querySelectorAll(":invalid")).slice(0, 10).map(labelFor);
           return { submitted: false, validationFailed: true, invalidFields: invalid };
         }
-        const submitter =
-          (element instanceof HTMLButtonElement && element.type === "submit") ||
-          (element instanceof HTMLInputElement && ["submit", "image"].includes(element.type))
-            ? element
-            : undefined;
-        form.requestSubmit(submitter);
-        return { submitted: true, action: form.action || location.href, method: (form.method || "get").toUpperCase() };
+        const submitter = submitterFor(element);
+        const destination = formDestination(form, submitter);
+        form.requestSubmit(submitter ?? undefined);
+        return { submitted: true, action: destination.action, method: destination.method };
       }
     }
   }

@@ -22,6 +22,7 @@ export interface PageTargetDescription {
   form: {
     action: string;
     method: string;
+    target?: string;
     fields: Array<{ name: string; value: string; sensitive: boolean }>;
   } | null;
 }
@@ -32,6 +33,11 @@ export type PageActionDecision =
   | { decision: "refuse"; reason: string };
 
 const consequentialClickPattern = /^(save|send|publish|delete|book|schedule|invite)\b|\b(create account|sign up)\b/i;
+
+function opensNewBrowsingContext(target: PageTargetDescription): boolean {
+  const name = target.form?.target?.trim().toLowerCase() ?? "";
+  return name !== "" && !["_self", "_parent", "_top"].includes(name);
+}
 
 function confirmation(
   permissionMode: BrowserPermissionMode,
@@ -75,7 +81,7 @@ export function decidePageAction(
     return confirmation(
       permissionMode,
       "Submit this form?",
-      `Send the reviewed form to ${target.form?.action ?? "this site"}.`,
+      `Send the reviewed form to ${target.form?.action ?? "this site"}${opensNewBrowsingContext(target) ? " in a new tab or window" : ""}.`,
     );
   }
 
@@ -103,7 +109,9 @@ export function decidePageAction(
       return confirmation(
         permissionMode,
         "Confirm this page action?",
-        "This control may send, save, publish, book, invite, delete, or otherwise change external data.",
+        target.submitter && target.form
+          ? `This control submits a form to ${target.form.action}${opensNewBrowsingContext(target) ? " in a new tab or window" : ""}. It may send, save, publish, or otherwise change external data.`
+          : "This control may send, save, publish, book, invite, delete, or otherwise change external data.",
       );
     }
     return { decision: "allow" };
