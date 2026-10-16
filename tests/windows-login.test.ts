@@ -31,6 +31,22 @@ describe("Windows Codex launch", () => {
     });
     expect(invocation).toEqual({ command: "C:\\node.exe", args: [script, ...APP_SERVER_ARGS] });
   });
+
+  it.each([undefined, "C:\\npm\\prefix\\codex", "C:\\npm\\prefix\\codex.ps1"])("skips non-executable npm shims when CODEX_BIN is %s", (requested) => {
+    const shell = "C:\\npm\\prefix\\codex";
+    const powershell = "C:\\npm\\prefix\\codex.ps1";
+    const shim = "C:\\npm\\prefix\\codex.cmd";
+    const script = "C:\\npm\\prefix\\node_modules\\@openai\\codex\\bin\\codex.js";
+    const files = new Set([shell, powershell, shim, script]);
+    const invocation = codexInvocation({
+      platform: "win32", env: { CODEX_BIN: requested }, home: "C:\\Users\\ada",
+      existsSync: (file) => files.has(file),
+      readFileSync: () => String.raw`"%_prog%" "%dp0%\node_modules\@openai\codex\bin\codex.js" %*`,
+      execFileSync: () => `${shell}\r\n${powershell}\r\n${shim}\r\n`,
+      nodePath: "C:\\node.exe",
+    });
+    expect(invocation).toEqual({ command: "C:\\node.exe", args: [script, ...APP_SERVER_ARGS] });
+  });
 });
 
 describe("ChatGPT login callback", () => {

@@ -14,6 +14,14 @@ Reviewed on 2026-10-16: `a1f35b2`, `f69e2cf`, `9d95e02`, `3313e08`,
   probes now use the same resolver as the companion, preserving the Node/script
   prefix for npm `codex.cmd` installations. The bridge smoke check also accepts
   that installation instead of requiring an independently discoverable `.exe`.
+- **npm PATH discovery selected a non-executable Windows shim.** The first
+  Windows CI run exposed `where.exe` returning npm's extensionless POSIX script
+  before `codex.cmd`. The resolver now skips extensionless and PowerShell
+  scripts on Windows, continuing to a native `.exe` or a `.cmd` shim that can
+  be unwrapped through Node. Three regression cases failed before the repair.
+- **A settings test bypassed a disabled option.** The macOS runner exposed a
+  test selecting Auto review before companion capabilities were loaded. Tests
+  now wait for the option to become enabled, matching native browser behavior.
 - **Directory-symlink fixtures required Windows privileges.** Attachment and
   skill tests now use directory junctions on Windows. The real C# launcher test
   skips only on other operating systems; a missing compiler on Windows fails
@@ -49,18 +57,25 @@ the full unit/component suite, signed-out native bridge probes using Codex
 companion check. It needs no account credentials or live model inference and
 does not install the companion into the runner's browser profile.
 
-Local verification on macOS ARM64: **213 tests passed, one Windows-only test
+Local verification on macOS ARM64: **216 tests passed, one Windows-only test
 skipped**; typecheck, lint, build, native bridge probes, and extracted-package
 checks passed. The shutdown regression failed before the fix and passed after
 it. Package checks ran in a temporary staging copy, preserving existing release
 artifacts. No new browser UI flow was exercised for this review.
 
-**The new CI matrix has not run yet:** these changes have not been pushed.
-Linux/Windows execution and desktop browser integration for these six commits
-remain unverified. Earlier Windows validation of the baseline does not validate
-the newer attachment/reviewer/settings features. A passing CI run is also not
-a substitute for the desktop checks below. ARM64 Windows/Linux and alternate
-Linux packaging need their own environment checks.
+The branch has been pushed and the matrix is running. The
+[follow-up run at `f7c6cc7`](https://github.com/07rjain/browser-control/actions/runs/38927051769)
+passed the complete Linux and macOS jobs; Windows passed all 214 tests,
+including the real C# launcher, before its native bridge exposed the PATH
+discovery issue above. The resolver repair adds three more cases. Check the
+[latest branch CI results](https://github.com/07rjain/browser-control/actions/workflows/compatibility.yml?query=branch%3Afeat%2Ffile-attachments)
+for the repaired Windows native bridge and packaged-companion checks.
+
+**Desktop browser integration remains unverified for this review.** Earlier
+Windows validation of the baseline does not validate the newer attachment,
+reviewer, or Settings features. A passing CI run is not a substitute for the
+desktop checks below. ARM64 Windows/Linux and alternate Linux packaging need
+their own environment checks.
 
 ## Desktop acceptance checklist
 

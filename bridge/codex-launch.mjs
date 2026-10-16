@@ -18,7 +18,7 @@ export function codexInvocation({
   const paths = platform === "win32" ? path.win32 : path;
   const requested = env.CODEX_BIN?.trim();
   if (requested) {
-    const direct = invocationFor(requested, { paths, fileExists, readFile, nodePath });
+    const direct = invocationFor(requested, { platform, paths, fileExists, readFile, nodePath });
     if (direct) return direct;
   }
   if (platform === "win32") {
@@ -29,10 +29,13 @@ export function codexInvocation({
   return { command: "codex", args: [...APP_SERVER_ARGS] };
 }
 
-function invocationFor(filePath, { paths, fileExists, readFile, nodePath }) {
+function invocationFor(filePath, { platform, paths, fileExists, readFile, nodePath }) {
   if (!filePath || !fileExists(filePath)) return null;
   const lower = filePath.toLowerCase();
   if (lower.endsWith(".cmd") || lower.endsWith(".bat")) return unwrapWindowsShim(filePath, { paths, fileExists, readFile, nodePath });
+  // npm also installs extensionless POSIX and .ps1 shims. Neither is a native
+  // Windows executable; continue discovery until an .exe or usable .cmd exists.
+  if (platform === "win32" && !lower.endsWith(".exe")) return null;
   return { command: filePath, args: [...APP_SERVER_ARGS] };
 }
 
@@ -46,7 +49,7 @@ function findWindowsCodex({ env, home, paths, fileExists, readFile, execFile, no
     paths.join(appData, "npm", "codex.cmd"),
   ];
   for (const candidate of candidates) {
-    const invocation = invocationFor(candidate, { paths, fileExists, readFile, nodePath });
+    const invocation = invocationFor(candidate, { platform: "win32", paths, fileExists, readFile, nodePath });
     if (invocation) return invocation;
   }
   try {
@@ -57,7 +60,7 @@ function findWindowsCodex({ env, home, paths, fileExists, readFile, execFile, no
       ...lines.filter((line) => !line.toLowerCase().endsWith(".exe")),
     ];
     for (const line of ordered) {
-      const invocation = invocationFor(line, { paths, fileExists, readFile, nodePath });
+      const invocation = invocationFor(line, { platform: "win32", paths, fileExists, readFile, nodePath });
       if (invocation) return invocation;
     }
   } catch {
