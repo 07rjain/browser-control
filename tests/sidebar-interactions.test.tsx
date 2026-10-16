@@ -55,6 +55,9 @@ beforeEach(() => {
     } },
   });
   Object.defineProperty(HTMLElement.prototype, "scrollTo", { configurable: true, value: () => undefined });
+  // jsdom does not implement dialog.showModal/close; native focus and inertness are browser checks.
+  Object.defineProperty(HTMLDialogElement.prototype, "showModal", { configurable: true, value: function(this: HTMLDialogElement) { this.open = true; } });
+  Object.defineProperty(HTMLDialogElement.prototype, "close", { configurable: true, value: function(this: HTMLDialogElement) { this.open = false; } });
 });
 
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
@@ -69,8 +72,37 @@ function emit(event: string, data: unknown) {
 }
 
 describe("sidebar interactions", () => {
+  it("shows one settings section at a time, keeps drafts across sections, and supports keyboard navigation and dismissal", async () => {
+    await ready(); fireEvent.click(screen.getByRole("button", { name: "Open settings" }));
+    const settings = screen.getByRole("dialog", { name: "Settings" });
+    expect(within(settings).getByRole("tabpanel", { name: "General" })).toBeTruthy();
+    expect(within(settings).getByRole("combobox", { name: "Theme" })).toBeTruthy();
+    expect(within(settings).queryByRole("combobox", { name: "Agent permission" })).toBeNull();
+    expect(within(settings).queryByRole("group", { name: "Models in composer" })).toBeNull();
+    expect(within(settings).queryByRole("button", { name: /Delete all Browser Control data/ })).toBeNull();
+    fireEvent.click(within(settings).getByRole("tab", { name: "Agent" }));
+    expect(within(settings).getByText("Auto review settings").closest("details")?.open).toBe(false);
+    fireEvent.click(within(settings).getByText("Main chat system prompt"));
+    const prompt = await within(settings).findByRole("textbox", { name: "Main system prompt" }) as HTMLTextAreaElement;
+    await vi.waitFor(() => expect(prompt.disabled).toBe(false));
+    fireEvent.change(prompt, { target: { value: "Keep my unsaved instructions." } });
+    const models = within(settings).getByRole("tab", { name: "Models" });
+    fireEvent.click(models);
+    expect(within(settings).getByRole("group", { name: "Models in composer" })).toBeTruthy();
+    fireEvent.keyDown(models, { key: "ArrowRight" });
+    expect(within(settings).getByRole("tab", { name: "Agent" }).getAttribute("aria-selected")).toBe("true");
+    expect(within(settings).getByRole("textbox", { name: "Main system prompt" })).toBe(prompt);
+    expect(prompt.value).toBe("Keep my unsaved instructions.");
+    fireEvent.keyDown(within(settings).getByRole("tab", { name: "Agent" }), { key: "End" });
+    expect(within(settings).getByRole("button", { name: /Delete all Browser Control data/ })).toBeTruthy();
+    fireEvent(settings, new Event("cancel", { cancelable: true, bubbles: true }));
+    expect(screen.queryByRole("dialog", { name: "Settings" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Open settings" }).getAttribute("aria-expanded")).toBe("false");
+  });
+
   it("loads, edits, saves and resets the main prompt independently of reviewer settings", async () => {
     await ready(); fireEvent.click(screen.getByRole("button", { name: "Open settings" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Agent" }));
     fireEvent.click(screen.getByText("Main chat system prompt"));
     const prompt = await screen.findByRole("textbox", { name: "Main system prompt" }) as HTMLTextAreaElement;
     await vi.waitFor(() => expect(prompt.disabled).toBe(false));
@@ -82,6 +114,7 @@ describe("sidebar interactions", () => {
     expect(screen.getByText(/Main system prompt saved/)).toBeTruthy();
     expect(stored.codexSidebarAutoReview).toBeUndefined();
     cleanup(); await ready(); fireEvent.click(screen.getByRole("button", { name: "Open settings" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Agent" }));
     fireEvent.click(screen.getByText("Main chat system prompt"));
     const restored = await screen.findByRole("textbox", { name: "Main system prompt" }) as HTMLTextAreaElement;
     await vi.waitFor(() => expect(restored.value).toBe(custom));
@@ -92,6 +125,7 @@ describe("sidebar interactions", () => {
 
   it("rejects invalid main prompts and retains the draft when saving fails", async () => {
     await ready(); fireEvent.click(screen.getByRole("button", { name: "Open settings" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Agent" }));
     fireEvent.click(screen.getByText("Main chat system prompt"));
     const prompt = await screen.findByRole("textbox", { name: "Main system prompt" }) as HTMLTextAreaElement;
     await vi.waitFor(() => expect(prompt.disabled).toBe(false));
@@ -112,10 +146,12 @@ describe("sidebar interactions", () => {
   it("opts into Auto review with legacy Ask storage and an independent Luna model", async () => {
     await ready();
     fireEvent.click(screen.getByRole("button", { name: "Open settings" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Agent" }));
     const select = screen.getByRole("combobox", { name: "Agent permission" });
     await act(async () => fireEvent.change(select, { target: { value: "auto" } }));
     expect(stored.codexSidebarBrowserPermissionMode).toBe("ask");
     expect(stored.codexSidebarAutoReview).toEqual({ version: 2, enabled: true, model: "gpt-6-luna", systemPrompt: DEFAULT_REVIEW_SYSTEM_PROMPT });
+    fireEvent.click(screen.getByText("Auto review settings"));
     expect((screen.getByRole("combobox", { name: "Reviewer model" }) as HTMLSelectElement).value).toBe("gpt-6-luna");
     expect(chrome.permissions.remove).toHaveBeenCalledWith({ origins: ["http://*/*", "https://*/*"] });
     await act(async () => fireEvent.change(select, { target: { value: "ask" } }));
@@ -127,8 +163,10 @@ describe("sidebar interactions", () => {
     stored.codexSidebarVisibleModels = ["alpha"];
     await ready();
     fireEvent.click(screen.getByRole("button", { name: "Open settings" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Agent" }));
     const permission = screen.getByRole("combobox", { name: "Agent permission" });
     await act(async () => fireEvent.change(permission, { target: { value: "auto" } }));
+    fireEvent.click(screen.getByText("Auto review settings"));
     const model = screen.getByRole("combobox", { name: "Reviewer model" });
     expect(within(model).getByRole("option", { name: "Beta" })).toBeTruthy();
     const prompt = screen.getByRole("textbox", { name: "Reviewer system prompt" });
@@ -144,6 +182,8 @@ describe("sidebar interactions", () => {
     expect(stored.codexSidebarAutoReview).toMatchObject({ model: "beta", systemPrompt: custom });
     cleanup(); await ready();
     fireEvent.click(screen.getByRole("button", { name: "Open settings" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Agent" }));
+    fireEvent.click(screen.getByText("Auto review settings"));
     expect((screen.getByRole("combobox", { name: "Reviewer model" }) as HTMLSelectElement).value).toBe("beta");
     expect((screen.getByRole("textbox", { name: "Reviewer system prompt" }) as HTMLTextAreaElement).value).toBe(custom);
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Reset prompt to default" })));
@@ -152,7 +192,9 @@ describe("sidebar interactions", () => {
 
   it("rejects an empty prompt while retaining the saved prompt", async () => {
     await ready(); fireEvent.click(screen.getByRole("button", { name: "Open settings" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Agent" }));
     await act(async () => fireEvent.change(screen.getByRole("combobox", { name: "Agent permission" }), { target: { value: "auto" } }));
+    fireEvent.click(screen.getByText("Auto review settings"));
     fireEvent.change(screen.getByRole("textbox", { name: "Reviewer system prompt" }), { target: { value: "  " } });
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Save prompt" })));
     expect(screen.getByRole("alert").textContent).toMatch(/non-empty system prompt/);
@@ -162,6 +204,7 @@ describe("sidebar interactions", () => {
   it("disables new Auto review selection for an unsupported companion", async () => {
     reviewerAvailable = false;
     await ready(); fireEvent.click(screen.getByRole("button", { name: "Open settings" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Agent" }));
     const option = screen.getByRole("option", { name: "Auto review" }) as HTMLOptionElement;
     expect(option.disabled).toBe(true);
     expect(screen.getByText(/Auto review requires the updated companion/)).toBeTruthy();
@@ -199,13 +242,14 @@ describe("sidebar interactions", () => {
   it("persists visible models and shows only enabled choices, keeping one selectable", async () => {
     await ready();
     fireEvent.click(screen.getByRole("button", { name: "Open settings" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Models" }));
     const settings = screen.getByRole("group", { name: "Models in composer" });
     await within(settings).findByRole("checkbox", { name: "Beta" });
     fireEvent.click(within(settings).getByRole("checkbox", { name: "Beta" }));
     fireEvent.click(within(settings).getByRole("checkbox", { name: "Codex default" }));
     expect((within(settings).getByRole("checkbox", { name: "Alpha" }) as HTMLInputElement).disabled).toBe(true);
     expect(stored.codexSidebarVisibleModels).toEqual(["alpha"]);
-    fireEvent.click(screen.getByRole("button", { name: "Open settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close settings" }));
     fireEvent.click(screen.getByRole("button", { name: "Model, Alpha" }));
     expect(within(screen.getByRole("listbox", { name: "Models" })).getAllByRole("option").map((option) => option.textContent)).toEqual(["Alpha · Default"]);
     cleanup();

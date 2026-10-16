@@ -28,6 +28,7 @@ import { checkCanceled, preparePdf, releasePreparedFile } from "./attachments/pr
 import { uploadPreparedFiles, type AttachmentTransport } from "./attachments/transfer";
 import { FileCards, SentFiles } from "./attachments/FileCards";
 import ChatPromptSettings from "./ChatPromptSettings";
+import SettingsPanel from "./SettingsPanel";
 import { COMPLETION_NOTICE_DURATION_MS, freshCompletionNotice, type CompletionNotice } from "../shared/completion-notice";
 import { greetingFor, selectedModelLabel, setupSteps, STARTER_TASKS, type AuthState, type StarterTask } from "./welcome";
 import {
@@ -1628,78 +1629,126 @@ export default function App() {
           </section>
         )}
         {menuOpen && (
-          <section className="menu-card" aria-label="Settings">
-            <label>
-              Theme
-              <select value={theme} onChange={(event) => setTheme(event.target.value as Theme)}>
-                <option value="system">System</option>
-                <option value="light">Light</option>
-                <option value="dark">Dark</option>
-              </select>
-            </label>
-            <label>
-              Model
-              <select value={selectedModel} onChange={(event) => selectModel(event.target.value)}>
-                <option value="">Codex default</option>
-                {models.map((model) => (
-                  <option key={model.id} value={model.id}>{model.name}{model.isDefault ? " · Default" : ""}</option>
-                ))}
-              </select>
-            </label>
-            <p className="menu-hint">Model changes apply to your next message.</p>
-            <fieldset className="model-visibility">
-              <legend>Models in composer</legend>
-              <p className="menu-hint">Choose which models appear in the message box. Keep at least one selected.</p>
-              <div className="model-visibility-options">
-                {modelChoices.map((model) => {
-                  const checked = composerModels.some((choice) => choice.id === model.id);
-                  return <label key={model.id}>
-                    <input type="checkbox" checked={checked} disabled={checked && composerModels.length === 1} onChange={(event) => toggleVisibleModel(model.id, event.target.checked)} />
-                    <span>{model.name}</span>
-                  </label>;
-                })}
-              </div>
-            </fieldset>
-            <ChatPromptSettings disabled={streaming} request={sendRequest} />
-            <label>
-              Agent permission
-              <select
-                value={permissionMode}
-                disabled={streaming || reviewerSettingsSaving}
-                onChange={(event) => void changeBrowserPermissionMode(event.target.value === "auto" ? "auto" : normalizeBrowserPermissionMode(event.target.value)).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "Unable to save the permission setting."))}
-              >
-                <option value="full">Full access · Default</option>
-                <option value="ask">Ask every time</option>
-                <option value="auto" disabled={!reviewerAvailable}>Auto review</option>
-              </select>
-            </label>
-            <p className="menu-hint">
-              {browserPermissionMode === "full"
-                ? fullSiteAccessGranted
-                  ? "All-sites access enabled. Supported actions run without site or approval cards; hard safety blocks still apply."
-                  : "Full access needs one Chrome all-sites grant before tasks can run without site prompts."
-                : permissionMode === "auto"
-                  ? "Your selected model reviews eligible low-risk confirmations. Risky, unclear, or unavailable reviews come to you. Site grants still need your approval."
-                  : "Pauses before form submission, consequential controls, Enter submissions, and tab closing."}
-              {" "}Applies to the next browser task.
-            </p>
-            {!reviewerAvailable && <p className="menu-hint">Auto review requires the updated companion and verified Codex CLI 0.162.1.</p>}
-            <details className="reviewer-settings" open={permissionMode === "auto"}>
-              <summary>Auto review settings</summary>
+          <SettingsPanel onClose={() => setMenuOpen(false)} sections={{
+            general: <>
+              <h3 className="settings-section-title">Appearance and sound</h3>
               <label>
-                Reviewer model
-                <select value={autoReview.model} disabled={streaming || reviewerSettingsSaving || models.length === 0} onChange={(event) => void saveReviewerSettings({ ...autoReview, model: event.target.value }, false)}>
-                  {reviewerModelChoices.map((model) => <option key={model.id} value={model.id}>{model.name}</option>)}
+                Theme
+                <select value={theme} onChange={(event) => setTheme(event.target.value as Theme)}>
+                  <option value="system">System</option>
+                  <option value="light">Light</option>
+                  <option value="dark">Dark</option>
                 </select>
               </label>
-              <p className="menu-hint">Choose from your Codex models. Composer model visibility does not affect this list. If a model is unavailable or cannot complete a structured review, the action comes to you.</p>
+              <label className="toggle-row">
+                <span>Task completion sound<small>Play a quiet tone after browser work finishes.</small></span>
+                <input
+                  type="checkbox"
+                  checked={completionSoundEnabled}
+                  onChange={(event) => {
+                    const enabled = event.target.checked;
+                    setCompletionSoundEnabled(enabled);
+                    if (enabled) void playCompletionSound();
+                  }}
+                />
+              </label>
+            </>,
+            models: <>
+              <h3 className="settings-section-title">Chat models</h3>
               <label>
-                Reviewer system prompt
-                <textarea className="reviewer-prompt" rows={8} maxLength={MAX_REVIEW_SYSTEM_PROMPT} spellCheck={false} value={reviewerPromptDraft} disabled={streaming || reviewerSettingsSaving} onChange={(event) => {
-                  setReviewerPromptDraft(event.target.value);
-                  setReviewerSettingsError(null);
-                  setReviewerSettingsNotice(null);
-                }} />
+                Model
+                <select value={selectedModel} onChange={(event) => selectModel(event.target.value)}>
+                  <option value="">Codex default</option>
+                  {models.map((model) => (
+                    <option key={model.id} value={model.id}>{model.name}{model.isDefault ? " · Default" : ""}</option>
+                  ))}
+                </select>
+              </label>
+              <p className="menu-hint">Model changes apply to your next message.</p>
+              <fieldset className="model-visibility">
+                <legend>Models in composer</legend>
+                <p className="menu-hint">Choose the models shown in your message box. Keep at least one selected.</p>
+                <div className="model-visibility-options">
+                  {modelChoices.map((model) => {
+                    const checked = composerModels.some((choice) => choice.id === model.id);
+                    return <label key={model.id}>
+                      <input type="checkbox" checked={checked} disabled={checked && composerModels.length === 1} onChange={(event) => toggleVisibleModel(model.id, event.target.checked)} />
+                      <span>{model.name}</span>
+                    </label>;
+                  })}
+                </div>
+              </fieldset>
+            </>,
+            agent: <>
+              <h3 className="settings-section-title">Browser agent</h3>
+              <label>
+                Agent permission
+                <select
+                  value={permissionMode}
+                  disabled={streaming || reviewerSettingsSaving}
+                  onChange={(event) => void changeBrowserPermissionMode(event.target.value === "auto" ? "auto" : normalizeBrowserPermissionMode(event.target.value)).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "Unable to save the permission setting."))}
+                >
+                  <option value="full">Full access · Default</option>
+                  <option value="ask">Ask every time</option>
+                  <option value="auto" disabled={!reviewerAvailable}>Auto review</option>
+                </select>
+              </label>
+              <p className="menu-hint">
+                {browserPermissionMode === "full"
+                  ? fullSiteAccessGranted
+                    ? "All-sites access enabled. Supported actions run without site or approval cards; hard safety blocks still apply."
+                    : "Full access needs one Chrome all-sites grant before tasks can run without site prompts."
+                  : permissionMode === "auto"
+                    ? "Your selected model reviews eligible low-risk confirmations. Risky, unclear, or unavailable reviews come to you. Site grants still need your approval."
+                    : "Pauses before form submission, consequential controls, Enter submissions, and tab closing."}
+                {" "}Applies to the next browser task.
+              </p>
+              {!reviewerAvailable && <p className="menu-hint">Auto review requires the updated companion and verified Codex CLI 0.162.1.</p>}
+              {browserPermissionMode === "full" && !fullSiteAccessGranted && (
+                <button className="settings-grant-button" disabled={streaming} onClick={() => void requestFullSiteAccess()}>
+                  Enable full browser access
+                </button>
+              )}
+              <label>
+                Browser actions per request
+                <input
+                  type="number"
+                  min={MIN_BROWSER_TASK_ACTION_LIMIT}
+                  max={MAX_BROWSER_TASK_ACTION_LIMIT}
+                  step={5}
+                  value={browserTaskActionLimitDraft}
+                  onChange={(event) => setBrowserTaskActionLimitDraft(event.target.value)}
+                  onBlur={() => {
+                    const nextLimit = normalizeBrowserTaskActionLimit(browserTaskActionLimitDraft);
+                    setBrowserTaskActionLimit(nextLimit);
+                    setBrowserTaskActionLimitDraft(String(nextLimit));
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") event.currentTarget.blur();
+                  }}
+                />
+              </label>
+              <p className="menu-hint">
+                {MIN_BROWSER_TASK_ACTION_LIMIT}–{MAX_BROWSER_TASK_ACTION_LIMIT}; applies to the next request.
+              </p>
+              <h3 className="settings-subheading">Instructions and review</h3>
+              <ChatPromptSettings disabled={streaming} request={sendRequest} />
+              <details className="reviewer-settings">
+                <summary>Auto review settings</summary>
+                <label>
+                  Reviewer model
+                  <select value={autoReview.model} disabled={streaming || reviewerSettingsSaving || models.length === 0} onChange={(event) => void saveReviewerSettings({ ...autoReview, model: event.target.value }, false)}>
+                    {reviewerModelChoices.map((model) => <option key={model.id} value={model.id}>{model.name}</option>)}
+                  </select>
+                </label>
+                <p className="menu-hint">Independent of your chat model and composer list. Unavailable models fall back to your approval.</p>
+                <label>
+                  Reviewer system prompt
+                  <textarea className="reviewer-prompt" rows={8} maxLength={MAX_REVIEW_SYSTEM_PROMPT} spellCheck={false} value={reviewerPromptDraft} disabled={streaming || reviewerSettingsSaving} onChange={(event) => {
+                    setReviewerPromptDraft(event.target.value);
+                    setReviewerSettingsError(null);
+                    setReviewerSettingsNotice(null);
+                  }} />
               </label>
               <p className="menu-hint">{reviewerPromptDraft.length.toLocaleString()} / {MAX_REVIEW_SYSTEM_PROMPT.toLocaleString()} characters. Saved changes apply to the next browser task. Browser permission and approval limits still apply.</p>
               <div className="reviewer-settings-actions">
@@ -1714,35 +1763,10 @@ export default function App() {
               </details>
               <p className="menu-hint">Uses your existing Codex sign-in and adds model usage. Reviews receive your request and the proposed action context. Your chat model stays the same. Stop cancels a pending review.</p>
             </details>
-            {browserPermissionMode === "full" && !fullSiteAccessGranted && (
-              <button className="settings-grant-button" disabled={streaming} onClick={() => void requestFullSiteAccess()}>
-                Enable full browser access
-              </button>
-            )}
-            <label>
-              Browser actions per request
-              <input
-                type="number"
-                min={MIN_BROWSER_TASK_ACTION_LIMIT}
-                max={MAX_BROWSER_TASK_ACTION_LIMIT}
-                step={5}
-                value={browserTaskActionLimitDraft}
-                onChange={(event) => setBrowserTaskActionLimitDraft(event.target.value)}
-                onBlur={() => {
-                  const nextLimit = normalizeBrowserTaskActionLimit(browserTaskActionLimitDraft);
-                  setBrowserTaskActionLimit(nextLimit);
-                  setBrowserTaskActionLimitDraft(String(nextLimit));
-                }}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") event.currentTarget.blur();
-                }}
-              />
-            </label>
-            <p className="menu-hint">
-              {MIN_BROWSER_TASK_ACTION_LIMIT}–{MAX_BROWSER_TASK_ACTION_LIMIT}; applies to the next request.
-            </p>
+            </>,
+            skills: <>
+              <h3 className="settings-section-title">Taught skills</h3>
             <div className="skill-settings">
-              <p className="menu-hint">Taught skills</p>
               <p className="menu-hint">Saved on this computer and matched automatically when a request fits. Record a new skill from the message box. Choosing a skill does not skip action confirmations.</p>
               {skillsError && <p className="menu-hint">{skillsError}</p>}
               {taughtSkills.length === 0 ? (
@@ -1787,31 +1811,23 @@ export default function App() {
                 </ul>
               )}
             </div>
-            <label className="toggle-row">
-              <span>Task completion sound<small>Play a quiet tone after browser work finishes.</small></span>
-              <input
-                type="checkbox"
-                checked={completionSoundEnabled}
-                onChange={(event) => {
-                  const enabled = event.target.checked;
-                  setCompletionSoundEnabled(enabled);
-                  if (enabled) void playCompletionSound();
-                }}
-              />
-            </label>
-            <button onClick={() => void clearLocalData()}>Clear browser data and permissions</button>
-            <button className="settings-delete-button" onClick={() => void deleteAllLocalData()}>
-              Delete all Browser Control data and sign out
-            </button>
-            <button
-              className="settings-logout-button"
-              disabled={streaming}
-              onClick={() => void signOut()}
-            >
-              <span>Log out of ChatGPT</span>
-              {account?.email && <small>{account.email}</small>}
-            </button>
-          </section>
+            </>,
+            account: <>
+              <h3 className="settings-section-title">Your account</h3>
+              <p className="menu-hint">Signed in with ChatGPT{account?.email ? ` as ${account.email}` : ""}.</p>
+              <button className="settings-logout-button" disabled={streaming} onClick={() => void signOut()}>
+                Log out of ChatGPT
+              </button>
+              <h3 className="settings-subheading">Local data</h3>
+              <p className="menu-hint">Manage saved conversations, permissions, and companion data.</p>
+              <div className="settings-data-actions">
+                <button onClick={() => void clearLocalData()}>Clear browser data and permissions</button>
+                <button className="settings-delete-button" onClick={() => void deleteAllLocalData()}>
+                  Delete all Browser Control data and sign out
+                </button>
+              </div>
+            </>,
+          }} />
         )}
       </header>
 
