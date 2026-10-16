@@ -18,15 +18,26 @@ const activity = (overrides: Partial<ToolStatus>): ToolStatus => ({
 });
 
 describe("tool activity summaries", () => {
-  it("groups every lifecycle step with the request turn", () => {
+  it("updates one row per call while keeping separate requests in their own turn", () => {
     const groups = groupToolStatuses([
       activity({ status: "requested" }),
       activity({ status: "running" }),
       activity({ status: "succeeded" }),
       activity({ callId: "call-2", tool: "scroll", turnId: "turn-2" }),
     ]);
-    expect(groups.get("turn-1")?.map((item) => item.status)).toEqual(["requested", "running", "succeeded"]);
+    expect(groups.get("turn-1")?.map((item) => item.status)).toEqual(["succeeded"]);
     expect(groups.get("turn-2")).toHaveLength(1);
+  });
+
+  it("keeps first-call order and approval previews when terminal events omit them", () => {
+    const groups = groupToolStatuses([
+      activity({ callId: "first", status: "requested" }),
+      activity({ callId: "second", tool: "scroll", status: "requested" }),
+      activity({ callId: "first", status: "running", confirmationBypassed: true, target: { label: "Submit preview" } }),
+      activity({ callId: "first", status: "failed", error: "Timed out" }),
+    ]);
+    expect(groups.get("turn-1")?.map((item) => item.callId)).toEqual(["first", "second"]);
+    expect(groups.get("turn-1")?.[0]).toMatchObject({ status: "failed", error: "Timed out", confirmationBypassed: true, target: { label: "Submit preview" } });
   });
 
   it("counts unique actions and reports terminal failures", () => {

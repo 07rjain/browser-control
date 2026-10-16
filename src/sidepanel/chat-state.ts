@@ -1,9 +1,12 @@
+import type { AttachmentSummary } from "../shared/attachments";
+
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
   text: string;
   streaming?: boolean;
   failed?: boolean;
+  attachments?: AttachmentSummary[];
 }
 
 export function settleCanceledMessages(messages: ChatMessage[]): ChatMessage[] {

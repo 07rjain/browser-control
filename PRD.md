@@ -2,7 +2,7 @@
 
 - Status: MVP and supervised browser control implemented; first public Chrome Web Store release approved and in preparation, Chrome validation pending
 - Owner: `codex-chrome-extension-manager`
-- Last updated: 2026-09-28
+- Last updated: 2026-10-15
 - Target platform: Chromium browsers supporting Manifest V3 and `chrome.sidePanel`
 
 ## 1. Executive summary
@@ -150,6 +150,7 @@ If this gate fails, stop and request a product decision. Do not improvise authen
 #### Acceptance criteria
 
 - Page content is captured only after an explicit user gesture such as “Attach page.”
+- The page-attachment control toggles Attach/Detach on repeated clicks. Detach also cancels an in-progress capture; a late response cannot reattach the page. Detach does not revoke browser-control permissions.
 - Use `activeTab` plus `scripting` for temporary current-page access instead of broad `<all_urls>` access in the MVP.
 - The composer shows the page origin, included content types, and approximate size before submission.
 - Extraction excludes password fields, form values, hidden inputs, browser-internal pages, and extension pages.
@@ -199,6 +200,7 @@ Chrome documents that `chrome.tabs` can create, modify, and rearrange tabs, whil
 - Do not store raw authentication credentials in extension storage.
 - Include settings for theme (`system`, `light`, `dark`) and whether page attachments include readable body text by default; the safe default is off.
 - Load the models available to the signed-in Codex account and let the user choose a model. The selection is stored locally and applies to the next message without requiring a new conversation.
+- Settings provides a locally persisted checklist of models visible in the composer's dropdown. Keep at least one model available; removing the active model selects another enabled choice. Existing installations initially show all available models. No additional data leaves the computer.
 - Include a locally persisted agent-permission setting. Full access is the default, requests optional all-sites access once, and skips site-by-site and per-action approval cards for supported actions. Ask every time removes broad host access and restores exact-site permission plus confirmations for consequential actions and tab closing. The selected value is captured when the next browser task begins.
 - Do not add analytics or telemetry in the MVP.
 
@@ -233,9 +235,10 @@ Chrome documents that `chrome.tabs` can create, modify, and rearrange tabs, whil
 - Inspection returns no more than 80 visible interactive elements and never returns sensitive field values.
 - Element references expire after 30 seconds, navigation, origin change, or tab closure. Unrelated DOM mutations do not invalidate them; uniquely identifiable controls may be rebound after a reactive render.
 - Waits time out within eight seconds and unsupported frames or protected pages return honest errors.
-- The activity log records requested, awaiting permission/confirmation, running, succeeded, failed, rejected, canceled, and stale states.
+- The activity log shows one row per tool call, updating its requested, awaiting permission/confirmation, running, succeeded, failed, rejected, canceled, or stale state in place. Preserve chronological call order, approval previews, errors, and ownership by request.
 - Tool activity is grouped with the request that caused it, expands while running, and collapses to a summary dropdown after completion.
-- A completed browser task produces a dismissible sidebar notice. An off-by-default local completion tone can be enabled in Settings.
+- A completed browser task produces a dismissible sidebar notice that expires after 10 seconds, including across sidebar reopening. An off-by-default local completion tone can be enabled in Settings.
+- While sending or running a task, the message composer has an animated border that clears on completion, failure, or Stop. Reduced-motion users receive a static highlight. This adds no permissions or network traffic.
 - Stop cancels the Codex turn, pending page action, and pending confirmation. It does not revoke an exact-origin grant the user chose to remember. Permission-mode changes apply only to the next browser task.
 - Service-worker suspension, reconnect, or retry cannot silently repeat a completed action.
 
@@ -261,6 +264,32 @@ Chrome documents that `chrome.tabs` can create, modify, and rearrange tabs, whil
 - Page tools are redeclared when a Codex thread resumes; authentication remains the ADR 0001 ChatGPT browser flow.
 - The Chrome validation matrix in `next_set_off_feature.md` passes before private-beta sign-off.
 
+### Epic I — Local images, text, Markdown, and visual PDFs
+
+User-approved scope, revised 2026-10-15: attach text/Markdown, raster images, and PDFs including scans and diagrams directly. Word and presentation files must be exported to PDF by the user. No installed document converter or container runtime is required. Implementation is on `feat/file-attachments`; validation evidence and remaining checks are in [the attachment plan](docs/FILE_ATTACHMENTS_PLAN.md).
+
+#### Requirements and acceptance criteria
+
+- Preserve text/code attachments; support PNG/JPEG/WebP/GIF and visual PDFs with explicit file, byte, pixel, text, and page limits.
+- Render selected PDF pages locally using packaged PDF.js; send page images plus available text through the existing Codex App Server authentication and `turn/start` path. Scanned pages remain visual inputs even without a text layer.
+- Show the exact shared image previews, page ranges, normalization and truncation notices before sending. Require page selection above 20 pages and reject unsupported formats with an export-to-PDF message.
+- Use bounded chunk transfer and opaque conversation-bound IDs. Only the companion resolves IDs to owned paths; built-in shell, filesystem, and `view_image` tools remain disabled.
+- File contents remain untrusted and separate from user instructions, URL provenance, browser-action authority, and taught-skill selection. Support file-only submissions.
+- Privacy: prepare files in sidebar memory; after Send, retain prepared assets privately under the sidebar home for 30 days, and incomplete uploads for 24 hours. Stop cancels preparation/transfer or interrupts the accepted turn. Delete All Data removes uploads and send records with the owned home. No cloud converter, telemetry, embedded-resource fetching, or new Chrome permission is added.
+- CSP permits only packaged PDF workers/assets and local blob previews; no eval, WASM execution, or remote executable code is enabled. Preserve existing browser-control permission and working-tab rules.
+- Complete the automated gates, installed-host checks, and actual Chrome sidebar format/error/cancellation tests before claiming end-to-end support is validated. Record any untested platform or scenario explicitly.
+
+### Epic J — Automatic review of browser approval requests
+
+User-requested implementation on 2026-10-16: add **Auto review** beside Ask every time and Full access, using an independent `gpt-6-luna` reviewer to approve eligible routine requests and escalate risky or unclear actions. The [Auto reviewer implementation plan](docs/AUTO_REVIEW_IMPLEMENTATION_PLAN.md) defines the architecture, compatibility spike, eligibility rules, lifecycle and acceptance gates. Status: initial local implementation; see README.md for verification and remaining manual gates.
+
+- Preserve existing defaults, hard refusals, working-tab binding, action budgets and idempotency. Review applies to the extension's typed browser actions, not native shell/file execution.
+- Run review separately from the acting chat with no executable tools; native Codex automatic-review configuration alone does not handle the extension's approval cards. Require verified model access, structured results and event isolation before enabling it.
+- Use code policy before and after review. Risky, incomplete, timed-out or failed reviews require the existing user card; forbidden actions stay refused. Site permissions and unknown-destination approvals remain human decisions.
+- Keep legacy storage/task permission mode at Ask when Auto review is selected, with additive versioned reviewer configuration, so older clients do not fall back to Full access. Capture reviewer configuration for each task.
+- Initial review eligibility: complete same-origin search, bounded display preferences, explicitly private drafts, and reversible private notes with exact user-requested values. Generic forms, tab closing, destructive/external communication actions and incomplete evidence remain human-reviewed. Default to Luna, allow any model from the Codex model catalog independently of the composer, and expose the reviewer system prompt with explicit Save and Reset to default controls. Capture model and prompt per task; prompt edits cannot bypass code policy. CLI 0.162.1 is required.
+- Privacy impact: the selected reviewer receives bounded action evidence through the existing Codex account, consuming additional usage. Keep evidence ephemeral and credentials inaccessible; add no Chrome permissions, telemetry or external review provider.
+
 ## 5. User experience
 
 ### Primary journey
@@ -271,7 +300,7 @@ Chrome documents that `chrome.tabs` can create, modify, and rearrange tabs, whil
 4. The panel shows a ready composer and a clear indicator that no page content is attached.
 5. The user optionally attaches the current page, reviews the attachment, and sends a message.
 6. The answer streams in the sidebar.
-7. If the response proposes an allowed tab action, the activity log shows it; consequential actions require confirmation only in Ask every time mode.
+7. If the response proposes an allowed tab action, the activity log shows it; consequential actions use the captured Ask every time, Auto review, or Full access policy.
 8. The user changes tabs while the sidebar and conversation remain available.
 
 ### Key screens and states
