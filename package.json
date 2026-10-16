@@ -20,6 +20,7 @@
     "uninstall:host:mac": "node scripts/uninstall-native-host.mjs"
   },
   "dependencies": {
+    "pdfjs-dist": "5.6.205",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-markdown": "^10.1.0",
