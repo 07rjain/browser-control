@@ -23,7 +23,7 @@ function cleanRole(value: string): string {
 }
 
 interface RecorderGlobal {
-  __codexPageRecorderInstalled?: boolean;
+  __codexPageRecorder?: { restart: () => void };
 }
 
 interface RecordingEvent {
@@ -68,21 +68,22 @@ const ALLOWED_KEYS = new Set(["Enter", "Escape", "Tab", "ArrowUp", "ArrowDown", 
 
 const recorderGlobal = globalThis as typeof globalThis & RecorderGlobal;
 
-if (!recorderGlobal.__codexPageRecorderInstalled) {
-  recorderGlobal.__codexPageRecorderInstalled = true;
-
+if (recorderGlobal.__codexPageRecorder) {
+  recorderGlobal.__codexPageRecorder.restart();
+} else {
   let port: chrome.runtime.Port | null = null;
   let nonce = "";
   let listening = false;
   let stopped = false;
   let retries = 0;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let frameHost: HTMLDivElement | null = null;
   let scrollTimer: ReturnType<typeof setTimeout> | null = null;
   let scrollDirection: "up" | "down" | null = null;
   let dragSource: Element | null = null;
   const passwordFields = new WeakSet<Element>();
-  const reportedSkips = new WeakSet<Element>();
-  const fillTimers = new WeakMap<Element, ReturnType<typeof setTimeout>>();
+  let reportedSkips = new WeakSet<Element>();
+  const fillTimers = new Map<Element, ReturnType<typeof setTimeout>>();
 
   function clearFrame(): void {
     frameHost?.remove();
@@ -206,14 +207,15 @@ if (!recorderGlobal.__codexPageRecorderInstalled) {
     const explicit = element.getAttribute("role");
     let role = explicit ?? "";
     if (!role) {
-      if (element instanceof HTMLAnchorElement) role = "link";
-      else if (element instanceof HTMLButtonElement) role = "button";
-      else if (element instanceof HTMLTextAreaElement || isContentEditable(element)) role = "textbox";
-      else if (element instanceof HTMLSelectElement) role = "combobox";
-      else if (element instanceof HTMLInputElement) {
-        if (element.type === "checkbox") role = "checkbox";
-        else if (element.type === "radio") role = "radio";
-        else if (["button", "submit", "reset"].includes(element.type)) role = "button";
+      if (isCrossFrame(element, "HTMLAnchorElement")) role = "link";
+      else if (isCrossFrame(element, "HTMLButtonElement")) role = "button";
+      else if (isCrossFrame(element, "HTMLTextAreaElement") || isContentEditable(element)) role = "textbox";
+      else if (isCrossFrame(element, "HTMLSelectElement")) role = "combobox";
+      else if (isCrossFrame(element, "HTMLInputElement")) {
+        const type = (element as HTMLInputElement).type;
+        if (type === "checkbox") role = "checkbox";
+        else if (type === "radio") role = "radio";
+        else if (["button", "submit", "reset"].includes(type)) role = "button";
         else role = "textbox";
       } else role = element.tagName.toLowerCase();
     }
@@ -226,7 +228,7 @@ if (!recorderGlobal.__codexPageRecorderInstalled) {
     while (current) {
       if (current.getAttribute("role") === "combobox") return current;
       const root = current.getRootNode();
-      current = current.parentElement ?? (root instanceof ShadowRoot ? root.host : null);
+      current = current.parentElement ?? (isCrossFrame(root, "ShadowRoot") ? (root as ShadowRoot).host : null);
     }
     return element;
   }
@@ -256,49 +258,101 @@ if (!recorderGlobal.__codexPageRecorderInstalled) {
     return cleanPageLabel(collected, 200);
   }
 
+  function recordFill(element: Element): void {
+    const target = fillTarget(element);
+    if (!listening) return;
+    if (isSensitiveElement(element) || isSensitiveElement(target)) {
+      skip(target, "sensitive");
+      return;
+    }
+    report({ kind: "fill", ...roleAndLabel(target), example: fieldValue(target) });
+  }
+
   function scheduleFill(element: Element): void {
     const existing = fillTimers.get(element);
     if (existing) clearTimeout(existing);
     fillTimers.set(element, setTimeout(() => {
       fillTimers.delete(element);
-      const target = fillTarget(element);
-      if (!listening || isSensitiveElement(element) || isSensitiveElement(target)) {
-        if (listening && (isSensitiveElement(element) || isSensitiveElement(target))) skip(target, "sensitive");
-        return;
-      }
-      const identity = roleAndLabel(target);
-      report({ kind: "fill", ...identity, example: fieldValue(target) });
+      recordFill(element);
     }, 400));
   }
 
+  function flushPending(): void {
+    for (const [element, timer] of fillTimers) {
+      clearTimeout(timer);
+      recordFill(element);
+    }
+    fillTimers.clear();
+    if (scrollTimer) clearTimeout(scrollTimer);
+    flushScroll();
+  }
+
+  function clearPending(): void {
+    for (const timer of fillTimers.values()) clearTimeout(timer);
+    fillTimers.clear();
+    if (scrollTimer) clearTimeout(scrollTimer);
+    scrollTimer = null;
+    scrollDirection = null;
+    dragSource = null;
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+
   function connect(): void {
-    if (stopped) return;
-    port = chrome.runtime.connect({ name: RECORDER_PORT_NAME });
-    port.onMessage.addListener((message: unknown) => {
-      if (!message || typeof message !== "object") return;
-      const command = message as { type?: string; nonce?: string };
+    if (stopped || port) return;
+    const connection = chrome.runtime.connect({ name: RECORDER_PORT_NAME });
+    port = connection;
+    connection.onMessage.addListener((message: unknown) => {
+      if (port !== connection || !message || typeof message !== "object") return;
+      const command = message as { type?: string; nonce?: string; requestId?: string };
       if (command.type === "STOP") {
         stopped = true;
         listening = false;
+        nonce = "";
+        clearPending();
         clearFrame();
-        port?.disconnect();
+        port = null;
+        connection.disconnect();
+        return;
+      }
+      if (command.type === "FLUSH" && command.nonce === nonce && typeof command.requestId === "string") {
+        flushPending();
+        listening = false;
+        connection.postMessage({ type: "FLUSHED", nonce, requestId: command.requestId });
         return;
       }
       if (command.type === "START" && typeof command.nonce === "string" && command.nonce.length > 0) {
+        if (nonce !== command.nonce) {
+          clearPending();
+          reportedSkips = new WeakSet<Element>();
+        }
         nonce = command.nonce;
         listening = true;
         retries = 0;
         showFrame();
       }
     });
-    port.onDisconnect.addListener(() => {
+    connection.onDisconnect.addListener(() => {
+      if (port !== connection) return;
       port = null;
       listening = false;
+      clearPending();
       clearFrame();
       if (stopped || retries >= 3) return;
       retries += 1;
-      setTimeout(connect, 250);
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+        connect();
+      }, 250);
     });
+  }
+
+  function restart(): void {
+    if (port) return;
+    clearPending();
+    stopped = false;
+    retries = 0;
+    connect();
   }
 
   function onClick(event: RecordingEvent): void {
@@ -310,7 +364,7 @@ if (!recorderGlobal.__codexPageRecorderInstalled) {
       return;
     }
     const identity = roleAndLabel(target);
-    const href = target instanceof HTMLAnchorElement ? target.href : "";
+    const href = isCrossFrame(target, "HTMLAnchorElement") ? (target as HTMLAnchorElement).href : "";
     if (PURCHASE_RECORDING_PATTERN.test(`${identity.label} ${href}`)) {
       skip(target, "purchase");
       return;
@@ -327,9 +381,11 @@ if (!recorderGlobal.__codexPageRecorderInstalled) {
       skip(target, "sensitive");
       return;
     }
-    if (target instanceof HTMLSelectElement && event.type === "change") {
+    if (isCrossFrame(target, "HTMLSelectElement")) {
+      if (event.type !== "change") return;
       const identity = roleAndLabel(target);
-      const option = cleanPageLabel(target.selectedOptions[0]?.textContent ?? target.value);
+      const field = target as HTMLSelectElement;
+      const option = cleanPageLabel(field.selectedOptions[0]?.textContent ?? field.value);
       if (SENSITIVE_RECORDING_PATTERN.test(`${fieldHaystack(target)} ${option}`)) {
         skip(target, "sensitive");
         return;
@@ -337,9 +393,10 @@ if (!recorderGlobal.__codexPageRecorderInstalled) {
       if (identity.label && option) report({ kind: "select", ...identity, option });
       return;
     }
-    if ((target instanceof HTMLInputElement && (target.type === "checkbox" || target.type === "radio")) && event.type === "change") {
+    if (isCrossFrame(target, "HTMLInputElement") && ["checkbox", "radio"].includes((target as HTMLInputElement).type)) {
+      if (event.type !== "change") return;
       const identity = roleAndLabel(target);
-      if (identity.label) report({ kind: "check", ...identity, checked: target.checked });
+      if (identity.label) report({ kind: "check", ...identity, checked: (target as HTMLInputElement).checked });
       return;
     }
     if (
@@ -371,7 +428,7 @@ if (!recorderGlobal.__codexPageRecorderInstalled) {
 
   function onSubmit(event: RecordingEvent): void {
     if (!listening || !event.isTrusted || event.type !== "submit") return;
-    const target = event.composedPath().find((node): node is HTMLFormElement => node instanceof HTMLFormElement) ?? null;
+    const target = event.composedPath().find((node): node is HTMLFormElement => isElementNode(node) && isCrossFrame(node, "HTMLFormElement")) ?? null;
     const label = cleanPageLabel(target ? rawLabel(target) : "") || "form";
     if (PURCHASE_RECORDING_PATTERN.test(label)) {
       if (target) skip(target, "purchase");
@@ -457,16 +514,16 @@ if (!recorderGlobal.__codexPageRecorderInstalled) {
     doc.addEventListener("drop", (event) => onDrag(asRecordingEvent(event)), true);
     doc.addEventListener("wheel", (event) => onWheel(asRecordingEvent(event)), true);
     doc.addEventListener("focusin", (event) => {
-      if (event.target instanceof Element) rememberPassword(event.target);
+      if (event.target && isElementNode(event.target)) rememberPassword(event.target);
     }, true);
     doc.addEventListener("load", (event) => {
-      if (event.target instanceof HTMLIFrameElement) attachFrame(event.target);
+      if (event.target && isElementNode(event.target) && isCrossFrame(event.target, "HTMLIFrameElement")) attachFrame(event.target as HTMLIFrameElement);
     }, true);
     const attachNode = (node: Node): void => {
-      if (!(node instanceof Element)) return;
-      if (node instanceof HTMLIFrameElement) attachFrame(node);
+      if (!isElementNode(node)) return;
+      if (isCrossFrame(node, "HTMLIFrameElement")) attachFrame(node as HTMLIFrameElement);
       for (const frame of Array.from(node.querySelectorAll("iframe"))) {
-        if (frame instanceof HTMLIFrameElement) attachFrame(frame);
+        attachFrame(frame);
       }
     };
     attachNode(doc.documentElement);
@@ -479,7 +536,8 @@ if (!recorderGlobal.__codexPageRecorderInstalled) {
   }
 
   watchDocument(document);
-  connect();
+  recorderGlobal.__codexPageRecorder = { restart };
+  restart();
 }
 
 export {};

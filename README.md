@@ -16,6 +16,16 @@ The extension CSP adds `worker-src 'self'` for the packaged PDF parser, `img-src
 
 Manual attachment checks: prepare and remove images/text/Markdown; preview text and scanned PDFs; choose a range from a PDF over 20 pages; reject corrupt/encrypted PDFs and unsupported Word/slides; cancel preparation and transfer; send an image-only and scanned-PDF question through the actual sidebar; verify transcript previews, retry/fork ownership, expiry, and both extension consoles. See the [implementation plan](docs/FILE_ATTACHMENTS_PLAN.md) for recorded evidence.
 
+## Teach a skill
+
+Use **Record a skill**, describe when it should run, and demonstrate the task on an authorized page. Recordings retain up to **120 steps**; generated and saved skill documents support **240,000 characters**. The review shows step and character counts, lets you remove steps and choose examples, and saves only when you select **Save skill**.
+
+Done collects pending typing and scrolling before review. If the page disconnects or does not acknowledge the final capture, review shows a warning to check the last steps. You can record again on the same page after finishing or canceling, and return to previously recorded tabs. Same-origin iframe controls retain their roles, labels, and secret/purchase exclusions; cross-origin frames remain unavailable. The recorder uses the existing browser-control grants and adds no Chrome permissions or external services.
+
+Manual recorder checks: start on an authorized disposable page; type and immediately select Done; verify the final value in review; restart after both Save and Cancel; switch away and back; exercise dropdowns, checkboxes, labeled forms and revealed password fields in same-origin/nested frames using synthetic values; check Stop/disconnect recovery, the 120-step overflow notice, long-document save/read, and both extension consoles. Run these through the unpacked extension for end-to-end coverage.
+
+Validation on 2026-10-17: macOS 27.0.1, Node 20.20.1, Codex CLI 0.162.1, base commit `b030c5f` plus recorder fixes. Typecheck, lint, production build, and all 224 automated tests passed (one Windows-only test skipped). The isolated native bridge saved an exact 240,000-character multibyte document; the refreshed installed companion passed its Chrome-like launch check. Seven regression checks failed against the original code for the intended defects/old limits and passed after the fixes. A local jsdom probe of the built classic script also verified three stop/reinject/restart cycles, exactly one click per cycle, and frame removal. These are automated checks, not manual browser validation. The manual attempt at a disposable localhost fixture was blocked before opening a tab: the Brave connection became unavailable and native app control was unavailable. No Chrome sidebar/worker consoles, screenshots, or end-to-end skill run were captured; the manual checklist above remains required.
+
 ## Project status
 
 The MVP and supervised browser controls are available on the Chrome Web Store. The desktop native companion is distributed separately from the public support site. Manual Chrome validation and reliability hardening on dynamic applications such as Google Calendar remain release gates for updates.

@@ -9,8 +9,8 @@ import {
   sanitizeSkillField,
 } from "./skill-text";
 
-export const MAX_RECORDING_STEPS = 80;
-export const MAX_SKILL_DOCUMENT_CHARS = 24_000;
+export const MAX_RECORDING_STEPS = 120;
+export const MAX_SKILL_DOCUMENT_CHARS = 240_000;
 export const RECORDER_PORT_NAME = "codex-page-recorder";
 export const RECORDING_SESSION_KEY = "codexSidebarSkillRecording";
 export const ACTIVE_BROWSER_TASK_WINDOW_MS = 10 * 60 * 1_000;
@@ -36,11 +36,10 @@ export const recorderStepSchema = z.discriminatedUnion("kind", [
 
 export type RecorderStep = z.infer<typeof recorderStepSchema>;
 
-export const recorderMessageSchema = z.object({
-  type: z.literal("STEP"),
-  nonce: z.string().uuid(),
-  step: recorderStepSchema,
-}).strict();
+export const recorderMessageSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("STEP"), nonce: z.string().uuid(), step: recorderStepSchema }).strict(),
+  z.object({ type: z.literal("FLUSHED"), nonce: z.string().uuid(), requestId: z.string().uuid() }).strict(),
+]);
 
 export const storedRecordingStepSchema = z.discriminatedUnion("kind", [
   z.object({ id: z.string().uuid(), kind: z.literal("click"), ...locationFields, role: z.string().max(40), label: z.string().max(80), consequential: z.boolean() }).strict(),

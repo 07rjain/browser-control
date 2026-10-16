@@ -18,7 +18,7 @@ import {
   type BrowserPermissionMode,
 } from "../shared/page-tools";
 import { AUTO_REVIEW_SETTINGS_KEY, DEFAULT_AUTO_REVIEW, REVIEW_MODEL, DEFAULT_REVIEW_SYSTEM_PROMPT, REQUIRED_REVIEW_INSTRUCTIONS, MAX_REVIEW_SYSTEM_PROMPT, autoReviewSettingsSchema, readAutoReviewSettings, reviewCapabilitiesSchema, type AutoReviewSettings } from "../shared/auto-review";
-import { IDLE_RECORDING_VIEW, recordingStepSummary, type RecordingView } from "../shared/skill-recording";
+import { IDLE_RECORDING_VIEW, MAX_RECORDING_STEPS, MAX_SKILL_DOCUMENT_CHARS, recordingStepSummary, type RecordingView } from "../shared/skill-recording";
 import { COMPANION_INSTALL_COMMAND, isLegacyThreadError, isMissingNativeHost } from "../shared/companion-setup";
 import { activityStepLabel, groupToolStatuses, hasBrowserActivityForTurn, latestToolStatuses, summarizeToolStatuses, visibleActivityFormFields, type ToolStatus } from "./activity";
 import { settleCanceledMessages, type ChatMessage } from "./chat-state";
@@ -271,7 +271,7 @@ function RecordingReview({
       {recording.previewError && <p className="recording-error">{recording.previewError}</p>}
       {recording.preview && (
         <details>
-          <summary>File to save</summary>
+          <summary>File to save · {recording.preview.length.toLocaleString()} / {MAX_SKILL_DOCUMENT_CHARS.toLocaleString()} characters</summary>
           <pre className="recording-preview">{recording.preview}</pre>
         </details>
       )}
@@ -1973,6 +1973,7 @@ export default function App() {
           <section className="recording-panel" aria-label="Skill recording">
             <p className="eyebrow">{recording.status === "review" ? "Review skill" : "Recording a skill"}</p>
             <h2>{recording.name || "Taught skill"}</h2>
+            <p>{recording.steps.length} / {MAX_RECORDING_STEPS} steps</p>
             {recording.notice && <p>{recording.notice}</p>}
             {recordingError && <p className="recording-error">{recordingError}</p>}
             {recording.status === "needs-permission" && recording.pendingOriginPattern && (
@@ -2056,6 +2057,7 @@ export default function App() {
             event.preventDefault();
             void startRecording();
           }}>
+            <p>Record up to {MAX_RECORDING_STEPS} steps, then review before saving. Skill documents can contain up to {MAX_SKILL_DOCUMENT_CHARS.toLocaleString()} characters.</p>
             <label>
               When should the agent use this skill?
               <textarea

@@ -447,6 +447,9 @@ Do not request persistent required `<all_urls>`, `history`, `bookmarks`, `downlo
 - Accept only trusted page events. Inject the packaged recorder only after the browser-control origin grant, and only in the top frame.
 - Refuse to start while a browser task is active, and refuse chat or browser tools while a recording is open.
 - Show a review before anything is written. The user can delete steps, add notes, and choose which typed examples to keep.
+- Retain up to 120 steps per recording and up to 240,000 characters per saved skill document. Persist the full step list across service-worker restarts, show overflow explicitly, and apply the same document limit when generating, saving, and reading skills.
+- Done must drain pending typing and scroll events before opening review, without blocking the recorder message queue. A disconnected or unresponsive recorder must reach review with a capture warning. Cancel must never restore a discarded draft.
+- Stop/Cancel followed by a new recording, and returning to a previously recorded tab, must reconnect without duplicate page listeners. Same-origin iframe controls must retain their semantic roles and sensitive-field/purchase protections.
 - Save `~/.codex-sidebar/skills/<name>/SKILL.md` through the companion, then refresh the existing catalog.
 - Privacy: recordings stay on this computer. Passwords, one-time codes, payment fields, and purchase controls are skipped. Other typed values are omitted unless the user keeps them in review. Saved skills are sent to the model only when a later request matches.
 
