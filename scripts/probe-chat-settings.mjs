@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { encodeNativeMessage, LengthPrefixedJsonDecoder } from "../bridge/protocol.mjs";
 import { streamResponse } from "./probe-responses.mjs";
+import { stopProbeProcess } from "./probe-process.mjs";
 
 function nativeClient(home, codexBinary) {
   const child = spawn(process.execPath, [fileURLToPath(new URL("../bridge/native-host.mjs", import.meta.url))], {
@@ -45,10 +46,7 @@ function nativeClient(home, codexBinary) {
     },
     finished: (id) => completions.has(id) ? Promise.resolve(completions.get(id)) : bounded(waiting, id, id),
     async close() {
-      if (child.exitCode !== null || child.signalCode !== null) return;
-      const exited = new Promise((resolve) => child.once("exit", resolve));
-      const force = setTimeout(() => child.kill("SIGKILL"), 3000);
-      child.kill("SIGTERM"); await exited; clearTimeout(force);
+      await stopProbeProcess(child);
     },
   };
 }

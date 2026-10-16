@@ -1,7 +1,8 @@
 import { spawn } from "node:child_process";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { encodeNativeMessage, LengthPrefixedJsonDecoder } from "../bridge/protocol.mjs";
 import { chromeLikePath, companionLayout } from "./host-paths.mjs";
+import { stopProbeProcess } from "./probe-process.mjs";
 
 const launcher = companionLayout(process.platform, homedir(), process.env, "0.0.0").launcherPath;
 const host = spawn(launcher, [], {
@@ -9,7 +10,7 @@ const host = spawn(launcher, [], {
     HOME: homedir(),
     USERPROFILE: homedir(),
     PATH: chromeLikePath(process.platform),
-    TMPDIR: process.env.TMPDIR ?? process.env.TEMP ?? "/tmp",
+    TMPDIR: tmpdir(),
     TEMP: process.env.TEMP,
     SystemRoot: process.env.SystemRoot,
   },
@@ -60,5 +61,5 @@ try {
   if (!Array.isArray(catalog.models)) throw new Error("Installed host returned an invalid model catalog.");
   process.stdout.write("Installed native host passed a Chrome-like environment smoke test.\n");
 } finally {
-  host.kill("SIGTERM");
+  await stopProbeProcess(host);
 }

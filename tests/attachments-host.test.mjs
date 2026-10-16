@@ -50,8 +50,13 @@ describe("private attachment transfer", () => {
     expect(() => store.read({ owner: randomUUID(), id, offset: 0 })).toThrow(/unavailable/);
     expect(() => store.read({ owner, id: "../secret", offset: 0 })).toThrow(/Invalid/);
     const forged = randomUUID();
-    symlinkSync(join(root, "uploads", id), join(root, "uploads", forged));
+    symlinkSync(join(root, "uploads", id), join(root, "uploads", forged), "junction");
     expect(() => store.read({ owner, id: forged, offset: 0 })).toThrow(/symlink/);
+    const redirectedBytes = join(root, "uploads", id, "image.png");
+    rmSync(redirectedBytes);
+    // Directory junctions exercise the link guard without Windows admin rights.
+    symlinkSync(join(root, "uploads", forged), redirectedBytes, "junction");
+    expect(() => store.read({ owner, id, offset: 0 })).toThrow(/symlink/);
     store.abort(owner);
     expect(() => put(store, owner, png, "image/png")).toThrow(/canceled/);
   });

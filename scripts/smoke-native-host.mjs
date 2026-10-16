@@ -1,11 +1,11 @@
-import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { encodeNativeMessage, LengthPrefixedJsonDecoder } from "../bridge/protocol.mjs";
 import { LEGACY_THREAD_ERROR } from "../bridge/restricted-threads.mjs";
-import { resolveCodexBinary } from "./host-paths.mjs";
+import { stopProbeProcess } from "./probe-process.mjs";
 import { probeCodexTools, probeCodexImageInput, probeCodexReviewerTools } from "./probe-codex-tools.mjs";
 
 import { probeReviewerConcurrency } from "./reviewer-compatibility.mjs";
@@ -13,12 +13,7 @@ import { probeChatSettings } from "./probe-chat-settings.mjs";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const temporaryHome = mkdtempSync(join(tmpdir(), "codex-sidebar-smoke-"));
-const codexBinary = resolveCodexBinary({
-  platform: process.platform,
-  execFileSync,
-  realpathSync,
-  statSync,
-});
+const codexBinary = process.env.CODEX_BIN || "codex";
 const unsafeHost = spawn(process.execPath, [join(repositoryRoot, "bridge", "native-host.mjs")], {
   env: {
     ...process.env,
@@ -153,6 +148,6 @@ try {
   process.stderr.write(`${stderr}\n`);
   throw error;
 } finally {
-  host.kill("SIGTERM");
-  rmSync(temporaryHome, { recursive: true, force: true });
+  await stopProbeProcess(host);
+  rmSync(temporaryHome, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 }

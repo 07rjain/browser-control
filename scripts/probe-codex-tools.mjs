@@ -1,10 +1,10 @@
-import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { APP_SERVER_ARGS } from "../bridge/codex-launch.mjs";
 import { CODEX_THREAD_RESTRICTIONS, JsonLineDecoder } from "../bridge/protocol.mjs";
+import { spawnProbeCodex, stopProbeProcess } from "./probe-process.mjs";
 
 // Built-in tools Codex may still offer once CODEX_THREAD_RESTRICTIONS apply.
 // request_user_input server requests are rejected by the native host, and
@@ -47,10 +47,7 @@ async function withFakeProvider(run) {
 }
 
 function startAppServer(codexBinary, home, args) {
-  const child = spawn(codexBinary, args, {
-    env: { ...process.env, CODEX_HOME: home },
-    stdio: ["pipe", "pipe", "pipe"],
-  });
+  const child = spawnProbeCodex(codexBinary, home, args);
   const decoder = new JsonLineDecoder();
   const pending = new Map();
   const turnWaiters = [];
@@ -159,8 +156,7 @@ async function capturedTools(codexBinary, model, { resumeUnrestricted, imageInpu
         const started = await server.request("thread/start", { ...base, ephemeral: false, historyMode: "legacy", dynamicTools });
         threadId = started.thread.id;
         await runTurn(server, threadId);
-        server.child.kill("SIGTERM");
-        await new Promise((resolveExit) => server.child.once("exit", resolveExit));
+        await stopProbeProcess(server.child);
         requests.length = 0;
         server = await connect();
         await server.request("thread/resume", { threadId, ...restricted, excludeTurns: true, dynamicTools });
@@ -175,14 +171,7 @@ async function capturedTools(codexBinary, model, { resumeUnrestricted, imageInpu
       if (imageInput && !bodies.some((body) => body.input?.some((item) => item.content?.some((part) => part.type === "input_image" && part.image_url?.startsWith("data:image/"))))) throw new Error(`Codex did not forward the attached local image to the model. Input shape: ${JSON.stringify(bodies.map((body) => body.input?.map((item) => ({ type: item.type, content: item.content?.map((part) => ({ type: part.type, text: part.text?.slice(0,160) })) }))))}`);
       return [...new Set(bodies.flatMap(toolNames))];
     } finally {
-      await Promise.all(servers.map(async ({ child }) => {
-        if (child.exitCode !== null || child.signalCode !== null) return;
-        const exited = new Promise((resolveExit) => child.once("exit", resolveExit));
-        const force = setTimeout(() => child.kill("SIGKILL"), 1000);
-        child.kill("SIGTERM");
-        await exited;
-        clearTimeout(force);
-      }));
+      await Promise.all(servers.map(({ child }) => stopProbeProcess(child)));
       rmSync(home, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
     }
   });

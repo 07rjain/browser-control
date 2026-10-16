@@ -14,9 +14,9 @@ const compiler = process.platform === "win32" && windowsRoot
   : undefined;
 
 describe("Windows native-host launcher", () => {
-  it.skipIf(!compiler)("compiles and forwards a message while stdin stays open", async () => {
+  it.skipIf(process.platform !== "win32")("compiles and forwards a message while stdin stays open", async () => {
     if (!compiler) throw new Error("The .NET Framework C# compiler is unavailable.");
-    const directory = mkdtempSync(join(tmpdir(), "browser-control-launcher-"));
+    const directory = mkdtempSync(join(tmpdir(), "browser-control-launcher ü space-"));
     let launcher: ChildProcessWithoutNullStreams | undefined;
     try {
       const source = join(directory, "native-host-launcher.cs");

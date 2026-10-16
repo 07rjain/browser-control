@@ -57,7 +57,7 @@ describe("sidebar skill discovery", () => {
     const root = skillRoot();
     const outside = skillRoot();
     writeSkill(outside, "outside", "outside-skill", "A skill stored somewhere else");
-    symlinkSync(join(outside, "outside"), join(root, "linked"));
+    symlinkSync(join(outside, "outside"), join(root, "linked"), "junction");
 
     const discovered = discoverSkillsOnDisk(root);
     expect(discovered.skills).toEqual([]);
@@ -126,7 +126,7 @@ describe("sidebar skill discovery", () => {
 
     const outside = skillRoot();
     const linkParent = skillRoot();
-    symlinkSync(outside, join(linkParent, "linked-skills"));
+    symlinkSync(outside, join(linkParent, "linked-skills"), "junction");
     expect(() => writeNamedSkill(join(linkParent, "linked-skills"), markdown.replace("Reply tibo", "Other skill"))).toThrow(/symlink/);
   });
 

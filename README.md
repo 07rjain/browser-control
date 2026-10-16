@@ -60,6 +60,10 @@ Local Codex companion -----> Codex App Server / ChatGPT authentication
 - Node.js 20+
 - Codex CLI `0.148.0` or a compatible release available as `codex` (on Windows, `codex.exe` or the npm `codex.cmd` shim)
 
+Use Node.js 24 for development builds and CI. Auto review requires the verified
+Codex CLI **0.162.1**. See the [desktop compatibility review](docs/DESKTOP_COMPATIBILITY.md)
+for the Linux/Windows checks, portability fixes, and remaining desktop validation.
+
 ## Setup
 
 ```sh
@@ -108,6 +112,7 @@ npm test                # Unit tests
 npm run test:bridge     # Signed-out host checks, tool isolation, concurrent reviewer probe
 npm run test:reviewer   # Local fake-provider reviewer protocol checks; no account inference
 npm run test:installed-host # Verify Chrome-style launch environment after host installation
+npm run test:release     # Test the extracted companion after build:release; no inference
 npm run build           # Production extension in dist/
 npm run install:host
 npm run uninstall:host
@@ -265,7 +270,7 @@ Open **Settings → Agent → Main chat system prompt** to inspect or edit the m
 
 The prompt accepts up to 12,000 characters and preserves whitespace and line breaks. Empty, whitespace-only, oversized, or null-containing prompts are rejected. Editing is disabled while the current chat runs. A failed save retains the draft. Settings requires the updated companion; saving is acknowledged by the host rather than silently ignored by an older version.
 
-The prompt is stored locally at `~/.codex-sidebar/chat-settings.json`, with owner-only file permissions, and is removed by **Delete all local data**. It is sent to the existing model provider as chat instructions when a new conversation runs. Saving alone starts no inference. Browser permission checks and tool restrictions remain enforced by code. No new Chrome permission, model provider, or API key is needed.
+The prompt is stored locally at `~/.codex-sidebar/chat-settings.json`, using owner-only POSIX permissions or inherited Windows profile-directory ACLs, and is removed by **Delete all local data**. It is sent to the existing model provider as chat instructions when a new conversation runs. Saving alone starts no inference. Browser permission checks and tool restrictions remain enforced by code. No new Chrome permission, model provider, or API key is needed.
 
 `npm run test:bridge` exercises the real companion and Codex app-server against a synthetic localhost Responses provider. It verifies exact prompt bytes for new chats and forks, preservation of existing-chat instructions, persistence across host restart, invalid-input rejection, reset, and local-data deletion. Codex CLI 0.162.1 accepts `baseInstructions` on thread creation/resume/fork, but the local executable probe confirmed that resuming an already loaded thread does not replace its base prompt; the new-chat behavior avoids claiming an update that did not happen. See the [official app-server lifecycle documentation](https://learn.chatgpt.com/docs/app-server).
 

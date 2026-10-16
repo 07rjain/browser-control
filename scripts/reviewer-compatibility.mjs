@@ -1,10 +1,9 @@
-import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { APP_SERVER_ARGS } from "../bridge/codex-launch.mjs";
+import { spawnProbeCodex, stopProbeProcess } from "./probe-process.mjs";
 import { CODEX_THREAD_RESTRICTIONS, JsonLineDecoder } from "../bridge/protocol.mjs";
 import { streamResponse } from "./probe-responses.mjs";
 import { createApprovalReviewer, REVIEW_MODEL } from "../bridge/approval-reviewer.mjs";
@@ -32,7 +31,7 @@ export async function probeReviewerConcurrency(codexBinary = "codex") {
   });
   await new Promise((resolve, reject) => { provider.once("error", reject); provider.listen(0, "127.0.0.1", resolve); });
   writeFileSync(join(home, "config.toml"), `model = "gpt-6.1-sol"\nmodel_provider = "probe"\n[model_providers.probe]\nname = "probe"\nbase_url = "http://127.0.0.1:${provider.address().port}/v1"\nwire_api = "responses"\nrequires_openai_auth = false\nrequest_max_retries = 0\nstream_max_retries = 0\n`);
-  const child = spawn(codexBinary, [...APP_SERVER_ARGS], { env: { ...process.env, CODEX_HOME: home }, stdio: ["pipe", "pipe", "pipe"] });
+  const child = spawnProbeCodex(codexBinary, home);
   const pending = new Map(); const decoder = new JsonLineDecoder(); let next = 1;
   let parentTool; let resolveTool;
   const toolReady = new Promise((resolve) => { resolveTool = resolve; });
@@ -84,13 +83,7 @@ export async function probeReviewerConcurrency(codexBinary = "codex") {
     return { version: info.userAgent, structuredOutput: true, concurrent: true, tools: [], ephemeral: true, models: reviewModels, customPrompt: true };
   } finally {
     reviewer.close();
-    if (child.exitCode === null && child.signalCode === null) {
-      const exited = new Promise((resolveExit) => child.once("exit", resolveExit));
-      const force = setTimeout(() => child.kill("SIGKILL"), 1000);
-      child.kill("SIGTERM");
-      await exited;
-      clearTimeout(force);
-    }
+    await stopProbeProcess(child);
     for (const waiter of pending.values()) waiter.reject(new Error("Probe finished.")); pending.clear();
     await new Promise((resolve) => provider.close(resolve));
     rmSync(home, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });

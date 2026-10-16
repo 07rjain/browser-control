@@ -284,6 +284,7 @@ let initialized = null;
 let nextRpcId = 1;
 let lastAppServerError = "";
 let deletingLocalData = false;
+let shuttingDown = false;
 const rpcPending = new Map();
 const threadSkillCatalog = new Map();
 let cachedSkillCatalog = null;
@@ -293,6 +294,7 @@ const chromeDecoder = new LengthPrefixedJsonDecoder(MAX_NATIVE_MESSAGE_BYTES);
 const appDecoder = new JsonLineDecoder();
 
 function sendToChrome(message) {
+  if (shuttingDown) return;
   process.stdout.write(encodeNativeMessage(message));
 }
 
@@ -408,7 +410,7 @@ async function ensureAppServer() {
     const detail = lastAppServerError || `Codex App Server stopped (exit ${String(code)}, signal ${String(signal)}).`;
     for (const pending of rpcPending.values()) pending.reject(new Error(detail));
     rpcPending.clear();
-    if (!deletingLocalData) sendEvent("bridge.status", { connected: false, code, signal, error: detail });
+    if (!deletingLocalData && !shuttingDown) sendEvent("bridge.status", { connected: false, code, signal, error: detail });
   });
 
   initialized = appRequest("initialize", {
@@ -795,12 +797,21 @@ function closeLoginProxy() {
   loginProxy = null;
 }
 
-function shutdownHost() {
+async function shutdownHost() {
+  if (shuttingDown) return;
+  shuttingDown = true;
   approvalReviewer.close();
   chatInputs.close();
   closeLoginProxy();
-  terminateChild(appServer);
-  process.exit(0);
+  // On Windows taskkill is asynchronous. Do not leave Codex holding the home
+  // directory's databases open when Chrome closes or a probe restarts the host.
+  try {
+    await stopAppServer();
+    process.exit(0);
+  } catch (error) {
+    log(error instanceof Error ? error.message : "Codex did not stop.");
+    process.exit(1);
+  }
 }
 
 process.stdin.on("end", shutdownHost);

@@ -63,7 +63,11 @@ export function createUploadStore(root, { now = Date.now } = {}) {
     return value;
   }
   function openBytes(id, flags = "r") {
-    const fd = openSync(dataPath(id), (flags === "r" ? constants.O_RDONLY : constants.O_RDWR) | constants.O_NOFOLLOW);
+    const path = dataPath(id);
+    // Windows has no O_NOFOLLOW. Reject reparse links explicitly there too;
+    // retain the atomic open guard on platforms that provide it.
+    if (lstatSync(path).isSymbolicLink()) throw new Error("Refusing a symlinked attachment file.");
+    const fd = openSync(path, (flags === "r" ? constants.O_RDONLY : constants.O_RDWR) | (constants.O_NOFOLLOW ?? 0));
     if (!fstatSync(fd).isFile()) { closeSync(fd); throw new Error("Invalid attachment file."); }
     return fd;
   }
