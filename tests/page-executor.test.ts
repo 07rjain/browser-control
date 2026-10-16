@@ -219,6 +219,31 @@ describe("packaged page executor", () => {
     expect(JSON.stringify(described)).not.toContain("do-not-return");
   });
 
+  it("provides complete bounded form evidence and refuses omitted or named submitter data for review", () => {
+    document.body.innerHTML = `<form role="search" aria-label="Search"><input name="q" aria-label="Search terms" value="blue otter"><button type="submit">Search</button></form>`;
+    expect(describeLabel("Search").form?.review).toMatchObject({ complete: true, role: "search", label: "Search", values: [{ name: "q", value: "blue otter" }] });
+    document.querySelector("button")!.setAttribute("name", "action");
+    document.querySelector("button")!.setAttribute("value", "delete");
+    expect(describeLabel("Search").form?.review?.complete).toBe(false);
+    document.querySelector("button")!.removeAttribute("name");
+    document.querySelector("form")!.insertAdjacentHTML("beforeend", `<input type="hidden" name="unreviewed" value="hidden-data">`);
+    const target = describeLabel("Search");
+    expect(target.form?.review?.complete).toBe(false);
+    expect(JSON.stringify(target.form?.review)).not.toContain("hidden-data");
+  });
+
+  it("rechecks the approved form in the executor immediately before its side effect", () => {
+    document.body.innerHTML = `<form role="search" aria-label="Search"><input name="q" value="blue otter"><button type="submit">Search</button></form>`;
+    const target = describeLabel("Search");
+    const submit = vi.spyOn(document.querySelector("form")!, "requestSubmit").mockImplementation(() => undefined);
+    (document.querySelector("input") as HTMLInputElement).value = "changed after worker validation";
+    expect(() => command({ action: "SUBMIT", refId: target.refId, snapshotId: target.snapshotId, expectedTarget: JSON.stringify(target) })).toThrow(/reviewed.*changed/);
+    expect(submit).not.toHaveBeenCalled();
+    (document.querySelector("input") as HTMLInputElement).value = "blue otter";
+    command({ action: "SUBMIT", refId: target.refId, snapshotId: target.snapshotId, expectedTarget: JSON.stringify(target) });
+    expect(submit).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps references valid when an unrelated part of a dynamic page changes", async () => {
     document.body.innerHTML = `<button id="save">Save</button><div id="live-region">Idle</div>`;
     const inspection = command<{ snapshotId: string; elements: Array<{ refId: string; label: string }> }>({ action: "INSPECT" });

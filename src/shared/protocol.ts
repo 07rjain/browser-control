@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { conversationSnapshotSchema } from "./conversation-state";
+import { attachmentOperationSchema } from "./attachments";
 
 export const pageAttachmentSchema = z.object({
   title: z.string().max(500),
@@ -33,6 +34,8 @@ export const uiRequestSchema = z.discriminatedUnion("type", [
   requestBase.extend({ type: z.literal("AUTH_LOGOUT") }),
   requestBase.extend({ type: z.literal("DELETE_ALL_LOCAL_DATA") }),
   requestBase.extend({ type: z.literal("MODELS_READ") }),
+  requestBase.extend({ type: z.literal("AUTO_REVIEW_READ") }),
+  requestBase.extend({ type: z.literal("ATTACHMENTS_REQUEST"), request: attachmentOperationSchema }),
   requestBase.extend({ type: z.literal("CHAT_START"), model: z.string().min(1).max(120).optional() }),
   requestBase.extend({ type: z.literal("CHAT_RESUME"), threadId: z.string().min(1), model: z.string().min(1).max(120).optional() }),
   requestBase.extend({
@@ -43,10 +46,14 @@ export const uiRequestSchema = z.discriminatedUnion("type", [
   requestBase.extend({
     type: z.literal("CHAT_SEND"),
     threadId: z.string().min(1),
-    text: z.string().trim().min(1).max(80_000),
+    text: z.string().max(80_000),
+    pageContext: pageAttachmentSchema.optional(),
+    attachments: z.array(z.string().uuid()).max(5).optional(),
+    owner: z.string().uuid().optional(),
     clientMessageId: z.string().uuid(),
     model: z.string().min(1).max(120).optional(),
-  }),
+  }).refine((request) => request.text.trim().length > 0 || Boolean(request.attachments?.length) || Boolean(request.pageContext), "Enter a message or attach a file."),
+  requestBase.extend({ type: z.literal("CHAT_CANCEL_SEND"), threadId: z.string().min(1), clientMessageId: z.string().uuid() }),
   requestBase.extend({
     type: z.literal("CHAT_INTERRUPT"),
     threadId: z.string().min(1),

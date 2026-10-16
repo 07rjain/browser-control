@@ -13,6 +13,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:bridge": "node scripts/smoke-native-host.mjs",
+    "test:reviewer": "node scripts/probe-auto-review.mjs",
     "test:installed-host": "node scripts/smoke-installed-host.mjs",
     "install:host": "node scripts/install-native-host.mjs",
     "uninstall:host": "node scripts/uninstall-native-host.mjs",

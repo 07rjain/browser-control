@@ -7,15 +7,15 @@ type ExecutorCommand =
   | { type: "CODEX_PAGE_EXECUTOR"; action: "DESCRIBE"; snapshotId: string; refId: string }
   | { type: "CODEX_PAGE_EXECUTOR"; action: "REVALIDATE"; snapshotId: string; refId: string }
   | { type: "CODEX_PAGE_EXECUTOR"; action: "POPUP_GUARD_READY"; guardId: string }
-  | { type: "CODEX_PAGE_EXECUTOR"; action: "CLICK"; snapshotId: string; refId: string; popupGuardId?: string }
+  | { type: "CODEX_PAGE_EXECUTOR"; action: "CLICK"; snapshotId: string; refId: string; popupGuardId?: string; expectedTarget?: string }
   | { type: "CODEX_PAGE_EXECUTOR"; action: "FILL"; snapshotId: string; refId: string; value: string; mode: "replace" | "append" | "clear" }
   | { type: "CODEX_PAGE_EXECUTOR"; action: "SELECT"; snapshotId: string; refId: string; value: string }
   | { type: "CODEX_PAGE_EXECUTOR"; action: "CHECK"; snapshotId: string; refId: string; checked: boolean }
   | { type: "CODEX_PAGE_EXECUTOR"; action: "DRAG"; snapshotId: string; sourceRefId: string; targetRefId: string }
-  | { type: "CODEX_PAGE_EXECUTOR"; action: "KEYPRESS"; snapshotId: string; refId: string; key: string }
+  | { type: "CODEX_PAGE_EXECUTOR"; action: "KEYPRESS"; snapshotId: string; refId: string; key: string; expectedTarget?: string }
   | { type: "CODEX_PAGE_EXECUTOR"; action: "SCROLL"; direction: "up" | "down" | "top" | "bottom"; amount?: number }
   | { type: "CODEX_PAGE_EXECUTOR"; action: "SCROLL_ELEMENT"; snapshotId: string; refId: string }
-  | { type: "CODEX_PAGE_EXECUTOR"; action: "SUBMIT"; snapshotId: string; refId: string };
+  | { type: "CODEX_PAGE_EXECUTOR"; action: "SUBMIT"; snapshotId: string; refId: string; expectedTarget?: string };
 
 interface ExecutorGlobal {
   __codexPageExecutorInstalled?: boolean;
@@ -320,7 +320,7 @@ if (!executorGlobal.__codexPageExecutorInstalled) {
   function formPreview(
     form: HTMLFormElement | null,
     submitter: HTMLButtonElement | HTMLInputElement | null,
-  ): { action: string; method: string; target: string; fields: Array<{ name: string; value: string; sensitive: boolean }> } | null {
+  ) {
     if (!form) return null;
     const { action, method, target } = formDestination(form, submitter);
     const fields: Array<{ name: string; value: string; sensitive: boolean }> = [];
@@ -349,7 +349,40 @@ if (!executorGlobal.__codexPageExecutorInstalled) {
         sensitive: false,
       });
     }
-    return { action, method, target, fields };
+    // Approval evidence is deliberately stricter than the human preview:
+    // hidden, omitted, unnamed, oversized and sensitive controls prevent review.
+    const values: Array<{ name: string; value: string }> = [];
+    let complete = form.elements.length <= 30 && !form.querySelector("iframe,[contenteditable='true']") && !submitter?.name;
+    for (const control of Array.from(form.elements)) {
+      if (isCrossFrame(control, "HTMLButtonElement")) {
+        const button = control as HTMLButtonElement;
+        if (button.name && button.type === "submit") complete = false;
+        continue;
+      }
+      if (!(isInput(control) || isTextArea(control) || isSelect(control))) { complete = false; continue; }
+      if (control.disabled) continue;
+      if (isInput(control) && ["submit", "button", "reset", "image"].includes(control.type)) {
+        if (control.name && ["submit", "image"].includes(control.type)) complete = false;
+        continue;
+      }
+      if (isSensitive(control) || (isSelect(control) && control.multiple)) { complete = false; continue; }
+      const name = control.name;
+      const value = control.value;
+      if (!name || name.length > 120 || value.length > 300 || values.length >= 30) { complete = false; continue; }
+      if (isInput(control) && control.type === "hidden") {
+        if (!/^(visibility|status)$/i.test(name) || !/^(private|draft)$/i.test(value)) { complete = false; continue; }
+      } else if (!isVisible(control)) { complete = false; continue; }
+      if (isInput(control) && ["checkbox", "radio"].includes(control.type) && !control.checked) continue;
+      values.push({ name, value });
+    }
+    const labelled = form.getAttribute("aria-labelledby")?.split(/\s+/).map((id) => form.ownerDocument.getElementById(id)?.textContent ?? "").join(" ");
+    const rawLabel = form.getAttribute("aria-label") || labelled || "";
+    const rawRole = form.getAttribute("role") || "";
+    const review = {
+      complete: Boolean(complete) && rawLabel.length <= 120 && rawRole.length <= 60, label: text(rawLabel, 120), role: text(rawRole, 60), values,
+      hasUndo: Array.from(form.querySelectorAll("button,input[type='button']")).some((control) => isVisible(control) && !control.hasAttribute("disabled") && /^(undo|restore)\b/i.test(labelFor(control))),
+    };
+    return { action, method, target, fields, review };
   }
 
   function describe(element: Element, refId: string) {
@@ -605,6 +638,13 @@ if (!executorGlobal.__codexPageExecutorInstalled) {
     return typeof value === "string" && /^[\w-]{1,64}$/.test(value);
   }
 
+  function assertReviewed(element: Element, refId: string, expectedTarget?: string): void {
+    if (expectedTarget === undefined) return;
+    if (typeof expectedTarget !== "string" || expectedTarget.length > 24_000 || JSON.stringify(describe(element, refId)) !== expectedTarget) {
+      throw new Error("The reviewed page or form changed before execution. Inspect it again.");
+    }
+  }
+
   function handle(command: ExecutorCommand): unknown {
     switch (command.action) {
       case "PING":
@@ -630,6 +670,7 @@ if (!executorGlobal.__codexPageExecutorInstalled) {
           if (isSensitive(element)) throw new Error("Browser Control will not interact with sensitive fields.");
           const before = location.href;
           (element as HTMLElement).focus({ preventScroll: true });
+          assertReviewed(element, command.refId, command.expectedTarget);
           (element as HTMLElement).click();
           return { clicked: true, beforeUrl: before, label: labelFor(element) };
         } finally {
@@ -701,6 +742,7 @@ if (!executorGlobal.__codexPageExecutorInstalled) {
         assertInteractable(element);
         if (isSensitive(element)) throw new Error("Browser Control will not interact with sensitive fields.");
         element.focus({ preventScroll: true });
+        assertReviewed(element, command.refId, command.expectedTarget);
         if (command.key === "Tab") {
           const focusable = querySelectorAllDeep("a[href],button,input,textarea,select,[tabindex]:not([tabindex='-1'])")
             .filter(isVisible) as HTMLElement[];
@@ -737,6 +779,7 @@ if (!executorGlobal.__codexPageExecutorInstalled) {
           const invalid = Array.from(form.querySelectorAll(":invalid")).slice(0, 10).map(labelFor);
           return { submitted: false, validationFailed: true, invalidFields: invalid };
         }
+        assertReviewed(element, command.refId, command.expectedTarget);
         const submitter = submitterFor(element);
         const destination = formDestination(form, submitter);
         form.requestSubmit(submitter ?? undefined);

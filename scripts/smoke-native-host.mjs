@@ -6,7 +6,9 @@ import { fileURLToPath } from "node:url";
 import { encodeNativeMessage, LengthPrefixedJsonDecoder } from "../bridge/protocol.mjs";
 import { LEGACY_THREAD_ERROR } from "../bridge/restricted-threads.mjs";
 import { resolveCodexBinary } from "./host-paths.mjs";
-import { probeCodexTools } from "./probe-codex-tools.mjs";
+import { probeCodexTools, probeCodexImageInput, probeCodexReviewerTools } from "./probe-codex-tools.mjs";
+
+import { probeReviewerConcurrency } from "./reviewer-compatibility.mjs";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const temporaryHome = mkdtempSync(join(tmpdir(), "codex-sidebar-smoke-"));
@@ -89,6 +91,8 @@ function request(method, params) {
 
 try {
   const status = await request("bridge.status");
+  const reviewerCapabilities = await request("approval.capabilities");
+  if (reviewerCapabilities.version !== 2 || typeof reviewerCapabilities.available !== "boolean") throw new Error("Invalid reviewer capabilities.");
   const account = await request("account.read");
   const catalog = await request("models.list");
   if (status.connected !== true) throw new Error("Bridge did not report a connected state.");
@@ -135,9 +139,14 @@ try {
     if (error.message === LEGACY_THREAD_ERROR) throw new Error("chat.resume refused a restricted thread.");
   });
   process.stdout.write("Native bridge smoke test passed (isolated, signed-out account).\n");
+  for (const model of ["gpt-6-luna", "gpt-6.1-sol", "gpt-6-astra", "probe-unknown-model"]) await probeCodexReviewerTools(codexBinary, model);
+  await probeReviewerConcurrency(codexBinary);
+  process.stdout.write("Reviewer isolation and concurrent structured-output probes passed.\n");
   for (const result of await probeCodexTools(codexBinary)) {
     process.stdout.write(`Codex tools for ${result.label}: ${result.names.join(", ")}\n`);
   }
+  await probeCodexImageInput(codexBinary);
+  process.stdout.write("Codex local-image input passed with built-in image and shell tools disabled.\n");
 } catch (error) {
   process.stderr.write(`${stderr}\n`);
   throw error;
