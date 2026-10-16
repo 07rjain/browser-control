@@ -13,13 +13,16 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:bridge": "node scripts/smoke-native-host.mjs",
+    "test:reviewer": "node scripts/probe-auto-review.mjs",
     "test:installed-host": "node scripts/smoke-installed-host.mjs",
+    "test:release": "node scripts/smoke-release.mjs",
     "install:host": "node scripts/install-native-host.mjs",
     "uninstall:host": "node scripts/uninstall-native-host.mjs",
     "install:host:mac": "node scripts/install-native-host.mjs",
     "uninstall:host:mac": "node scripts/uninstall-native-host.mjs"
   },
   "dependencies": {
+    "pdfjs-dist": "5.6.205",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-markdown": "^10.1.0",

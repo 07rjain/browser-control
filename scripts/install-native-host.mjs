@@ -27,7 +27,7 @@ const companionVersion = "0.3.5";
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const layout = companionLayout(process.platform, homedir(), process.env, companionVersion);
 const installedHostScript = join(layout.runtimeDir, "native-host.mjs");
-const bridgeFiles = ["native-host.mjs", "protocol.mjs", "skills.mjs", "codex-launch.mjs", "login-proxy.mjs", "restricted-threads.mjs"];
+const bridgeFiles = ["native-host.mjs", "protocol.mjs", "skills.mjs", "codex-launch.mjs", "login-proxy.mjs", "restricted-threads.mjs", "uploads.mjs", "chat-input.mjs", "approval-reviewer.mjs", "reviewer-config.json", "chat-settings.mjs", "chat-config.json"];
 
 let codexBinary = "";
 try {

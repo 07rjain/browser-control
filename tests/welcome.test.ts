@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { greetingFor, setupSteps, STARTER_TASKS } from "../src/sidepanel/welcome";
+import { greetingFor, selectedModelLabel, setupSteps, STARTER_TASKS } from "../src/sidepanel/welcome";
 
 const states = (authState: Parameters<typeof setupSteps>[0], missing = false) =>
   setupSteps(authState, missing).map((step) => step.state);
@@ -30,5 +30,15 @@ describe("welcome home", () => {
 
   it("offers distinct starter tasks", () => {
     expect(new Set(STARTER_TASKS.map((task) => task.prompt)).size).toBe(STARTER_TASKS.length);
+  });
+
+  it("names the model shown beside attach", () => {
+    const models = [
+      { id: "gpt-5.5", name: "GPT-5.5", isDefault: true },
+      { id: "gpt-5.4", name: "GPT-5.4", isDefault: false },
+    ];
+    expect(selectedModelLabel(models, "")).toBe("GPT-5.5");
+    expect(selectedModelLabel(models, "gpt-5.4")).toBe("GPT-5.4");
+    expect(selectedModelLabel([], "")).toBe("Codex default");
   });
 });

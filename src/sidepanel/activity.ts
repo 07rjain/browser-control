@@ -1,3 +1,4 @@
+import type { ReviewActivity } from "../shared/auto-review";
 import type { BrowserPermissionMode } from "../shared/page-tools";
 
 export interface ToolStatus {
@@ -12,6 +13,7 @@ export interface ToolStatus {
   error?: string;
   permissionMode?: BrowserPermissionMode;
   confirmationBypassed?: boolean;
+  review?: ReviewActivity;
   target?: {
     label?: string;
     title?: string;
@@ -24,9 +26,18 @@ export interface ToolStatus {
   };
 }
 
+export function latestToolStatuses(statuses: ToolStatus[]): ToolStatus[] {
+  const calls = new Map<string, ToolStatus>();
+  for (const status of statuses) {
+    const key = JSON.stringify([status.threadId, status.turnId, status.callId]);
+    calls.set(key, { ...calls.get(key), ...status });
+  }
+  return [...calls.values()];
+}
+
 export function groupToolStatuses(statuses: ToolStatus[]): Map<string, ToolStatus[]> {
   const groups = new Map<string, ToolStatus[]>();
-  for (const status of statuses) {
+  for (const status of latestToolStatuses(statuses)) {
     if (!status.turnId) continue;
     const group = groups.get(status.turnId) ?? [];
     group.push(status);
@@ -54,9 +65,7 @@ export function summarizeToolStatuses(statuses: ToolStatus[]): {
   actionCount: number;
   failed: boolean;
 } {
-  const latestByCall = new Map<string, ToolStatus>();
-  for (const status of statuses) latestByCall.set(status.callId, status);
-  const calls = [...latestByCall.values()];
+  const calls = latestToolStatuses(statuses);
   return {
     actionCount: calls.filter((status) => status.namespace !== "skills").length,
     failed: calls.some((status) => ["failed", "rejected", "canceled", "stale"].includes(status.status)),

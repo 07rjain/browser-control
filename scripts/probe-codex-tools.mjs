@@ -1,10 +1,10 @@
-import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { APP_SERVER_ARGS } from "../bridge/codex-launch.mjs";
 import { CODEX_THREAD_RESTRICTIONS, JsonLineDecoder } from "../bridge/protocol.mjs";
+import { spawnProbeCodex, stopProbeProcess } from "./probe-process.mjs";
 
 // Built-in tools Codex may still offer once CODEX_THREAD_RESTRICTIONS apply.
 // request_user_input server requests are rejected by the native host, and
@@ -47,10 +47,7 @@ async function withFakeProvider(run) {
 }
 
 function startAppServer(codexBinary, home, args) {
-  const child = spawn(codexBinary, args, {
-    env: { ...process.env, CODEX_HOME: home },
-    stdio: ["pipe", "pipe", "pipe"],
-  });
+  const child = spawnProbeCodex(codexBinary, home, args);
   const decoder = new JsonLineDecoder();
   const pending = new Map();
   const turnWaiters = [];
@@ -89,11 +86,13 @@ function startAppServer(codexBinary, home, args) {
   return { child, request, notify, turnFinished };
 }
 
-async function capturedTools(codexBinary, model, { resumeUnrestricted }) {
+async function capturedTools(codexBinary, model, { resumeUnrestricted, imageInput = false, reviewer = false }) {
   return withFakeProvider(async (port, requests) => {
     const home = mkdtempSync(join(tmpdir(), "codex-tool-probe-"));
     const workspace = join(home, "workspace");
     mkdirSync(workspace);
+    const imagePath = join(home, "attached-image.png");
+    if (imageInput) writeFileSync(imagePath, Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEElEQVR4nGP4z8AARAwQCgAf7gP9i18U1AAAAABJRU5ErkJggg==", "base64"));
     writeFileSync(join(home, "config.toml"), [
       `model = "${model}"`,
       `model_provider = "probe"`,
@@ -142,8 +141,9 @@ async function capturedTools(codexBinary, model, { resumeUnrestricted }) {
         const finished = server.turnFinished();
         await server.request("turn/start", {
           threadId,
-          input: [{ type: "text", text: "probe", text_elements: [] }],
+          input: [{ type: "text", text: "probe", text_elements: [] }, ...(imageInput ? [{ type: "localImage", path: imagePath }] : [])],
           approvalPolicy: "never",
+          ...(reviewer ? { outputSchema: { type: "object", properties: { decision: { type: "string", enum: ["ask_user"] } }, required: ["decision"], additionalProperties: false }, effort: "low" } : {}),
         });
         await finished;
       };
@@ -156,23 +156,23 @@ async function capturedTools(codexBinary, model, { resumeUnrestricted }) {
         const started = await server.request("thread/start", { ...base, ephemeral: false, historyMode: "legacy", dynamicTools });
         threadId = started.thread.id;
         await runTurn(server, threadId);
-        server.child.kill("SIGTERM");
-        await new Promise((resolveExit) => server.child.once("exit", resolveExit));
+        await stopProbeProcess(server.child);
         requests.length = 0;
         server = await connect();
         await server.request("thread/resume", { threadId, ...restricted, excludeTurns: true, dynamicTools });
       } else {
         server = await connect();
-        const started = await server.request("thread/start", { ...restricted, ephemeral: true, dynamicTools });
+        const started = await server.request("thread/start", { ...restricted, ephemeral: true, dynamicTools: reviewer ? [] : dynamicTools });
         threadId = started.thread.id;
       }
       await runTurn(server, threadId);
-      const bodies = requests.filter((body) => body && Array.isArray(body.tools));
+      const bodies = requests.filter((body) => body && (Array.isArray(body.tools) || (reviewer && Array.isArray(body.input))));
       if (bodies.length === 0) throw new Error(`Codex sent no model request for ${model}.`);
+      if (imageInput && !bodies.some((body) => body.input?.some((item) => item.content?.some((part) => part.type === "input_image" && part.image_url?.startsWith("data:image/"))))) throw new Error(`Codex did not forward the attached local image to the model. Input shape: ${JSON.stringify(bodies.map((body) => body.input?.map((item) => ({ type: item.type, content: item.content?.map((part) => ({ type: part.type, text: part.text?.slice(0,160) })) }))))}`);
       return [...new Set(bodies.flatMap(toolNames))];
     } finally {
-      for (const server of servers) server.child.kill("SIGTERM");
-      rmSync(home, { recursive: true, force: true });
+      await Promise.all(servers.map(({ child }) => stopProbeProcess(child)));
+      rmSync(home, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
     }
   });
 }
@@ -191,4 +191,17 @@ export async function probeCodexTools(codexBinary) {
     }
   }
   return results;
+}
+
+export async function probeCodexImageInput(codexBinary) {
+  const names = await capturedTools(codexBinary, "gpt-5.5", { resumeUnrestricted: false, imageInput: true });
+  if (names.includes("view_image") || names.includes("shell")) throw new Error("Attachment input unexpectedly enabled local tools.");
+  return { imageForwarded: true, names };
+}
+
+export async function probeCodexReviewerTools(codexBinary, model = "gpt-6-luna") {
+  const names = await capturedTools(codexBinary, model, { resumeUnrestricted: false, reviewer: true });
+  const unexpected = names.filter((name) => name !== "request_user_input");
+  if (unexpected.length) throw new Error(`${model} reviewer exposes executable tools: ${unexpected.join(", ")}`);
+  return { model, names };
 }

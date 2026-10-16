@@ -24,6 +24,10 @@ export interface PageTargetDescription {
     method: string;
     target?: string;
     fields: Array<{ name: string; value: string; sensitive: boolean }>;
+    review?: {
+      complete: boolean; label: string; role: string; hasUndo: boolean;
+      values: Array<{ name: string; value: string }>;
+    };
   } | null;
 }
 

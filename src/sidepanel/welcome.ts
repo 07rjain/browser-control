@@ -72,6 +72,16 @@ export function setupSteps(authState: AuthState, companionMissing: boolean): Set
   ];
 }
 
+export function selectedModelLabel(
+  models: readonly { id: string; name: string; isDefault: boolean }[],
+  selectedId: string,
+): string {
+  const selected = models.find((model) => model.id === selectedId);
+  if (selected) return selected.name;
+  if (!selectedId) return models.find((model) => model.isDefault)?.name ?? "Codex default";
+  return "Codex default";
+}
+
 export function greetingFor(hour: number): string {
   if (hour >= 5 && hour < 12) return "Good morning";
   if (hour >= 12 && hour < 18) return "Good afternoon";

@@ -213,7 +213,7 @@ async function withPopupClickLock<T>(tabId: number, run: () => Promise<T>): Prom
   }
 }
 
-async function clickWithPopupGuard(ref: ElementRef, taskTabId?: number): Promise<Record<string, unknown>> {
+async function clickWithPopupGuard(ref: ElementRef, taskTabId?: number, expectedTarget?: string): Promise<Record<string, unknown>> {
   if (taskTabId !== undefined && ref.tabId !== taskTabId) {
     throw new Error("The page element does not belong to this task's working tab. Inspect the working tab again.");
   }
@@ -236,6 +236,7 @@ async function clickWithPopupGuard(ref: ElementRef, taskTabId?: number): Promise
       snapshotId: ref.snapshotId,
       refId: ref.id,
       popupGuardId: guardId,
+      ...(expectedTarget ? { expectedTarget } : {}),
     });
   } catch (error) {
     clickError = error;
@@ -375,13 +376,13 @@ export async function describePageTarget(call: PageToolCall, refreshExpired = fa
   return withRef<PageTargetDescription>(args.ref, refreshExpired ? "REVALIDATE" : "DESCRIBE", undefined, taskTabId);
 }
 
-export async function executePageTool(call: PageToolCall, taskTabId?: number): Promise<unknown> {
+export async function executePageTool(call: PageToolCall, taskTabId?: number, expectedTarget?: string): Promise<unknown> {
   switch (call.tool) {
     case "inspect":
       return inspectActivePage(call, taskTabId);
     case "click": {
       const args = clickArgumentsSchema.parse(call.arguments);
-      return withPopupClickLock(args.ref.tabId, () => clickWithPopupGuard(args.ref, taskTabId));
+      return withPopupClickLock(args.ref.tabId, () => clickWithPopupGuard(args.ref, taskTabId, expectedTarget));
     }
     case "fill": {
       const args = fillArgumentsSchema.parse(call.arguments);
@@ -413,7 +414,7 @@ export async function executePageTool(call: PageToolCall, taskTabId?: number): P
     }
     case "keypress": {
       const args = keypressArgumentsSchema.parse(call.arguments);
-      return withRef(args.ref, "KEYPRESS", { key: args.key }, taskTabId);
+      return withRef(args.ref, "KEYPRESS", { key: args.key, ...(expectedTarget ? { expectedTarget } : {}) }, taskTabId);
     }
     case "scroll": {
       const args = scrollArgumentsSchema.parse(call.arguments);
@@ -444,7 +445,7 @@ export async function executePageTool(call: PageToolCall, taskTabId?: number): P
     }
     case "submit": {
       const args = submitArgumentsSchema.parse(call.arguments);
-      const result = await withRef<Record<string, unknown>>(args.ref, "SUBMIT", undefined, taskTabId);
+      const result = await withRef<Record<string, unknown>>(args.ref, "SUBMIT", expectedTarget ? { expectedTarget } : undefined, taskTabId);
       await new Promise((resolve) => setTimeout(resolve, 150));
       const tab = await chrome.tabs.get(args.ref.tabId);
       return { ...result, url: tab.url ?? "", title: tab.title ?? "", status: tab.status ?? "unknown" };

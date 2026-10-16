@@ -17,11 +17,20 @@ import {
   normalizeBrowserTaskActionLimit,
   type BrowserPermissionMode,
 } from "../shared/page-tools";
+import { AUTO_REVIEW_SETTINGS_KEY, DEFAULT_AUTO_REVIEW, REVIEW_MODEL, DEFAULT_REVIEW_SYSTEM_PROMPT, REQUIRED_REVIEW_INSTRUCTIONS, MAX_REVIEW_SYSTEM_PROMPT, autoReviewSettingsSchema, readAutoReviewSettings, reviewCapabilitiesSchema, type AutoReviewSettings } from "../shared/auto-review";
 import { IDLE_RECORDING_VIEW, recordingStepSummary, type RecordingView } from "../shared/skill-recording";
 import { COMPANION_INSTALL_COMMAND, isLegacyThreadError, isMissingNativeHost } from "../shared/companion-setup";
-import { activityStepLabel, groupToolStatuses, hasBrowserActivityForTurn, summarizeToolStatuses, visibleActivityFormFields, type ToolStatus } from "./activity";
+import { activityStepLabel, groupToolStatuses, hasBrowserActivityForTurn, latestToolStatuses, summarizeToolStatuses, visibleActivityFormFields, type ToolStatus } from "./activity";
 import { settleCanceledMessages, type ChatMessage } from "./chat-state";
-import { greetingFor, setupSteps, STARTER_TASKS, type AuthState, type StarterTask } from "./welcome";
+import { MAX_ATTACHED_FILES, readAttachedFile, type AttachedFile } from "./attached-files";
+import { FILE_LIMITS, type AttachmentSummary, type AttachmentOperation } from "../shared/attachments";
+import { checkCanceled, preparePdf, releasePreparedFile } from "./attachments/prepare";
+import { uploadPreparedFiles, type AttachmentTransport } from "./attachments/transfer";
+import { FileCards, SentFiles } from "./attachments/FileCards";
+import ChatPromptSettings from "./ChatPromptSettings";
+import SettingsPanel from "./SettingsPanel";
+import { COMPLETION_NOTICE_DURATION_MS, freshCompletionNotice, type CompletionNotice } from "../shared/completion-notice";
+import { greetingFor, selectedModelLabel, setupSteps, STARTER_TASKS, type AuthState, type StarterTask } from "./welcome";
 import {
   createConversationRecord,
   readConversationHistory,
@@ -79,17 +88,28 @@ interface ModelOption {
   name: string;
   description: string;
   isDefault: boolean;
+  inputModalities?: string[];
 }
 
 interface RetryPayload {
   displayText: string;
-  outboundText: string;
+  userText: string;
+  pageContext?: PageAttachment;
+  files: AttachedFile[];
+  attachments?: AttachmentSummary[];
+  owner: string;
+  clientMessageId: string;
+  userMessageId: string;
+  threadId?: string;
+  accepted?: boolean;
+  model?: string;
 }
 
 const INITIAL_STATE: PersistedState = { threadId: null, messages: [], theme: "system", selectedModel: "", completionSoundEnabled: false };
 const STORAGE_KEY = SIDEBAR_STATE_STORAGE_KEY;
 const CONVERSATION_SAVE_DELAY_MS = 400;
 const PAGE_ORIGINS_KEY = "codexSidebarGrantedPageOrigins";
+const VISIBLE_MODELS_KEY = "codexSidebarVisibleModels";
 const COMPANION_SUPPORT_URL = "https://07rjain.github.io/browser-control-support/support.html";
 
 class ExtensionRequestError extends Error {
@@ -117,16 +137,7 @@ async function sendRequest<T>(request: Record<string, unknown>): Promise<T> {
   return response.data as T;
 }
 
-function formatPageContext(text: string, attachment: PageAttachment | null): string {
-  if (!attachment) return text;
-  const selected = attachment.selectedText
-    ? `\n\nSelected text:\n${attachment.selectedText}`
-    : "";
-  const body = attachment.readableText
-    ? `\n\nReadable page text${attachment.truncated ? " (truncated)" : ""}:\n${attachment.readableText}`
-    : "";
-  return `${text}\n\n--- BEGIN USER-ATTACHED UNTRUSTED PAGE CONTEXT ---\nTitle: ${attachment.title}\nURL: ${attachment.url}${selected}${body}\n--- END USER-ATTACHED UNTRUSTED PAGE CONTEXT ---`;
-}
+const attachmentTransport: AttachmentTransport = <T,>(request: AttachmentOperation) => sendRequest<T>({ type: "ATTACHMENTS_REQUEST", request });
 
 function compactPlan(plan: string | null): string {
   if (!plan) return "ChatGPT";
@@ -172,11 +183,12 @@ function ToolActivity({ statuses, complete }: { statuses: ToolStatus[]; complete
         <strong>{complete ? (summary.failed ? "Needs attention" : "Completed") : "Working"}</strong>
       </summary>
       <ol className="tool-steps">
-        {statuses.map((status, index) => (
-          <li key={`${status.callId}-${status.status}-${status.timestamp ?? index}`}>
+        {statuses.map((status) => (
+          <li key={status.callId}>
             <span>{activityStepLabel(status)}</span>
             <strong>{status.status}</strong>
             {status.origin && <small>{status.origin}</small>}
+            {status.review && <small className="tool-step-review">{status.review.source === "user" ? "You" : status.review.status === "ask_user" ? "Your review needed" : status.review.model} · {status.review.reason}</small>}
             {status.confirmationBypassed && (
               <small className="tool-step-bypass">
                 Full access · approval skipped{status.target?.label ? ` for ${status.target.label}` : ""}
@@ -310,18 +322,39 @@ export default function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [attachment, setAttachment] = useState<PageAttachment | null>(null);
+  const [attachingPage, setAttachingPage] = useState(false);
+  const pageAttachmentRequestRef = useRef({ generation: 0, pending: false });
+  const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
+  const [fileProgress, setFileProgress] = useState<string | null>(null);
+  const [preparingFiles, setPreparingFiles] = useState(false);
+  const preparationRef = useRef<AbortController | null>(null);
+  const sendAbortRef = useRef<AbortController | null>(null);
+  const filesRef = useRef<AttachedFile[]>([]);
+  const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [activeTurnId, setActiveTurnId] = useState<string | null>(null);
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [desktopOs, setDesktopOs] = useState("");
   const [theme, setTheme] = useState<Theme>("system");
   const [selectedModel, setSelectedModel] = useState("");
+  const [visibleModelIds, setVisibleModelIds] = useState<string[] | null>(null);
+  const modelPreferencesRef = useRef({ selectedModel, visibleModelIds });
   const [browserPermissionMode, setBrowserPermissionMode] = useState<BrowserPermissionMode>(DEFAULT_BROWSER_PERMISSION_MODE);
+  const [autoReview, setAutoReview] = useState<AutoReviewSettings>({ ...DEFAULT_AUTO_REVIEW });
+  const [reviewerPromptDraft, setReviewerPromptDraft] = useState(DEFAULT_REVIEW_SYSTEM_PROMPT);
+  const [reviewerSettingsError, setReviewerSettingsError] = useState<string | null>(null);
+  const [reviewerSettingsNotice, setReviewerSettingsNotice] = useState<string | null>(null);
+  const [reviewerSettingsSaving, setReviewerSettingsSaving] = useState(false);
+  const [reviewerAvailable, setReviewerAvailable] = useState(false);
+  const permissionMode = autoReview.enabled && browserPermissionMode === "ask" ? "auto" : browserPermissionMode;
   const [fullSiteAccessGranted, setFullSiteAccessGranted] = useState(false);
   const [browserTaskActionLimit, setBrowserTaskActionLimit] = useState(DEFAULT_BROWSER_TASK_ACTION_LIMIT);
   const [browserTaskActionLimitDraft, setBrowserTaskActionLimitDraft] = useState(String(DEFAULT_BROWSER_TASK_ACTION_LIMIT));
   const [completionSoundEnabled, setCompletionSoundEnabled] = useState(false);
-  const [completionNotice, setCompletionNotice] = useState<string | null>(null);
+  const [completionNotice, setCompletionNotice] = useState<CompletionNotice | null>(null);
+  const showCompletionNotice = useCallback((message: string) => {
+    setCompletionNotice({ message, timestamp: Date.now() });
+  }, []);
   const [models, setModels] = useState<ModelOption[]>([]);
   const [toolApproval, setToolApproval] = useState<ToolApproval | null>(null);
   const [toolPermission, setToolPermission] = useState<ToolPermission | null>(null);
@@ -337,6 +370,8 @@ export default function App() {
   const [forkingMessageId, setForkingMessageId] = useState<string | null>(null);
   const [taughtSkills, setTaughtSkills] = useState<SidebarSkill[]>([]);
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const modelPickerRef = useRef<HTMLDivElement>(null);
   const [skillsError, setSkillsError] = useState<string | null>(null);
   const [recording, setRecording] = useState<RecordingView>(IDLE_RECORDING_VIEW);
   const [recordingError, setRecordingError] = useState<string | null>(null);
@@ -358,6 +393,19 @@ export default function App() {
 
   const streaming = activeTurnId !== null || isSending;
   const recordingActive = recording.status !== "idle";
+
+  useEffect(() => {
+    const retainedUrls = new Set(attachedFiles.flatMap((file) => file.pages.map((page) => page.previewUrl)));
+    for (const file of filesRef.current) for (const page of file.pages) if (!retainedUrls.has(page.previewUrl)) URL.revokeObjectURL(page.previewUrl);
+    filesRef.current = attachedFiles;
+  }, [attachedFiles]);
+  useEffect(() => () => {
+    pageAttachmentRequestRef.current.generation += 1;
+    pageAttachmentRequestRef.current.pending = false;
+    preparationRef.current?.abort();
+    sendAbortRef.current?.abort();
+    for (const file of filesRef.current) releasePreparedFile(file);
+  }, []);
   const activeBrowserTask = streaming && hasBrowserActivityForTurn(toolStatuses, activeTurnId);
 
   const refreshAccount = useCallback(async () => {
@@ -377,8 +425,17 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (!modelMenuOpen) return;
+    const close = (event: PointerEvent) => {
+      if (!(event.target instanceof Node) || !modelPickerRef.current?.contains(event.target)) setModelMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", close);
+    return () => document.removeEventListener("pointerdown", close);
+  }, [modelMenuOpen]);
+
+  useEffect(() => {
     void chrome.storage.local
-      .get([STORAGE_KEY, BROWSER_PERMISSION_MODE_KEY, BROWSER_TASK_ACTION_LIMIT_KEY, FULL_ACCESS_HOST_GRANT_KEY])
+      .get([STORAGE_KEY, AUTO_REVIEW_SETTINGS_KEY, VISIBLE_MODELS_KEY, BROWSER_PERMISSION_MODE_KEY, BROWSER_TASK_ACTION_LIMIT_KEY, FULL_ACCESS_HOST_GRANT_KEY])
       .then(async (stored) => {
         const state = (stored[STORAGE_KEY] as PersistedState | undefined) ?? INITIAL_STATE;
         const restoredHistory = readConversationHistory(state.conversationHistory);
@@ -407,10 +464,20 @@ export default function App() {
           ),
         ));
         setTheme(state.theme ?? "system");
-        setSelectedModel(state.selectedModel ?? "");
+        const visibleModels = stored[VISIBLE_MODELS_KEY];
+        let restoredVisibleModels: string[] | null = null;
+        if (Array.isArray(visibleModels) && visibleModels.length > 0 && visibleModels.length <= 200 && visibleModels.every((id) => typeof id === "string" && id.length <= 200)) {
+          restoredVisibleModels = [...new Set(visibleModels as string[])];
+        }
+        setVisibleModelIds(restoredVisibleModels);
+        const restoredModel = state.selectedModel ?? "";
+        setSelectedModel(restoredVisibleModels && !restoredVisibleModels.includes(restoredModel) ? restoredVisibleModels[0] : restoredModel);
         setCompletionSoundEnabled(Boolean(state.completionSoundEnabled));
         completionSoundEnabledRef.current = Boolean(state.completionSoundEnabled);
         setBrowserPermissionMode(normalizeBrowserPermissionMode(stored[BROWSER_PERMISSION_MODE_KEY]));
+        const restoredReview = readAutoReviewSettings(stored[AUTO_REVIEW_SETTINGS_KEY]);
+        setAutoReview(restoredReview);
+        setReviewerPromptDraft(restoredReview.systemPrompt);
         const storedActionLimit = normalizeBrowserTaskActionLimit(stored[BROWSER_TASK_ACTION_LIMIT_KEY]);
         setBrowserTaskActionLimit(storedActionLimit);
         setBrowserTaskActionLimitDraft(String(storedActionLimit));
@@ -428,21 +495,48 @@ export default function App() {
     void sendRequest<{
       activities: ToolStatus[];
       prompts: Array<{ type: "approval" | "permission"; data: ToolApproval | ToolPermission }>;
-      completionNotice?: { message?: string } | null;
+      completionNotice?: CompletionNotice | null;
     }>({ type: "BROWSER_STATE_READ" }).then((state) => {
-      setToolStatuses(Array.isArray(state.activities) ? state.activities.slice(-100) : []);
+      setToolStatuses(Array.isArray(state.activities) ? latestToolStatuses(state.activities).slice(-100) : []);
       const approval = state.prompts.find((prompt) => prompt.type === "approval");
       const permission = state.prompts.find((prompt) => prompt.type === "permission");
       if (approval) setToolApproval(approval.data as ToolApproval);
       if (permission) setToolPermission(permission.data as ToolPermission);
-      if (state.completionNotice?.message) setCompletionNotice(state.completionNotice.message);
+      const notice = freshCompletionNotice(state.completionNotice);
+      if (notice) setCompletionNotice(notice);
     }).catch(() => undefined);
   }, []);
 
   useEffect(() => {
+    if (!completionNotice) return;
+    const remaining = Math.max(0, completionNotice.timestamp + COMPLETION_NOTICE_DURATION_MS - Date.now());
+    const timer = window.setTimeout(() => {
+      setCompletionNotice(null);
+      void sendRequest({ type: "COMPLETION_NOTICE_DISMISS" }).catch(() => undefined);
+    }, remaining);
+    return () => window.clearTimeout(timer);
+  }, [completionNotice]);
+
+  useEffect(() => {
+    modelPreferencesRef.current = { selectedModel, visibleModelIds };
+  }, [selectedModel, visibleModelIds]);
+
+  useEffect(() => {
     if (authState !== "ready") return;
+    void sendRequest({ type: "AUTO_REVIEW_READ" }).then((result) => {
+      const capabilities = reviewCapabilitiesSchema.safeParse(result);
+      setReviewerAvailable(capabilities.success && capabilities.data.available);
+    }).catch(() => setReviewerAvailable(false));
     void sendRequest<{ models: ModelOption[] }>({ type: "MODELS_READ" })
-      .then((result) => setModels(result.models))
+      .then((result) => {
+        setModels(result.models);
+        const available = new Set(["", ...result.models.map((model) => model.id)]);
+        const preferences = modelPreferencesRef.current;
+        const enabled = preferences.visibleModelIds?.filter((id) => available.has(id)) ?? [...available];
+        if (enabled.length === 0) enabled.push("");
+        setVisibleModelIds(preferences.visibleModelIds === null ? null : enabled);
+        setSelectedModel(enabled.includes(preferences.selectedModel) ? preferences.selectedModel : enabled[0]);
+      })
       .catch(() => setModels([]));
   }, [authState]);
 
@@ -538,6 +632,12 @@ export default function App() {
   }, [browserPermissionMode, hydrated]);
 
   useEffect(() => {
+    if (!hydrated) return;
+    if (visibleModelIds === null) void chrome.storage.local.remove(VISIBLE_MODELS_KEY);
+    else void chrome.storage.local.set({ [VISIBLE_MODELS_KEY]: visibleModelIds });
+  }, [visibleModelIds, hydrated]);
+
+  useEffect(() => {
     document.documentElement.dataset.theme = theme;
   }, [theme]);
 
@@ -610,15 +710,20 @@ export default function App() {
         case "chat.turnCompleted": {
           const wasStopped = stopRequestedRef.current;
           const completedBrowserTask = turnExecutedToolRef.current;
+          const data = message.data as { turn?: { status?: string; error?: { message?: string } } };
+          const failed = !wasStopped && data.turn?.status === "failed";
           stopRequestedRef.current = false;
           turnExecutedToolRef.current = false;
           setActiveTurnId(null);
           setIsSending(false);
-          setRetryPayload(null);
+          setRetryPayload(failed && !completedBrowserTask ? inFlightPayloadRef.current : null);
           inFlightPayloadRef.current = null;
-          setMessages(settleCanceledMessages);
-          if (completedBrowserTask && !wasStopped) {
-            setCompletionNotice("Task complete — you can check the result when you’re ready.");
+          if (failed) {
+            setError(data.turn?.error?.message ?? "Codex could not process this message. Check the selected model and attachments before retrying.");
+            setMessages((current) => current.map((item) => item.streaming ? { ...item, streaming: false, failed: true } : item));
+          } else setMessages(settleCanceledMessages);
+          if (completedBrowserTask && !wasStopped && !failed) {
+            showCompletionNotice("Task complete — you can check the result when you’re ready.");
             if (completionSoundEnabledRef.current) void playCompletionSound();
           }
           break;
@@ -654,7 +759,7 @@ export default function App() {
         case "tool.status": {
           const status = message.data as ToolStatus;
           if (status.status === "succeeded") turnExecutedToolRef.current = true;
-          setToolStatuses((current) => [...current, status].slice(-100));
+          setToolStatuses((current) => latestToolStatuses([...current, status]).slice(-100));
           if (["succeeded", "failed", "rejected", "canceled", "stale"].includes(status.status)) {
             setToolApproval((current) => (current?.callId === status.callId ? null : current));
             setToolPermission((current) => (current?.callId === status.callId ? null : current));
@@ -668,7 +773,7 @@ export default function App() {
     };
     chrome.runtime.onMessage.addListener(listener);
     return () => chrome.runtime.onMessage.removeListener(listener);
-  }, [refreshAccount, refreshSkills]);
+  }, [refreshAccount, refreshSkills, showCompletionNotice]);
 
   const signIn = async () => {
     setAuthState("authenticating");
@@ -698,12 +803,22 @@ export default function App() {
     setMenuOpen(false);
   };
 
-  const attachPage = async () => {
-    setError(null);
+  const clearPageAttachment = () => {
+    pageAttachmentRequestRef.current = { generation: pageAttachmentRequestRef.current.generation + 1, pending: false };
+    setAttachingPage(false);
+    setAttachment(null);
     setPendingPageOrigin(null);
+  };
+
+  const capturePageAttachment = async () => {
+    const generation = pageAttachmentRequestRef.current.generation + 1;
+    pageAttachmentRequestRef.current = { generation, pending: true };
+    setAttachingPage(true);
     try {
-      setAttachment(await sendRequest<PageAttachment>({ type: "PAGE_ATTACH" }));
+      const page = await sendRequest<PageAttachment>({ type: "PAGE_ATTACH" });
+      if (pageAttachmentRequestRef.current.generation === generation) setAttachment(page);
     } catch (cause) {
+      if (pageAttachmentRequestRef.current.generation !== generation) return;
       if (cause instanceof ExtensionRequestError && cause.code === "PAGE_PERMISSION_REQUIRED") {
         const originPattern = (cause.details as { originPattern?: unknown } | undefined)?.originPattern;
         if (typeof originPattern === "string") {
@@ -713,29 +828,96 @@ export default function App() {
         }
       }
       setError(cause instanceof Error ? cause.message : "This page cannot be attached.");
+    } finally {
+      if (pageAttachmentRequestRef.current.generation === generation) {
+        pageAttachmentRequestRef.current.pending = false;
+        setAttachingPage(false);
+      }
     }
+  };
+
+  const attachPage = async () => {
+    setError(null);
+    if (attachment || pageAttachmentRequestRef.current.pending || pendingPageOrigin) { clearPageAttachment(); return; }
+    setPendingPageOrigin(null);
+    await capturePageAttachment();
+  };
+
+  const addFiles = async (picked: File[]) => {
+    if (picked.length === 0 || preparationRef.current || streaming || recordingActive) return;
+    const room = MAX_ATTACHED_FILES - attachedFiles.length;
+    if (room <= 0) {
+      setError(`You can add up to ${MAX_ATTACHED_FILES} files.`);
+      return;
+    }
+    const accepted: AttachedFile[] = [];
+    const problems: string[] = [];
+    const controller = new AbortController();
+    preparationRef.current = controller;
+    setPreparingFiles(true);
+    try {
+      let totalBytes = attachedFiles.reduce((sum, file) => sum + file.bytes, 0);
+      for (const file of picked.slice(0, room)) {
+        checkCanceled(controller.signal);
+        setFileProgress(`Preparing ${file.name}…`);
+        try {
+          if (totalBytes + file.size > FILE_LIMITS.batchBytes) throw new Error("Choose at most 40 MiB of files per message.");
+          accepted.push(await readAttachedFile(file, { signal: controller.signal }));
+          totalBytes += file.size;
+        } catch (cause) {
+          checkCanceled(controller.signal);
+          problems.push(cause instanceof Error ? cause.message : "That file could not be added.");
+        }
+      }
+      if (picked.length > room) problems.push(`Only ${MAX_ATTACHED_FILES} files can be added.`);
+      if (accepted.length > 0) { setAttachedFiles((current) => [...current, ...accepted].slice(0, MAX_ATTACHED_FILES)); setError(null); }
+      if (problems.length > 0) setError(problems.join(" "));
+    } catch (cause) {
+      for (const file of accepted) releasePreparedFile(file);
+      if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : "Unable to prepare files.");
+    } finally {
+      if (preparationRef.current === controller) { preparationRef.current = null; setPreparingFiles(false); setFileProgress(null); }
+    }
+  };
+
+  const prepareFileRange = async (file: AttachedFile, range: string) => {
+    if (!file.source || preparationRef.current || streaming) return;
+    const controller = new AbortController();
+    preparationRef.current = controller;
+    setPreparingFiles(true); setFileProgress(`Preparing selected pages of ${file.name}…`); setError(null);
+    try {
+      const prepared = await preparePdf(file.source, controller.signal, range);
+      checkCanceled(controller.signal);
+      setAttachedFiles((current) => current.map((item) => item.id === file.id ? { ...prepared, id: file.id, name: file.name, bytes: file.bytes, kind: file.kind, notice: file.notice ?? prepared.notice } : item));
+    } catch (cause) { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : "Unable to prepare those pages."); }
+    finally { if (preparationRef.current === controller) { preparationRef.current = null; setPreparingFiles(false); setFileProgress(null); } }
   };
 
   const grantPageAccess = async () => {
     if (!pendingPageOrigin) return;
     const originPattern = pendingPageOrigin;
+    const generation = pageAttachmentRequestRef.current.generation;
     try {
       const granted = await chrome.permissions.request({ origins: [originPattern] });
+      if (pageAttachmentRequestRef.current.generation !== generation) return;
       if (!granted) {
         setError("Site access was not granted. No page content was read.");
         return;
       }
       const stored = await chrome.storage.local.get(PAGE_ORIGINS_KEY);
+      if (pageAttachmentRequestRef.current.generation !== generation) return;
       const current = Array.isArray(stored[PAGE_ORIGINS_KEY])
         ? (stored[PAGE_ORIGINS_KEY] as string[])
         : [];
       await chrome.storage.local.set({
         [PAGE_ORIGINS_KEY]: [...new Set([...current, originPattern])],
       });
+      if (pageAttachmentRequestRef.current.generation !== generation) return;
       setPendingPageOrigin(null);
       setError(null);
-      setAttachment(await sendRequest<PageAttachment>({ type: "PAGE_ATTACH" }));
+      await capturePageAttachment();
     } catch (cause) {
+      if (pageAttachmentRequestRef.current.generation !== generation) return;
       setError(cause instanceof Error ? cause.message : "Unable to grant access to this site.");
     }
   };
@@ -760,17 +942,47 @@ export default function App() {
     }
   };
 
-  const changeBrowserPermissionMode = async (mode: BrowserPermissionMode) => {
-    if (mode === "full") {
-      const granted = await requestFullSiteAccess();
-      if (granted) setBrowserPermissionMode("full");
+  const changeBrowserPermissionMode = async (mode: BrowserPermissionMode | "auto") => {
+    if (mode === "auto" && !reviewerAvailable) return;
+    if (mode === "full" && !(await requestFullSiteAccess())) return;
+    const nextReview = { ...autoReview, enabled: mode === "auto" };
+    // Persist legacy Ask with the additive review flag in one storage update.
+    await chrome.storage.local.set({ [BROWSER_PERMISSION_MODE_KEY]: mode === "full" ? "full" : "ask", [AUTO_REVIEW_SETTINGS_KEY]: nextReview });
+    setAutoReview(nextReview);
+    setBrowserPermissionMode(mode === "full" ? "full" : "ask");
+    if (mode !== "full") {
+      setFullSiteAccessGranted(false);
+      await chrome.storage.local.remove(FULL_ACCESS_HOST_GRANT_KEY);
+      await chrome.permissions.remove({ origins: [...FULL_ACCESS_HOST_PATTERNS] }).catch(() => false);
+    }
+  };
+
+  const saveReviewerSettings = async (next: AutoReviewSettings, updatePromptDraft = true) => {
+    setReviewerSettingsError(null);
+    setReviewerSettingsNotice(null);
+    const parsed = autoReviewSettingsSchema.safeParse(next);
+    if (!parsed.success) {
+      setReviewerSettingsError(`Enter a model and a non-empty system prompt of at most ${MAX_REVIEW_SYSTEM_PROMPT.toLocaleString()} characters.`);
       return;
     }
-    setBrowserPermissionMode("ask");
-    setFullSiteAccessGranted(false);
-    await chrome.storage.local.remove(FULL_ACCESS_HOST_GRANT_KEY);
-    await chrome.permissions.remove({ origins: [...FULL_ACCESS_HOST_PATTERNS] }).catch(() => false);
+    setReviewerSettingsSaving(true);
+    try {
+      await chrome.storage.local.set({ [AUTO_REVIEW_SETTINGS_KEY]: parsed.data });
+      setAutoReview(parsed.data);
+      if (updatePromptDraft) setReviewerPromptDraft(parsed.data.systemPrompt);
+      setReviewerSettingsNotice(updatePromptDraft ? "Reviewer settings saved. Applies to the next browser task." : "Reviewer model saved. Save prompt to apply any prompt edits.");
+    } catch (cause) {
+      setReviewerSettingsError(cause instanceof Error ? cause.message : "Unable to save reviewer settings.");
+    } finally { setReviewerSettingsSaving(false); }
   };
+
+  const reviewerModelChoices = useMemo(() => {
+    const choices = new Map<string, { id: string; name: string }>();
+    choices.set(REVIEW_MODEL, { id: REVIEW_MODEL, name: `${REVIEW_MODEL} · Default` });
+    for (const model of models) choices.set(model.id, { id: model.id, name: model.id === REVIEW_MODEL ? `${model.name} · Default` : model.name });
+    if (!choices.has(autoReview.model)) choices.set(autoReview.model, { id: autoReview.model, name: `${autoReview.model} · Unavailable` });
+    return [...choices.values()];
+  }, [autoReview.model, models]);
 
   const runRecording = async (work: () => Promise<RecordingView | { name: string }>) => {
     setRecordingError(null);
@@ -847,8 +1059,9 @@ export default function App() {
     return { threadId: created.threadId, replacedLegacy };
   };
 
-  const sendChatMessage = async (payload: RetryPayload, appendUser: boolean) => {
+  const sendChatMessage = async (initialPayload: RetryPayload, appendUser: boolean) => {
     if (streaming || recording.status !== "idle") return;
+    let payload = { ...initialPayload };
     setIsSending(true);
     setError(null);
     setCompletionNotice(null);
@@ -857,19 +1070,26 @@ export default function App() {
     inFlightPayloadRef.current = payload;
     turnExecutedToolRef.current = false;
     stopRequestedRef.current = false;
-    const messageId = crypto.randomUUID();
+    const controller = new AbortController();
+    sendAbortRef.current = controller;
+    const messageId = payload.userMessageId;
+    const displayText = payload.displayText;
     setMessages((current) => {
       const withoutFailedAssistant = appendUser
         ? current
         : current.filter((item) => !(item.role === "assistant" && item.failed));
       return [
         ...withoutFailedAssistant,
-        ...(appendUser ? [{ id: messageId, role: "user" as const, text: payload.displayText }] : []),
+        ...(appendUser ? [{ id: messageId, role: "user" as const, text: displayText }] : []),
         { id: `${messageId}-assistant`, role: "assistant" as const, text: "", streaming: true },
       ];
     });
     try {
       const { threadId: activeThreadId, replacedLegacy } = await ensureThread();
+      checkCanceled(controller.signal);
+      if (payload.threadId && payload.threadId !== activeThreadId && payload.attachments?.length) throw new Error("These files belong to another conversation. Reattach them in this chat.");
+      payload = { ...payload, threadId: activeThreadId };
+      inFlightPayloadRef.current = payload;
       if (replacedLegacy) {
         setConversationHistory((current) => upsertConversation(
           current,
@@ -881,15 +1101,29 @@ export default function App() {
           { id: `${messageId}-assistant`, role: "assistant", text: "", streaming: true },
         ]);
         setToolStatuses([]);
-        setCompletionNotice("That chat was created by an older version and is now read-only in History, so your message started a new chat.");
+        showCompletionNotice("That chat was created by an older version and is now read-only in History, so your message started a new chat.");
       }
-      const result = await sendRequest<{ turnId: string }>({
+      if (payload.files.length > 0 && !payload.attachments) {
+        payload = { ...payload, attachments: await uploadPreparedFiles(attachmentTransport, payload.owner, payload.files, controller.signal, setFileProgress) };
+        inFlightPayloadRef.current = payload;
+      }
+      checkCanceled(controller.signal);
+      const preparedAttachments = payload.attachments;
+      if (preparedAttachments?.length) setMessages((current) => current.map((item) => item.id === messageId ? { ...item, attachments: preparedAttachments } : item));
+      setFileProgress(null);
+      const result = await sendRequest<{ turnId: string; attachments?: AttachmentSummary[]; replayed?: boolean }>({
         type: "CHAT_SEND",
         threadId: activeThreadId,
-        text: payload.outboundText,
-        clientMessageId: messageId,
-        model: selectedModel || undefined,
+        text: payload.userText,
+        pageContext: payload.pageContext,
+        attachments: payload.attachments?.map((file) => file.id),
+        owner: payload.owner,
+        clientMessageId: payload.clientMessageId,
+        model: payload.model,
       });
+      payload = { ...payload, accepted: true };
+      inFlightPayloadRef.current = payload;
+      if (result.attachments?.length) setMessages((current) => current.map((item) => item.id === messageId ? { ...item, attachments: result.attachments } : item));
       if (stopRequestedRef.current) {
         await sendRequest({ type: "BROWSER_TASK_CANCEL", threadId: activeThreadId, turnId: result.turnId }).catch(() => undefined);
         await sendRequest({ type: "CHAT_INTERRUPT", threadId: activeThreadId, turnId: result.turnId }).catch(() => undefined);
@@ -897,7 +1131,10 @@ export default function App() {
         setMessages(settleCanceledMessages);
         return;
       }
-      setActiveTurnId(result.turnId);
+      if (result.replayed) {
+        setMessages(settleCanceledMessages);
+        showCompletionNotice("This message was already accepted by Codex and was not sent twice. Check the conversation before starting another request.");
+      } else setActiveTurnId(result.turnId);
       setIsSending(false);
     } catch (cause) {
       setIsSending(false);
@@ -915,22 +1152,36 @@ export default function App() {
       if (cause instanceof Error && isLegacyThreadError(cause.message)) threadReadyRef.current = false;
       setRetryPayload(payload);
       setError(cause instanceof Error ? cause.message : "Unable to send this message.");
+    } finally {
+      if (sendAbortRef.current === controller) sendAbortRef.current = null;
+      setFileProgress(null);
     }
   };
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     const text = draft.trim();
-    if (!text || streaming) return;
-    const payload = { displayText: text, outboundText: formatPageContext(text, attachment) };
+    if ((!text && attachedFiles.length === 0 && !attachment) || streaming || preparingFiles || attachingPage) return;
+    if (attachedFiles.some((file) => !file.ready)) { setError("Choose and prepare the pages to share before sending."); return; }
+    const visuals = attachedFiles.reduce((sum, file) => sum + file.pages.length, 0);
+    const selected = models.find((model) => model.id === selectedModel) ?? models.find((model) => model.isDefault);
+    if (visuals > 0 && selected?.inputModalities && !selected.inputModalities.includes("image")) { setError("Choose a model that supports images to share visual files."); return; }
+    if (visuals > FILE_LIMITS.visualPages) { setError("Share at most 20 images/pages across all files. Choose smaller page ranges."); return; }
+    const preparedBytes = attachedFiles.reduce((sum, file) => sum + file.pages.reduce((size, page) => size + page.blob.size, 0), 0);
+    if (preparedBytes > FILE_LIMITS.preparedBytes) { setError("Prepared images exceed 32 MiB. Choose fewer pages."); return; }
+    const characters = text.length + (attachment?.selectedText.length ?? 0) + (attachment?.readableText.length ?? 0) + attachedFiles.reduce((sum, file) => sum + file.text.length, 0) + visuals * 300 + attachedFiles.length * 600;
+    if (characters > FILE_LIMITS.turnCharacters) { setError("The message and attachment text exceed 80,000 characters. Remove a file or choose fewer pages."); return; }
+    const payload: RetryPayload = { displayText: text || "Describe the attached files.", userText: text, pageContext: attachment ?? undefined, files: attachedFiles, owner: crypto.randomUUID(), clientMessageId: crypto.randomUUID(), userMessageId: crypto.randomUUID(), model: selectedModel || undefined };
     setDraft("");
-    setAttachment(null);
+    clearPageAttachment();
+    setAttachedFiles([]);
     await sendChatMessage(payload, true);
   };
 
   const retryLastMessage = async () => {
     if (!retryPayload || streaming) return;
-    await sendChatMessage(retryPayload, false);
+    const nextPayload = { ...retryPayload, ...(retryPayload.accepted ? { clientMessageId: crypto.randomUUID(), accepted: false } : {}) };
+    await sendChatMessage(nextPayload, false);
   };
 
   const copyMessage = async (message: ChatMessage) => {
@@ -977,7 +1228,8 @@ export default function App() {
       setMessages(forkedMessages);
       setToolStatuses(forkedStatuses);
       setRetryPayload(null);
-      setAttachment(null);
+      clearPageAttachment();
+      setAttachedFiles([]);
       setCompletionNotice(null);
       setHistoryOpen(false);
       setMenuOpen(false);
@@ -989,6 +1241,8 @@ export default function App() {
   };
 
   const stop = async () => {
+    preparationRef.current?.abort();
+    sendAbortRef.current?.abort();
     stopRequestedRef.current = true;
     setIsSending(false);
     setError(null);
@@ -996,6 +1250,11 @@ export default function App() {
     setToolApproval(null);
     setToolPermission(null);
     if (!threadId) return;
+    const payload = inFlightPayloadRef.current;
+    if (payload) {
+      await sendRequest({ type: "CHAT_CANCEL_SEND", threadId: payload.threadId ?? threadId, clientMessageId: payload.clientMessageId }).catch(() => undefined);
+      await attachmentTransport({ operation: "abort", owner: payload.owner }).catch(() => undefined);
+    }
     await sendRequest({ type: "BROWSER_TASK_CANCEL", threadId, turnId: activeTurnId ?? undefined }).catch(() => undefined);
     if (activeTurnId) {
       await sendRequest({ type: "CHAT_INTERRUPT", threadId, turnId: activeTurnId }).catch((cause) => {
@@ -1016,6 +1275,7 @@ export default function App() {
   };
 
   const newChat = () => {
+    preparationRef.current?.abort();
     if (streaming) void stop();
     setConversationHistory((current) => upsertConversation(
       current,
@@ -1031,12 +1291,14 @@ export default function App() {
     setToolApproval(null);
     setToolPermission(null);
     setRetryPayload(null);
-    setAttachment(null);
+    clearPageAttachment();
+    setAttachedFiles([]);
     setMenuOpen(false);
     setHistoryOpen(false);
   };
 
   const openConversation = (conversation: ConversationRecord) => {
+    preparationRef.current?.abort();
     if (streaming) return;
     setConversationHistory((current) => upsertConversation(
       current,
@@ -1050,7 +1312,8 @@ export default function App() {
     setToolApproval(null);
     setToolPermission(null);
     setRetryPayload(null);
-    setAttachment(null);
+    clearPageAttachment();
+    setAttachedFiles([]);
     setError(null);
     setCompletionNotice(null);
     setHistoryOpen(false);
@@ -1078,6 +1341,8 @@ export default function App() {
     const origins = [...new Set([...attachmentOrigins, ...taskOrigins, ...FULL_ACCESS_HOST_PATTERNS])];
     if (origins.length > 0) await chrome.permissions.remove({ origins }).catch(() => false);
     await chrome.storage.local.remove(STORAGE_KEY);
+    await chrome.storage.local.remove(VISIBLE_MODELS_KEY);
+    await chrome.storage.local.remove(AUTO_REVIEW_SETTINGS_KEY);
     await chrome.storage.local.remove(BROWSER_PERMISSION_MODE_KEY);
     await chrome.storage.local.remove(FULL_ACCESS_HOST_GRANT_KEY);
     await chrome.storage.local.remove(BROWSER_TASK_ACTION_LIMIT_KEY);
@@ -1087,6 +1352,7 @@ export default function App() {
   };
 
   const resetBrowserState = () => {
+    setVisibleModelIds(null);
     conversationPersistSuspended.current = false;
     setThreadId(null);
     threadReadyRef.current = false;
@@ -1094,10 +1360,15 @@ export default function App() {
     setConversationHistory([]);
     setMessages([]);
     setDraft("");
-    setAttachment(null);
+    clearPageAttachment();
+    setAttachedFiles([]);
     setTheme("system");
     setSelectedModel("");
     setBrowserPermissionMode(DEFAULT_BROWSER_PERMISSION_MODE);
+    setAutoReview({ ...DEFAULT_AUTO_REVIEW });
+    setReviewerPromptDraft(DEFAULT_REVIEW_SYSTEM_PROMPT);
+    setReviewerSettingsError(null);
+    setReviewerSettingsNotice(null);
     setFullSiteAccessGranted(false);
     setBrowserTaskActionLimit(DEFAULT_BROWSER_TASK_ACTION_LIMIT);
     setBrowserTaskActionLimitDraft(String(DEFAULT_BROWSER_TASK_ACTION_LIMIT));
@@ -1124,6 +1395,8 @@ export default function App() {
   const deleteAllLocalData = async () => {
     if (!confirm("Delete all Browser Control data from this browser and computer, including local conversations and the Browser Control ChatGPT sign-in? The installed companion will be kept.")) return;
     setError(null);
+    preparationRef.current?.abort();
+    sendAbortRef.current?.abort();
     try {
       if (threadId) await sendRequest({ type: "BROWSER_TASK_CANCEL", threadId }).catch(() => undefined);
       await sendRequest({ type: "DELETE_ALL_LOCAL_DATA" });
@@ -1175,8 +1448,20 @@ export default function App() {
     }
   };
 
-  const canSend = draft.trim().length > 0 && !streaming && !recordingActive && authState === "ready";
+  const canSend = (draft.trim().length > 0 || attachedFiles.length > 0 || Boolean(attachment)) && !streaming && !preparingFiles && !attachingPage && attachedFiles.every((file) => file.ready) && !recordingActive && authState === "ready";
   const greeting = greetingFor(new Date().getHours());
+  const modelChoices = [{ id: "", name: "Codex default", isDefault: false }, ...models];
+  const composerModels = modelChoices.filter((model) => visibleModelIds === null || visibleModelIds.includes(model.id) || model.id === selectedModel);
+  const selectModel = (id: string) => {
+    setSelectedModel(id);
+    if (visibleModelIds !== null && !visibleModelIds.includes(id)) setVisibleModelIds([...visibleModelIds, id]);
+  };
+  const toggleVisibleModel = (id: string, checked: boolean) => {
+    const next = checked ? [...new Set([...composerModels.map((model) => model.id), id])] : composerModels.filter((model) => model.id !== id).map((model) => model.id);
+    if (next.length === 0) return;
+    setVisibleModelIds(next);
+    if (!next.includes(selectedModel)) setSelectedModel(next[0]);
+  };
   const enabledSkillCount = taughtSkills.filter((skill) => skill.enabled).length;
   const activitiesByTurn = useMemo(() => groupToolStatuses(toolStatuses), [toolStatuses]);
   const visibleConversationHistory = useMemo(() => upsertConversation(
@@ -1274,7 +1559,23 @@ export default function App() {
         </div>
         <div className="header-actions">
           <button
-            className="icon-button"
+            type="button"
+            className={`icon-button record-button${recordingActive || recordComposerOpen ? " record-button-active" : ""}`}
+            aria-label="Record a skill"
+            aria-expanded={recordComposerOpen}
+            data-tooltip={recordingActive ? "Finish or cancel the recording below" : "Record clicks and typing, then save them as a skill after review"}
+            disabled={streaming || recordingActive}
+            onClick={() => {
+              setRecordComposerOpen((open) => !open);
+              setMenuOpen(false);
+              setHistoryOpen(false);
+              setModelMenuOpen(false);
+            }}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.75" y="7.25" width="12" height="9.5" rx="2" /><path d="m14.75 10.5 6.2-2.8v8.6l-6.2-2.8z" /></svg>
+          </button>
+          <button
+            className="icon-button history-button"
             aria-label="Open conversation history"
             aria-expanded={historyOpen}
             data-tooltip="Open conversations saved in this browser"
@@ -1283,13 +1584,24 @@ export default function App() {
               setHistoryOpen(!historyOpen);
               setMenuOpen(false);
             }}
-          >◷</button>
-          <button className="icon-button" aria-label="Start a new chat" data-tooltip="Start a new conversation. This one stays in history." onClick={newChat}>＋</button>
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M6.6 15.5a6.2 6.2 0 1 0 2.3-8.5" />
+              <path d="M11.4 6.2 8.9 7 10.4 4.4" />
+              <path d="M12 12.4V9.6" />
+              <path d="M12 12.4l2.2 1.3" />
+            </svg>
+          </button>
+          <button className="icon-button" aria-label="Start a new chat" data-tooltip="Start a new conversation. This one stays in history." onClick={newChat}>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5.5v13M5.5 12h13" /></svg>
+          </button>
           <button className="icon-button" aria-label="Open settings" aria-expanded={menuOpen} data-tooltip="Theme, model, permissions, and saved skills" onClick={() => {
             setMenuOpen(!menuOpen);
             setHistoryOpen(false);
             if (!menuOpen) void refreshSkills();
-          }}>•••</button>
+          }}>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle className="solid" cx="6" cy="12" r="1.25" /><circle className="solid" cx="12" cy="12" r="1.25" /><circle className="solid" cx="18" cy="12" r="1.25" /></svg>
+          </button>
         </div>
         {historyOpen && (
           <section className="history-card" aria-label="Conversation history">
@@ -1317,73 +1629,144 @@ export default function App() {
           </section>
         )}
         {menuOpen && (
-          <section className="menu-card" aria-label="Settings">
-            <label>
-              Theme
-              <select value={theme} onChange={(event) => setTheme(event.target.value as Theme)}>
-                <option value="system">System</option>
-                <option value="light">Light</option>
-                <option value="dark">Dark</option>
-              </select>
-            </label>
-            <label>
-              Model
-              <select value={selectedModel} onChange={(event) => setSelectedModel(event.target.value)}>
-                <option value="">Codex default</option>
-                {models.map((model) => (
-                  <option key={model.id} value={model.id}>{model.name}{model.isDefault ? " · Default" : ""}</option>
-                ))}
-              </select>
-            </label>
-            <p className="menu-hint">Model changes apply to your next message.</p>
-            <label>
-              Agent permission
-              <select
-                value={browserPermissionMode}
-                disabled={streaming}
-                onChange={(event) => void changeBrowserPermissionMode(normalizeBrowserPermissionMode(event.target.value))}
-              >
-                <option value="full">Full access · Default</option>
-                <option value="ask">Ask every time</option>
-              </select>
-            </label>
-            <p className="menu-hint">
-              {browserPermissionMode === "full"
-                ? fullSiteAccessGranted
-                  ? "All-sites access enabled. Supported actions run without site or approval cards; hard safety blocks still apply."
-                  : "Full access needs one Chrome all-sites grant before tasks can run without site prompts."
-                : "Pauses before form submission, consequential controls, Enter submissions, and tab closing."}
-              {" "}Applies to the next browser task.
-            </p>
-            {browserPermissionMode === "full" && !fullSiteAccessGranted && (
-              <button className="settings-grant-button" disabled={streaming} onClick={() => void requestFullSiteAccess()}>
-                Enable full browser access
-              </button>
-            )}
-            <label>
-              Browser actions per request
-              <input
-                type="number"
-                min={MIN_BROWSER_TASK_ACTION_LIMIT}
-                max={MAX_BROWSER_TASK_ACTION_LIMIT}
-                step={5}
-                value={browserTaskActionLimitDraft}
-                onChange={(event) => setBrowserTaskActionLimitDraft(event.target.value)}
-                onBlur={() => {
-                  const nextLimit = normalizeBrowserTaskActionLimit(browserTaskActionLimitDraft);
-                  setBrowserTaskActionLimit(nextLimit);
-                  setBrowserTaskActionLimitDraft(String(nextLimit));
-                }}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") event.currentTarget.blur();
-                }}
-              />
-            </label>
-            <p className="menu-hint">
-              {MIN_BROWSER_TASK_ACTION_LIMIT}–{MAX_BROWSER_TASK_ACTION_LIMIT}; applies to the next request.
-            </p>
+          <SettingsPanel onClose={() => setMenuOpen(false)} sections={{
+            general: <>
+              <h3 className="settings-section-title">Appearance and sound</h3>
+              <label>
+                Theme
+                <select value={theme} onChange={(event) => setTheme(event.target.value as Theme)}>
+                  <option value="system">System</option>
+                  <option value="light">Light</option>
+                  <option value="dark">Dark</option>
+                </select>
+              </label>
+              <label className="toggle-row">
+                <span>Task completion sound<small>Play a quiet tone after browser work finishes.</small></span>
+                <input
+                  type="checkbox"
+                  checked={completionSoundEnabled}
+                  onChange={(event) => {
+                    const enabled = event.target.checked;
+                    setCompletionSoundEnabled(enabled);
+                    if (enabled) void playCompletionSound();
+                  }}
+                />
+              </label>
+            </>,
+            models: <>
+              <h3 className="settings-section-title">Chat models</h3>
+              <label>
+                Model
+                <select value={selectedModel} onChange={(event) => selectModel(event.target.value)}>
+                  <option value="">Codex default</option>
+                  {models.map((model) => (
+                    <option key={model.id} value={model.id}>{model.name}{model.isDefault ? " · Default" : ""}</option>
+                  ))}
+                </select>
+              </label>
+              <p className="menu-hint">Model changes apply to your next message.</p>
+              <fieldset className="model-visibility">
+                <legend>Models in composer</legend>
+                <p className="menu-hint">Choose the models shown in your message box. Keep at least one selected.</p>
+                <div className="model-visibility-options">
+                  {modelChoices.map((model) => {
+                    const checked = composerModels.some((choice) => choice.id === model.id);
+                    return <label key={model.id}>
+                      <input type="checkbox" checked={checked} disabled={checked && composerModels.length === 1} onChange={(event) => toggleVisibleModel(model.id, event.target.checked)} />
+                      <span>{model.name}</span>
+                    </label>;
+                  })}
+                </div>
+              </fieldset>
+            </>,
+            agent: <>
+              <h3 className="settings-section-title">Browser agent</h3>
+              <label>
+                Agent permission
+                <select
+                  value={permissionMode}
+                  disabled={streaming || reviewerSettingsSaving}
+                  onChange={(event) => void changeBrowserPermissionMode(event.target.value === "auto" ? "auto" : normalizeBrowserPermissionMode(event.target.value)).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "Unable to save the permission setting."))}
+                >
+                  <option value="full">Full access · Default</option>
+                  <option value="ask">Ask every time</option>
+                  <option value="auto" disabled={!reviewerAvailable}>Auto review</option>
+                </select>
+              </label>
+              <p className="menu-hint">
+                {browserPermissionMode === "full"
+                  ? fullSiteAccessGranted
+                    ? "All-sites access enabled. Supported actions run without site or approval cards; hard safety blocks still apply."
+                    : "Full access needs one Chrome all-sites grant before tasks can run without site prompts."
+                  : permissionMode === "auto"
+                    ? "Your selected model reviews eligible low-risk confirmations. Risky, unclear, or unavailable reviews come to you. Site grants still need your approval."
+                    : "Pauses before form submission, consequential controls, Enter submissions, and tab closing."}
+                {" "}Applies to the next browser task.
+              </p>
+              {!reviewerAvailable && <p className="menu-hint">Auto review requires the updated companion and verified Codex CLI 0.162.1.</p>}
+              {browserPermissionMode === "full" && !fullSiteAccessGranted && (
+                <button className="settings-grant-button" disabled={streaming} onClick={() => void requestFullSiteAccess()}>
+                  Enable full browser access
+                </button>
+              )}
+              <label>
+                Browser actions per request
+                <input
+                  type="number"
+                  min={MIN_BROWSER_TASK_ACTION_LIMIT}
+                  max={MAX_BROWSER_TASK_ACTION_LIMIT}
+                  step={5}
+                  value={browserTaskActionLimitDraft}
+                  onChange={(event) => setBrowserTaskActionLimitDraft(event.target.value)}
+                  onBlur={() => {
+                    const nextLimit = normalizeBrowserTaskActionLimit(browserTaskActionLimitDraft);
+                    setBrowserTaskActionLimit(nextLimit);
+                    setBrowserTaskActionLimitDraft(String(nextLimit));
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") event.currentTarget.blur();
+                  }}
+                />
+              </label>
+              <p className="menu-hint">
+                {MIN_BROWSER_TASK_ACTION_LIMIT}–{MAX_BROWSER_TASK_ACTION_LIMIT}; applies to the next request.
+              </p>
+              <h3 className="settings-subheading">Instructions and review</h3>
+              <ChatPromptSettings disabled={streaming} request={sendRequest} />
+              <details className="reviewer-settings">
+                <summary>Auto review settings</summary>
+                <label>
+                  Reviewer model
+                  <select value={autoReview.model} disabled={streaming || reviewerSettingsSaving || models.length === 0} onChange={(event) => void saveReviewerSettings({ ...autoReview, model: event.target.value }, false)}>
+                    {reviewerModelChoices.map((model) => <option key={model.id} value={model.id}>{model.name}</option>)}
+                  </select>
+                </label>
+                <p className="menu-hint">Independent of your chat model and composer list. Unavailable models fall back to your approval.</p>
+                <label>
+                  Reviewer system prompt
+                  <textarea className="reviewer-prompt" rows={8} maxLength={MAX_REVIEW_SYSTEM_PROMPT} spellCheck={false} value={reviewerPromptDraft} disabled={streaming || reviewerSettingsSaving} onChange={(event) => {
+                    setReviewerPromptDraft(event.target.value);
+                    setReviewerSettingsError(null);
+                    setReviewerSettingsNotice(null);
+                  }} />
+              </label>
+              <p className="menu-hint">{reviewerPromptDraft.length.toLocaleString()} / {MAX_REVIEW_SYSTEM_PROMPT.toLocaleString()} characters. Saved changes apply to the next browser task. Browser permission and approval limits still apply.</p>
+              <div className="reviewer-settings-actions">
+                <button type="button" disabled={streaming || reviewerSettingsSaving || reviewerPromptDraft === autoReview.systemPrompt} onClick={() => void saveReviewerSettings({ ...autoReview, systemPrompt: reviewerPromptDraft })}>Save prompt</button>
+                <button type="button" disabled={streaming || reviewerSettingsSaving || (reviewerPromptDraft === DEFAULT_REVIEW_SYSTEM_PROMPT && autoReview.systemPrompt === DEFAULT_REVIEW_SYSTEM_PROMPT)} onClick={() => void saveReviewerSettings({ ...autoReview, systemPrompt: DEFAULT_REVIEW_SYSTEM_PROMPT })}>Reset prompt to default</button>
+              </div>
+              {reviewerSettingsError && <p className="menu-hint reviewer-settings-error" role="alert">{reviewerSettingsError}</p>}
+              {reviewerSettingsNotice && <p className="menu-hint" role="status">{reviewerSettingsNotice}</p>}
+              <details className="reviewer-response-rules">
+                <summary>Required response rules</summary>
+                <p className="menu-hint">{REQUIRED_REVIEW_INSTRUCTIONS}</p>
+              </details>
+              <p className="menu-hint">Uses your existing Codex sign-in and adds model usage. Reviews receive your request and the proposed action context. Your chat model stays the same. Stop cancels a pending review.</p>
+            </details>
+            </>,
+            skills: <>
+              <h3 className="settings-section-title">Taught skills</h3>
             <div className="skill-settings">
-              <p className="menu-hint">Taught skills</p>
               <p className="menu-hint">Saved on this computer and matched automatically when a request fits. Record a new skill from the message box. Choosing a skill does not skip action confirmations.</p>
               {skillsError && <p className="menu-hint">{skillsError}</p>}
               {taughtSkills.length === 0 ? (
@@ -1428,31 +1811,23 @@ export default function App() {
                 </ul>
               )}
             </div>
-            <label className="toggle-row">
-              <span>Task completion sound<small>Play a quiet tone after browser work finishes.</small></span>
-              <input
-                type="checkbox"
-                checked={completionSoundEnabled}
-                onChange={(event) => {
-                  const enabled = event.target.checked;
-                  setCompletionSoundEnabled(enabled);
-                  if (enabled) void playCompletionSound();
-                }}
-              />
-            </label>
-            <button onClick={() => void clearLocalData()}>Clear browser data and permissions</button>
-            <button className="settings-delete-button" onClick={() => void deleteAllLocalData()}>
-              Delete all Browser Control data and sign out
-            </button>
-            <button
-              className="settings-logout-button"
-              disabled={streaming}
-              onClick={() => void signOut()}
-            >
-              <span>Log out of ChatGPT</span>
-              {account?.email && <small>{account.email}</small>}
-            </button>
-          </section>
+            </>,
+            account: <>
+              <h3 className="settings-section-title">Your account</h3>
+              <p className="menu-hint">Signed in with ChatGPT{account?.email ? ` as ${account.email}` : ""}.</p>
+              <button className="settings-logout-button" disabled={streaming} onClick={() => void signOut()}>
+                Log out of ChatGPT
+              </button>
+              <h3 className="settings-subheading">Local data</h3>
+              <p className="menu-hint">Manage saved conversations, permissions, and companion data.</p>
+              <div className="settings-data-actions">
+                <button onClick={() => void clearLocalData()}>Clear browser data and permissions</button>
+                <button className="settings-delete-button" onClick={() => void deleteAllLocalData()}>
+                  Delete all Browser Control data and sign out
+                </button>
+              </div>
+            </>,
+          }} />
         )}
       </header>
 
@@ -1482,7 +1857,7 @@ export default function App() {
               ))}
             </div>
             <p className="home-status rise">
-              <span>{browserPermissionMode === "full" ? "Full access" : "Ask every time"}</span>
+              <span>{permissionMode === "auto" ? "Auto review" : browserPermissionMode === "full" ? "Full access" : "Ask every time"}</span>
               {enabledSkillCount > 0 && <span>{enabledSkillCount === 1 ? "1 taught skill" : `${enabledSkillCount} taught skills`}</span>}
               <span>Stop any time</span>
             </p>
@@ -1525,6 +1900,7 @@ export default function App() {
                   ) : (
                     <p>{message.text}</p>
                   )}
+                  {message.role === "user" && message.attachments?.length ? <SentFiles files={message.attachments} threadId={threadId} transport={attachmentTransport} /> : null}
                   {message.role === "assistant" && message.text && !message.streaming && !message.failed && (
                     <div className="message-actions" aria-label="Response actions">
                       <button type="button" onClick={() => void copyMessage(message)} data-tooltip="Copy this response">
@@ -1642,7 +2018,7 @@ export default function App() {
         )}
         {completionNotice && (
           <div className="completion-banner" role="status">
-            <span>{completionNotice}</span>
+            <span>{completionNotice.message}</span>
             <button aria-label="Dismiss completion message" onClick={() => {
               setCompletionNotice(null);
               void sendRequest({ type: "COMPLETION_NOTICE_DISMISS" }).catch(() => undefined);
@@ -1670,9 +2046,11 @@ export default function App() {
                 {attachment.truncated ? " · truncated" : ""}
               </small>
             </div>
-            <button aria-label="Remove page attachment" onClick={() => setAttachment(null)}>×</button>
+            <button aria-label="Remove page attachment" onClick={clearPageAttachment}>×</button>
           </div>
         )}
+        {fileProgress && <div className="file-progress" role="status"><span>{fileProgress}</span><button type="button" onClick={() => void stop()}>Stop</button></div>}
+        {attachedFiles.length > 0 && <FileCards files={attachedFiles} disabled={streaming || preparingFiles} onRemove={(id) => setAttachedFiles((current) => current.filter((file) => file.id !== id))} onRange={(file, range) => void prepareFileRange(file, range)} />}
         {recordComposerOpen && !recordingActive && (
           <form className="record-start composer-record" onSubmit={(event) => {
             event.preventDefault();
@@ -1694,11 +2072,12 @@ export default function App() {
             </div>
           </form>
         )}
-        <form className="composer" onSubmit={(event) => void submit(event)}>
+        <form className={`composer${streaming ? " composer-running" : ""}`} aria-label="Message composer" aria-busy={streaming} onSubmit={(event) => void submit(event)} onDragOver={(event) => { if (event.dataTransfer.types.includes("Files")) event.preventDefault(); }} onDrop={(event) => { if (event.dataTransfer.files.length) { event.preventDefault(); void addFiles([...event.dataTransfer.files]); } }}>
           <textarea
             ref={composerRef}
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
+            onPaste={(event) => { const files = [...event.clipboardData.files]; if (files.length) { event.preventDefault(); void addFiles(files); } }}
             onKeyDown={(event) => {
               if (event.key === "Enter" && !event.shiftKey) {
                 event.preventDefault();
@@ -1712,24 +2091,59 @@ export default function App() {
           />
           <div className="composer-toolbar">
             <div className="composer-tools">
-              <button type="button" className="attach-button" onClick={() => void attachPage()} aria-label="Attach the current page" data-tooltip="Share the current page with this message">
-                ⊕ <span>Attach page</span>
+              <button type="button" className="attach-button" onClick={() => void attachPage()} aria-label={attachment ? "Detach the current page" : attachingPage || pendingPageOrigin ? "Cancel page attachment" : "Attach the current page"} aria-pressed={Boolean(attachment) || attachingPage || Boolean(pendingPageOrigin)} data-tooltip={attachment ? "Remove this page from your next message" : attachingPage || pendingPageOrigin ? "Cancel attaching this page" : "Share the current page with this message"} disabled={recordingActive}>
+                {attachment ? "⊖" : "⊕"} <span>{attachment ? "Detach page" : attachingPage || pendingPageOrigin ? "Cancel attachment" : "Attach page"}</span>
               </button>
               <button
                 type="button"
                 className="attach-button"
-                aria-label="Record a skill"
-                aria-expanded={recordComposerOpen}
-                data-tooltip="Records your clicks and typing on the page, then saves them as a skill after you review it"
-                disabled={streaming || recordingActive}
-                onClick={() => {
-                  setRecordComposerOpen((open) => !open);
-                  setMenuOpen(false);
-                  setHistoryOpen(false);
-                }}
+                aria-label="Add files"
+                data-tooltip="Add images, visual PDFs, Markdown, or text. Preparation stays on this computer; selected content is sent to Codex when you send."
+                disabled={recordingActive || streaming || preparingFiles || attachedFiles.length >= MAX_ATTACHED_FILES}
+                onClick={() => fileInputRef.current?.click()}
               >
-                <span>Record</span>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 7.5V16a4 4 0 0 0 8 0V6.5a2.5 2.5 0 0 0-5 0V15a1 1 0 0 0 2 0V8" /></svg>
+                <span>Add files</span>
               </button>
+              <input
+                ref={fileInputRef}
+                className="sr-only"
+                type="file"
+                aria-label="Choose files"
+                multiple
+                tabIndex={-1}
+                accept="image/png,image/jpeg,image/webp,image/gif,.pdf,text/*,.md,.markdown,.json,.csv,.tsv,.xml,.html,.css,.js,.jsx,.ts,.tsx,.py,.rb,.go,.rs,.java,.yml,.yaml,.toml,.sql,.log,.svg"
+                onChange={(event) => {
+                  const picked = [...(event.target.files ?? [])];
+                  event.target.value = "";
+                  void addFiles(picked);
+                }}
+              />
+              <div className="model-picker" ref={modelPickerRef}>
+                <button
+                  type="button"
+                  className="model-card"
+                  aria-haspopup="listbox"
+                  aria-expanded={modelMenuOpen}
+                  aria-label={`Model, ${selectedModelLabel(models, selectedModel)}`}
+                  disabled={recordingActive}
+                  onClick={() => setModelMenuOpen((open) => !open)}
+                >
+                  <span>{selectedModelLabel(models, selectedModel)}</span>
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10l5 5 5-5" /></svg>
+                </button>
+                {modelMenuOpen && (
+                  <ul className="model-menu" role="listbox" aria-label="Models">
+                    {composerModels.map((model) => (
+                      <li key={model.id}>
+                        <button type="button" role="option" aria-selected={selectedModel === model.id} onClick={() => { selectModel(model.id); setModelMenuOpen(false); }}>
+                          {model.name}{model.isDefault ? " · Default" : ""}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
             </div>
             {streaming ? (
               <button type="button" className="stop-button" onClick={() => void stop()} aria-label="Stop response" data-tooltip="Stop the current response">■</button>
@@ -1738,7 +2152,7 @@ export default function App() {
             )}
           </div>
         </form>
-        <p className="composer-note">Page content is shared only when attached. AI can make mistakes.</p>
+        <p className="composer-note">Pages and files are shared only when you add them. AI can make mistakes.</p>
       </footer>
     </main>
   );

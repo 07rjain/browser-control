@@ -1,4 +1,9 @@
 import { z } from "zod";
+import { attachmentSummarySchema } from "../shared/attachments";
+import { chatSettingsSchema } from "../shared/chat-settings";
+import { AUTO_REVIEW_SETTINGS_KEY, DEFAULT_AUTO_REVIEW, REVIEW_MODEL, REVIEW_TIMEOUT_MS, readAutoReviewSettings, reviewCapabilitiesSchema, reviewVerdictSchema, verdictApproves, type AutoReviewSettings, type ReviewActivity } from "../shared/auto-review";
+import { reviewCandidate, reviewFingerprint, reviewedTarget } from "./auto-review-policy";
+import { freshCompletionNotice } from "../shared/completion-notice";
 import {
   accountSchema,
   nativeEnvelopeSchema,
@@ -65,6 +70,8 @@ const TASK_KEY = "codexSidebarBrowserTasks";
 const THREAD_TARGETS_KEY = "codexSidebarThreadWorkingTabs";
 const COMPLETION_NOTICE_KEY = "codexSidebarCompletionNotice";
 const PENDING_PROMPTS_KEY = "codexSidebarPendingBrowserPrompts";
+const REVIEW_INTENTS_KEY = "codexSidebarReviewIntents";
+const EXECUTIONS_KEY = "codexSidebarApprovalExecutions";
 const KNOWN_URLS_KEY = "codexSidebarThreadKnownUrls";
 const MAX_KNOWN_URLS_PER_THREAD = 300;
 const TASK_TOMBSTONE_TTL_MS = 10 * 60 * 1_000;
@@ -83,6 +90,7 @@ const modelsResponseSchema = z.object({
     name: z.string().min(1),
     description: z.string(),
     isDefault: z.boolean(),
+    inputModalities: z.array(z.string()).optional(),
   })),
 });
 
@@ -109,6 +117,10 @@ interface BrowserTaskState {
   successfulActionCount?: number;
   actionLimit?: number;
   permissionMode?: BrowserPermissionMode;
+  autoReview?: AutoReviewSettings;
+  reviewCount?: number;
+  reviewLimit?: number;
+  userInstruction?: string;
   canceled: boolean;
   finished?: boolean;
   browserActivityStarted?: boolean;
@@ -135,6 +147,7 @@ interface ThreadKnownUrls {
 interface PendingApproval {
   call: BrowserToolCall;
   target?: PageTargetDescription;
+  review?: { id: string; fingerprint: string; deadline: number };
 }
 
 interface PendingPermission {
@@ -156,7 +169,16 @@ const pendingNative = new Map<string, PendingNativeRequest>();
 const pendingApprovals = new Map<string, PendingApproval>();
 const pendingPermissions = new Map<string, PendingPermission>();
 const pendingPrompts = new Map<string, { type: "approval" | "permission"; data: Record<string, unknown> }>();
+const processingCalls = new Map<string, BrowserToolCall>();
+const decidingCalls = new Set<string>();
+const liveReviews = new Map<string, string>();
+interface ReviewIntent { threadId: string; text?: string; createdAt: number }
+interface ExecutionMarker { key: string; taskKey?: string; createdAt: number }
 const finishedTurns = new Set<string>();
+const canceledTasks = new Set<string>();
+const observedTasks = new Set<string>();
+const retiredTasks = new Set<string>();
+let lifecycleEpoch = 0;
 
 function broadcast(event: string, data?: unknown): void {
   const message: SidebarEvent = { source: "codex-sidebar-background", event, data };
@@ -223,14 +245,14 @@ async function handleNativeEnvelope(message: NativeEnvelope): Promise<void> {
   broadcast(message.event, message.data);
 }
 
-function requestNative(method: string, params?: unknown): Promise<unknown> {
+function requestNative(method: string, params?: unknown, timeoutMs = NATIVE_TIMEOUT_MS): Promise<unknown> {
   const id = crypto.randomUUID();
   const port = connectNative();
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
       pendingNative.delete(id);
       reject(new Error(`The native companion timed out while running ${method}.`));
-    }, NATIVE_TIMEOUT_MS);
+    }, timeoutMs);
     pendingNative.set(id, { resolve, reject, timeout });
     port.postMessage({ type: "request", id, method, params });
   });
@@ -244,7 +266,7 @@ function toolKey(call: BrowserToolCall): string {
   return call.callId;
 }
 
-function taskKey(call: BrowserToolCall): string {
+function taskKey(call: { threadId: string; turnId: string }): string {
   return `${call.threadId}:${call.turnId}`;
 }
 
@@ -254,8 +276,11 @@ async function storedList<T>(key: string): Promise<T[]> {
 }
 
 async function persistPendingPrompt(prompt: StoredPendingPrompt): Promise<void> {
+  const call = prompt.approval?.call ?? prompt.permission?.call;
+  if (call && retiredTasks.has(taskKey(call))) return;
   const prompts = (await storedList<StoredPendingPrompt>(PENDING_PROMPTS_KEY))
     .filter((item) => item.callId !== prompt.callId);
+  if (call && retiredTasks.has(taskKey(call))) return;
   prompts.push(prompt);
   await chrome.storage.session.set({ [PENDING_PROMPTS_KEY]: prompts.slice(-20) });
 }
@@ -385,6 +410,7 @@ async function recordSkillStatus(input: unknown): Promise<void> {
 }
 
 async function storeActivity(call: { callId: string; namespace?: string; tool: string; threadId: string; turnId: string }, status: string, extra?: Record<string, unknown>): Promise<void> {
+  if (retiredTasks.has(taskKey(call))) return;
   const entry = {
     callId: call.callId,
     namespace: call.namespace,
@@ -396,6 +422,7 @@ async function storeActivity(call: { callId: string; namespace?: string; tool: s
     ...extra,
   };
   const current = await storedList<Record<string, unknown>>(ACTIVITY_KEY);
+  if (retiredTasks.has(taskKey(call))) return;
   current.push(entry);
   await chrome.storage.session.set({ [ACTIVITY_KEY]: current.slice(-100) });
   broadcast("tool.status", entry);
@@ -407,6 +434,7 @@ async function getTask(call: BrowserToolCall): Promise<BrowserTaskState> {
   const existing = tasks.find((item) => item.key === key);
   if (existing) return existing;
   const workingTabId = await getThreadWorkingTab(call.threadId);
+  const intent = (await storedList<ReviewIntent>(REVIEW_INTENTS_KEY)).find((item) => item.threadId === call.threadId && Date.now() - item.createdAt < 60_000);
   return {
     key,
     threadId: call.threadId,
@@ -414,12 +442,23 @@ async function getTask(call: BrowserToolCall): Promise<BrowserTaskState> {
     actionCount: 0,
     canceled: false,
     authorizedTabId: workingTabId,
+    userInstruction: intent?.text,
     updatedAt: Date.now(),
   };
 }
 
 async function saveTask(task: BrowserTaskState): Promise<void> {
-  const tasks = (await storedList<BrowserTaskState>(TASK_KEY)).filter((item) => item.key !== task.key);
+  if (retiredTasks.has(task.key)) return;
+  const current = await storedList<BrowserTaskState>(TASK_KEY);
+  if (retiredTasks.has(task.key)) return;
+  const previous = current.find((item) => item.key === task.key);
+  // Stop/finish are monotonic even when a slower review callback holds an old task object.
+  task.canceled ||= canceledTasks.has(task.key) || (previous?.canceled ?? false);
+  task.finished ||= finishedTurns.has(task.turnId) || (previous?.finished ?? false);
+  task.actionCount = Math.max(task.actionCount, previous?.actionCount ?? 0);
+  task.reviewCount = Math.max(task.reviewCount ?? 0, previous?.reviewCount ?? 0);
+  if (task.canceled || task.finished) delete task.userInstruction;
+  const tasks = current.filter((item) => item.key !== task.key);
   tasks.push(task);
   await chrome.storage.session.set({ [TASK_KEY]: tasks.slice(-20) });
 }
@@ -481,14 +520,8 @@ async function initializeBrowserTask(threadId: string, turnId: string, tabId: nu
   const key = `${threadId}:${turnId}`;
   const tasks = await storedList<BrowserTaskState>(TASK_KEY);
   const existing = tasks.find((task) => task.key === key);
-  const task: BrowserTaskState = existing ?? {
-    key,
-    threadId,
-    turnId,
-    actionCount: 0,
-    canceled: false,
-    updatedAt: Date.now(),
-  };
+  const task = existing ?? await getTask({ threadId, turnId } as BrowserToolCall);
+  await getTaskPermissionMode(task);
   if (task.authorizedTabId === undefined && !task.workingTabClosed) task.authorizedTabId = tabId;
   if (task.authorizedTabId !== undefined) await refreshRememberedTaskOrigin(task, task.authorizedTabId);
   task.updatedAt = Date.now();
@@ -530,16 +563,25 @@ async function focusThreadWorkingTab(threadId: string): Promise<Record<string, u
 
 async function recordAction(call: BrowserToolCall): Promise<void> {
   const task = await getTask(call);
+  if (retiredTasks.has(taskKey(call))) throw new Error("This browser session was cleared.");
   if (finishedTurns.has(call.turnId)) throw new Error("This browser turn already finished.");
-  if (task.canceled) throw new Error("The user stopped this browser task.");
+  if (task.canceled || canceledTasks.has(task.key)) throw new Error("The user stopped this browser task.");
   if (task.finished) throw new Error("This browser turn already finished.");
   if (task.actionLimit === undefined) {
     const stored = await chrome.storage.local.get(BROWSER_TASK_ACTION_LIMIT_KEY);
     task.actionLimit = normalizeBrowserTaskActionLimit(stored[BROWSER_TASK_ACTION_LIMIT_KEY]);
+    task.reviewLimit = Math.min(task.reviewLimit ?? 20, task.actionLimit);
   }
   if (task.actionCount >= task.actionLimit) {
     throw new Error(`This browser task reached its ${task.actionLimit}-action safety limit.`);
   }
+  const markers = await storedList<ExecutionMarker>(EXECUTIONS_KEY);
+  if (markers.some((marker) => marker.key === toolKey(call))) throw new Error("This action's previous outcome is uncertain. Inspect the page before repeating it.");
+  // Keep active-task markers even on long tasks; expire only finished-task history.
+  const activeKeys = new Set((await storedList<BrowserTaskState>(TASK_KEY)).filter((item) => !item.finished && !item.canceled).map((item) => item.key));
+  if (retiredTasks.has(task.key) || canceledTasks.has(task.key) || finishedTurns.has(call.turnId)) throw new Error("This browser task stopped before execution.");
+  // Persist consumption before any browser side effect. A suspended worker cannot replay it.
+  await chrome.storage.session.set({ [EXECUTIONS_KEY]: [...markers.filter((marker) => Date.now() - marker.createdAt < TASK_TOMBSTONE_TTL_MS || (marker.taskKey && activeKeys.has(marker.taskKey))), { key: toolKey(call), taskKey: task.key, createdAt: Date.now() }] });
   task.actionCount += 1;
   task.updatedAt = Date.now();
   await saveTask(task);
@@ -548,15 +590,18 @@ async function recordAction(call: BrowserToolCall): Promise<void> {
 async function getTaskPermissionMode(task: BrowserTaskState): Promise<BrowserPermissionMode> {
   if (task.permissionMode !== undefined) {
     const normalized = normalizeBrowserPermissionMode(task.permissionMode);
+    task.autoReview = normalized === "ask" ? readAutoReviewSettings(task.autoReview) : { ...DEFAULT_AUTO_REVIEW };
     if (task.permissionMode !== normalized) {
       task.permissionMode = normalized;
-      task.updatedAt = Date.now();
       await saveTask(task);
     }
     return normalized;
   }
-  const stored = await chrome.storage.local.get(BROWSER_PERMISSION_MODE_KEY);
+  const stored = await chrome.storage.local.get([BROWSER_PERMISSION_MODE_KEY, AUTO_REVIEW_SETTINGS_KEY, BROWSER_TASK_ACTION_LIMIT_KEY]);
   task.permissionMode = normalizeBrowserPermissionMode(stored[BROWSER_PERMISSION_MODE_KEY]);
+  task.autoReview = task.permissionMode === "ask" ? readAutoReviewSettings(stored[AUTO_REVIEW_SETTINGS_KEY]) : { ...DEFAULT_AUTO_REVIEW };
+  task.reviewCount = 0;
+  task.reviewLimit = Math.min(20, normalizeBrowserTaskActionLimit(stored[BROWSER_TASK_ACTION_LIMIT_KEY]));
   task.updatedAt = Date.now();
   await saveTask(task);
   return task.permissionMode;
@@ -564,8 +609,9 @@ async function getTaskPermissionMode(task: BrowserTaskState): Promise<BrowserPer
 
 async function activeTask(call: BrowserToolCall): Promise<BrowserTaskState> {
   const task = await getTask(call);
+  if (retiredTasks.has(taskKey(call))) throw new Error("This browser session was cleared.");
   if (finishedTurns.has(call.turnId) || task.finished) throw new Error("This browser turn already finished.");
-  if (task.canceled) throw new Error("The user stopped this browser task.");
+  if (task.canceled || canceledTasks.has(task.key)) throw new Error("The user stopped this browser task.");
   return task;
 }
 
@@ -574,6 +620,7 @@ async function respondToTool(call: BrowserToolCall, success: boolean, result: un
 }
 
 async function finishTool(call: BrowserToolCall, success: boolean, result: unknown, status: string): Promise<void> {
+  if (retiredTasks.has(taskKey(call))) return;
   pendingPrompts.delete(call.callId);
   await removePendingPrompt(call.callId);
   if (success) {
@@ -691,6 +738,7 @@ async function executePageCallForTask(
   call: PageToolCall,
   task: BrowserTaskState,
   target?: PageTargetDescription,
+  approved = false,
 ): Promise<unknown> {
   if (call.tool === "click" && target?.newTab && target.href && isSafeHttpUrl(target.href)) {
     if (task.authorizedTabId === undefined) throw new Error("This browser task has no working tab.");
@@ -712,7 +760,7 @@ async function executePageCallForTask(
       selectedForTask: true,
     };
   }
-  const result = await executePageTool(call, task.authorizedTabId);
+  const result = await executePageTool(call, task.authorizedTabId, approved && target ? JSON.stringify(target) : undefined);
   return processCapturedPopup(call, task, result);
 }
 
@@ -862,7 +910,9 @@ async function handlePageCall(call: PageToolCall, announce: boolean): Promise<vo
     pendingApprovals.set(call.callId, { call, target });
     pendingPrompts.set(call.callId, { type: "approval", data: prompt });
     await persistPendingPrompt({ callId: call.callId, type: "approval", data: prompt, approval: { call, target } });
-    broadcast("tool.approval", prompt);
+    if (task.autoReview?.enabled) {
+      await reviewPageApproval(call, target, task, prompt);
+    } else broadcast("tool.approval", prompt);
     return;
   }
   await recordAction(call);
@@ -883,16 +933,100 @@ async function handlePageCall(call: PageToolCall, announce: boolean): Promise<vo
   await finishTool(call, !actionFailed, result, actionFailed ? "failed" : "succeeded");
 }
 
+function reviewActivity(model: string, status: ReviewActivity["status"], reason: string, source?: ReviewActivity["source"]): { review: ReviewActivity } {
+  return { review: { model, status, reason, ...(source ? { source } : {}) } };
+}
+
+async function showReviewFallback(call: PageToolCall, prompt: Record<string, unknown>, reason: string): Promise<void> {
+  if (!pendingApprovals.has(call.callId) || await getCompleted(call)) return;
+  await activeTask(call);
+  const pending = pendingApprovals.get(call.callId)!;
+  delete pending.review;
+  const data = { ...prompt, description: `${String(prompt.description)} ${reason}` };
+  pendingPrompts.set(call.callId, { type: "approval", data });
+  await persistPendingPrompt({ callId: call.callId, type: "approval", data, approval: pending });
+  await storeActivity(call, "awaiting confirmation", reviewActivity((await getTask(call)).autoReview?.model ?? REVIEW_MODEL, "ask_user", reason));
+  broadcast("tool.approval", data);
+}
+
+async function reviewPageApproval(call: PageToolCall, target: PageTargetDescription | undefined, task: BrowserTaskState, prompt: Record<string, unknown>): Promise<void> {
+  const candidate = reviewCandidate(call, target, task.userInstruction, task.authorizedTabId!, task.authorizedOrigin!);
+  if (!("evidence" in candidate)) return showReviewFallback(call, prompt, candidate.reason);
+  if ((task.reviewCount ?? 0) >= (task.reviewLimit ?? 0)) return showReviewFallback(call, prompt, "The automatic-review budget was reached. Please review this action.");
+  const id = crypto.randomUUID();
+  liveReviews.set(call.callId, id);
+  try {
+    const review = { id, fingerprint: await reviewFingerprint(call, target!, candidate.evidence, task.autoReview), deadline: Date.now() + REVIEW_TIMEOUT_MS };
+    if (liveReviews.get(call.callId) !== id || !pendingApprovals.has(call.callId)) return;
+    await activeTask(call);
+    const pending: PendingApproval = { call, target, review };
+    pendingApprovals.set(call.callId, pending);
+    pendingPrompts.delete(call.callId);
+    await persistPendingPrompt({ callId: call.callId, type: "approval", data: prompt, approval: pending });
+    task.reviewCount = (task.reviewCount ?? 0) + 1;
+    await saveTask(task);
+    await activeTask(call);
+    if (liveReviews.get(call.callId) !== id || !pendingApprovals.has(call.callId)) return;
+    await storeActivity(call, "reviewing", reviewActivity(task.autoReview!.model, "reviewing", "Reviewing the proposed action."));
+    const raw = await requestNative("approval.reviewConfigured", { configurationVersion: 2, systemPrompt: task.autoReview!.systemPrompt, reviewId: id, parentThreadId: call.threadId, parentTurnId: call.turnId, parentCallId: call.callId, model: task.autoReview!.model, deadline: review.deadline, evidence: candidate.evidence }, REVIEW_TIMEOUT_MS + 1500);
+    if (liveReviews.get(call.callId) !== id || !pendingApprovals.has(call.callId) || await getCompleted(call)) return;
+    await activeTask(call);
+    const result = reviewVerdictSchema.safeParse(raw);
+    if (Date.now() <= review.deadline && result.success && verdictApproves(result.data, candidate.evidence.category)) {
+      await decideTool(call.callId, true, id);
+    } else {
+      const reason = result.success && result.data.reasonCode === "timeout" ? "Automatic review timed out. Please review this action." : "Automatic review could not verify a low-risk action that matches your request. Please review it.";
+      await showReviewFallback(call, prompt, reason);
+    }
+  } catch {
+    // Model availability, validation and transport failures never authorize an action.
+    await showReviewFallback(call, prompt, "Automatic review is unavailable. Please review this action.").catch(() => undefined);
+  } finally {
+    if (liveReviews.get(call.callId) === id) liveReviews.delete(call.callId);
+    void requestNative("approval.cancel", { threadId: call.threadId, turnId: call.turnId }).catch(() => undefined);
+  }
+}
+
 async function handleDynamicToolCall(input: unknown): Promise<void> {
   const call = parseBrowserToolCall(input);
   if (!call) {
     broadcast("tool.status", { status: "failed", error: "Rejected malformed browser tool request." });
     return;
   }
+  const observedKey = taskKey(call);
+  if (!observedTasks.has(observedKey)) {
+    observedTasks.add(observedKey);
+    setTimeout(() => observedTasks.delete(observedKey), TASK_TOMBSTONE_TTL_MS);
+  }
+  if (retiredTasks.has(taskKey(call))) return;
+  let key: string;
+  try { key = toolKey(call); } catch {
+    await respondToTool(call, false, { error: "The page tool arguments were rejected by policy." }).catch(() => undefined);
+    await storeActivity(call, "failed", { error: "The page tool arguments were rejected by policy." });
+    return;
+  }
+  const inProgress = processingCalls.get(key);
+  if (inProgress) {
+    if (inProgress.requestId !== call.requestId) await respondToTool(call, false, { error: "This action is already in progress. Do not repeat it." });
+    return;
+  }
+  processingCalls.set(key, call);
   try {
     const completed = await getCompleted(call);
     if (completed) {
       await respondToTool(call, completed.success, completed.result);
+      return;
+    }
+    const pending = (await storedList<StoredPendingPrompt>(PENDING_PROMPTS_KEY)).find((item) => {
+      const saved = item.approval?.call ?? item.permission?.call;
+      return saved && toolKey(saved) === key;
+    });
+    if (pending) {
+      if (pending.callId !== call.callId) await respondToTool(call, false, { error: "This action is already awaiting approval. Do not repeat it." });
+      return;
+    }
+    if ((await storedList<ExecutionMarker>(EXECUTIONS_KEY)).some((marker) => marker.key === key)) {
+      await finishTool(call, false, { error: "The previous action outcome is uncertain. Inspect the page before repeating it." }, "failed");
       return;
     }
     if (await recordingBlocksBrowserWork()) {
@@ -949,53 +1083,65 @@ async function handleDynamicToolCall(input: unknown): Promise<void> {
       ? { error: message, recoverable: true, recoveryAction: "open-or-activate-tab" }
       : { error: message };
     await finishTool(call, false, result, /stale|expired|changed|closed/i.test(message) ? "stale" : "failed").catch(() => undefined);
+  } finally {
+    processingCalls.delete(key);
   }
 }
 
-async function decideTool(callId: string, approved: boolean): Promise<unknown> {
-  const stored = (await storedList<StoredPendingPrompt>(PENDING_PROMPTS_KEY)).find((item) => item.callId === callId);
-  const pending = pendingApprovals.get(callId) ?? stored?.approval;
-  if (!pending) throw new Error("This browser-action request is no longer pending.");
-  pendingApprovals.delete(callId);
-  pendingPrompts.delete(callId);
-  await removePendingPrompt(callId);
-  const { call } = pending;
-  if (!approved) {
-    await finishTool(call, false, { error: "The user rejected this browser action." }, "rejected");
-    return { rejected: true };
-  }
+async function decideTool(callId: string, approved: boolean, reviewerId?: string): Promise<unknown> {
+  if (decidingCalls.has(callId)) throw new Error("This action is already being handled.");
+  decidingCalls.add(callId);
+  let pending: PendingApproval | undefined;
   try {
+    const stored = (await storedList<StoredPendingPrompt>(PENDING_PROMPTS_KEY)).find((item) => item.callId === callId);
+    pending = pendingApprovals.get(callId) ?? stored?.approval;
+    if (!pending || await getCompleted(pending.call)) throw new Error("This browser-action request is no longer pending.");
+    if (!reviewerId && liveReviews.has(callId)) throw new Error("This action is still being reviewed.");
+    const { call } = pending;
+    await activeTask(call);
+    if (reviewerId && (liveReviews.get(callId) !== reviewerId || pending.review?.id !== reviewerId || Date.now() > pending.review.deadline)) throw new Error("This automatic review expired.");
+    if (!approved) {
+      pendingApprovals.delete(callId);
+      await finishTool(call, false, { error: "The user rejected this browser action." }, "rejected");
+      return { rejected: true };
+    }
     if (call.namespace === "page" && pending.target) {
-      const approvalTask = await getTask(call);
-      const currentTarget = await describePageTarget(call, true, approvalTask.authorizedTabId);
-      const reviewed = (target: PageTargetDescription) => JSON.stringify({
-        label: target.label,
-        href: target.href,
-        form: target.form,
-        submitter: target.submitter,
-        sensitive: target.sensitive,
-        newTab: target.newTab,
-        download: target.download,
-        snapshotId: target.snapshotId,
-      });
-      if (reviewed(pending.target) !== reviewed(currentTarget)) {
-        throw new Error("The page or reviewed form changed. Inspect it again before approving.");
-      }
-      const recheck = decidePageAction(call, currentTarget, await getTaskPermissionMode(approvalTask));
+      const task = await activeTask(call);
+      if (task.authorizedTabId === undefined) throw new Error("The task no longer has a working tab.");
+      const origin = await currentControlOrigin(task.authorizedTabId);
+      if (origin.tabId !== task.authorizedTabId || origin.origin !== task.authorizedOrigin || !(await hasRememberedControlAccess(origin.originPattern))) throw new Error("The page or its permission changed. Inspect it again before approving.");
+      const currentTarget = await describePageTarget(call, true, task.authorizedTabId);
+      if (reviewedTarget(pending.target) !== reviewedTarget(currentTarget)) throw new Error("The page or reviewed form changed. Inspect it again before approving.");
+      const recheck = decidePageAction(call, currentTarget, await getTaskPermissionMode(task));
       if (recheck.decision === "refuse") throw new Error(recheck.reason);
+      if (reviewerId) {
+        const candidate = reviewCandidate(call, currentTarget, task.userInstruction, origin.tabId, origin.origin);
+        if (!("evidence" in candidate) || await reviewFingerprint(call, currentTarget, candidate.evidence, task.autoReview) !== pending.review!.fingerprint || Date.now() > pending.review!.deadline) throw new Error("The automatic-review evidence changed or expired. Inspect again.");
+      }
     }
     await recordAction(call);
-    await storeActivity(call, "running");
-    const task = await getTask(call);
-    const result = call.namespace === "tabs" ? await executeTabToolForThread(call) : await executePageCallForTask(call, task, pending.target);
+    const task = await activeTask(call);
+    if (reviewerId && (liveReviews.get(callId) !== reviewerId || Date.now() > pending.review!.deadline)) throw new Error("The automatic review was canceled or expired.");
+    pendingApprovals.delete(callId);
+    pendingPrompts.delete(callId);
+    await removePendingPrompt(callId);
+    const metadata = task.autoReview?.enabled ? reviewActivity(task.autoReview.model, "approved", reviewerId ? "Approved a verified low-risk action." : "Approved by you.", reviewerId ? "reviewer" : "user") : undefined;
+    await storeActivity(call, "running", metadata);
+    await activeTask(call);
+    const result = call.namespace === "tabs" ? await executeTabToolForThread(call) : await executePageCallForTask(call, task, pending.target, true);
     const actionFailed = actionResultFailed(result);
     await finishTool(call, !actionFailed, result, actionFailed ? "failed" : "succeeded");
     return result;
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Browser action failed.";
-    await finishTool(call, false, { error: message }, /stale|expired|changed/i.test(message) ? "stale" : "failed");
+    if (pending && (!liveReviews.has(callId) || reviewerId)) {
+      pendingApprovals.delete(callId);
+      if (!(await getCompleted(pending.call))) {
+        const message = error instanceof Error ? error.message : "Browser action failed.";
+        await finishTool(pending.call, false, { error: message }, /stale|expired|changed/i.test(message) ? "stale" : "failed");
+      }
+    }
     throw error;
-  }
+  } finally { decidingCalls.delete(callId); }
 }
 
 async function continueAfterPermission(callId: string, originPattern: string, granted: boolean): Promise<unknown> {
@@ -1038,6 +1184,14 @@ async function continueAfterPermission(callId: string, originPattern: string, gr
 }
 
 async function finishBrowserTurn(turnId: string): Promise<void> {
+  finishedTurns.add(turnId);
+  setTimeout(() => finishedTurns.delete(turnId), TASK_TOMBSTONE_TTL_MS);
+  for (const pending of pendingApprovals.values()) {
+    if (pending.call.turnId === turnId) {
+      liveReviews.delete(pending.call.callId);
+      void requestNative("approval.cancel", { threadId: pending.call.threadId, turnId }).catch(() => undefined);
+    }
+  }
   const now = Date.now();
   const storedTasks = await storedList<BrowserTaskState>(TASK_KEY);
   const tasks = storedTasks
@@ -1051,10 +1205,19 @@ async function finishBrowserTurn(turnId: string): Promise<void> {
   for (const task of tasks) {
     if (task.turnId === turnId) {
       task.finished = true;
+      delete task.userInstruction;
       task.updatedAt = now;
     }
   }
   await chrome.storage.session.set({ [TASK_KEY]: tasks.slice(-40) });
+  for (const prompt of await storedList<StoredPendingPrompt>(PENDING_PROMPTS_KEY)) {
+    const call = prompt.approval?.call ?? prompt.permission?.call;
+    if (call?.turnId === turnId) {
+      pendingApprovals.delete(call.callId);
+      pendingPermissions.delete(call.callId);
+      await finishTool(call, false, { error: "This browser turn already finished." }, "canceled").catch(() => undefined);
+    }
+  }
   await Promise.all([...affectedTabIds].map((tabId) => syncTaskIndicator(tabId)));
   if (completedTask && (completedTask.successfulActionCount ?? 0) > 0 && !completedTask.canceled) {
     await chrome.storage.session.set({
@@ -1068,14 +1231,23 @@ async function finishBrowserTurn(turnId: string): Promise<void> {
 }
 
 async function cancelBrowserTask(threadId: string, turnId?: string): Promise<void> {
+  const markCanceled = (key: string) => {
+    canceledTasks.add(key);
+    setTimeout(() => canceledTasks.delete(key), TASK_TOMBSTONE_TTL_MS);
+  };
+  if (turnId) markCanceled(`${threadId}:${turnId}`);
+  for (const pending of pendingApprovals.values()) if (pending.call.threadId === threadId && (!turnId || pending.call.turnId === turnId)) liveReviews.delete(pending.call.callId);
+  void requestNative("approval.cancel", { threadId, turnId }).catch(() => undefined);
   const tasks = await storedList<BrowserTaskState>(TASK_KEY);
   let matched = false;
   const affectedTabIds = new Set<number>();
   for (const task of tasks) {
     if (task.threadId === threadId && (!turnId || task.turnId === turnId)) {
       matched = true;
+      markCanceled(task.key);
       if (task.authorizedTabId !== undefined) affectedTabIds.add(task.authorizedTabId);
       task.canceled = true;
+      delete task.userInstruction;
       task.updatedAt = Date.now();
     }
   }
@@ -1122,10 +1294,38 @@ async function routeRequest(input: unknown): Promise<unknown> {
       const storedPrompts = await storedList<StoredPendingPrompt>(PENDING_PROMPTS_KEY);
       const promptByCall = new Map(storedPrompts.map((prompt) => [prompt.callId, { type: prompt.type, data: prompt.data }]));
       for (const [callId, prompt] of pendingPrompts) promptByCall.set(callId, prompt);
+      for (const prompt of storedPrompts) {
+        const savedCall = prompt.approval?.call ?? prompt.permission?.call;
+        if (savedCall && !(await activeTask(savedCall).catch(() => undefined))) {
+          promptByCall.delete(prompt.callId);
+          pendingApprovals.delete(prompt.callId);
+          pendingPermissions.delete(prompt.callId);
+          pendingPrompts.delete(prompt.callId);
+          await removePendingPrompt(prompt.callId);
+          continue;
+        }
+        if (liveReviews.has(prompt.callId)) { promptByCall.delete(prompt.callId); continue; }
+        if (prompt.approval?.review) {
+          if (await getCompleted(prompt.approval.call)) { promptByCall.delete(prompt.callId); continue; }
+          if ((await storedList<ExecutionMarker>(EXECUTIONS_KEY)).some((marker) => marker.key === toolKey(prompt.approval!.call))) {
+            promptByCall.delete(prompt.callId);
+            await finishTool(prompt.approval.call, false, { error: "The previous action outcome is uncertain. Inspect the page before repeating it." }, "failed");
+          } else {
+            delete prompt.approval.review;
+            prompt.data = { ...prompt.data, description: `${String(prompt.data.description)} Automatic review was interrupted. Please review this action.` };
+            await persistPendingPrompt(prompt);
+            promptByCall.set(prompt.callId, { type: prompt.type, data: prompt.data });
+            await storeActivity(prompt.approval.call, "awaiting confirmation", reviewActivity((await getTask(prompt.approval.call)).autoReview?.model ?? REVIEW_MODEL, "ask_user", "Automatic review was interrupted. Please review this action."));
+          }
+        }
+      }
+      const storedNotice = (await chrome.storage.session.get(COMPLETION_NOTICE_KEY))[COMPLETION_NOTICE_KEY];
+      const completionNotice = freshCompletionNotice(storedNotice);
+      if (storedNotice && !completionNotice) await chrome.storage.session.remove(COMPLETION_NOTICE_KEY);
       return {
         activities: await storedList<Record<string, unknown>>(ACTIVITY_KEY),
         prompts: [...promptByCall.values()],
-        completionNotice: (await chrome.storage.session.get(COMPLETION_NOTICE_KEY))[COMPLETION_NOTICE_KEY] ?? null,
+        completionNotice,
       };
     }
     case "COMPLETION_NOTICE_DISMISS":
@@ -1134,9 +1334,31 @@ async function routeRequest(input: unknown): Promise<unknown> {
     case "ACCOUNT_READ": return accountResponseSchema.parse(await requestNative("account.read"));
     case "AUTH_LOGIN": return loginResponseSchema.parse(await requestNative("auth.login"));
     case "AUTH_CANCEL": return requestNative("auth.cancel", { loginId: request.loginId });
-    case "AUTH_LOGOUT": return requestNative("auth.logout");
-    case "DELETE_ALL_LOCAL_DATA": return requestNative("data.deleteAll");
+    case "AUTH_LOGOUT":
+    case "DELETE_ALL_LOCAL_DATA":
+      lifecycleEpoch++;
+      for (const key of observedTasks) {
+        retiredTasks.add(key);
+        setTimeout(() => { retiredTasks.delete(key); observedTasks.delete(key); }, TASK_TOMBSTONE_TTL_MS);
+      }
+      for (const prompt of pendingApprovals.values()) liveReviews.delete(prompt.call.callId);
+      for (const task of await storedList<BrowserTaskState>(TASK_KEY)) {
+        retiredTasks.add(task.key);
+        setTimeout(() => retiredTasks.delete(task.key), TASK_TOMBSTONE_TTL_MS);
+        if (!task.finished && !task.canceled) {
+          await cancelBrowserTask(task.threadId, task.turnId);
+          void requestNative("chat.interrupt", { threadId: task.threadId, turnId: task.turnId }).catch(() => undefined);
+        }
+      }
+      pendingApprovals.clear();
+      pendingPermissions.clear();
+      pendingPrompts.clear();
+      return requestNative(request.type === "AUTH_LOGOUT" ? "auth.logout" : "data.deleteAll");
+    case "AUTO_REVIEW_READ": return reviewCapabilitiesSchema.parse(await requestNative("approval.capabilities"));
+    case "CHAT_SETTINGS_READ": return chatSettingsSchema.parse(await requestNative("chat.settingsRead"));
+    case "CHAT_SETTINGS_WRITE": return chatSettingsSchema.parse(await requestNative("chat.settingsWrite", request.settings));
     case "MODELS_READ": return modelsResponseSchema.parse(await requestNative("models.list"));
+    case "ATTACHMENTS_REQUEST": return requestNative("attachments.request", request.request, NATIVE_TIMEOUT_MS);
     case "SKILLS_LIST": return skillsListResponseSchema.parse(await requestNative("skills.list"));
     case "SKILLS_SET_ENABLED": return skillEnabledResponseSchema.parse(await requestNative("skills.setEnabled", { name: request.name, enabled: request.enabled }));
     case "SKILLS_DELETE": return skillDeletedResponseSchema.parse(await requestNative("skills.delete", { name: request.name }));
@@ -1166,13 +1388,22 @@ async function routeRequest(input: unknown): Promise<unknown> {
     }
     case "CHAT_SEND": {
       if (await recordingBlocksBrowserWork()) throw new Error("Finish or cancel skill recording before sending a message.");
+      const epoch = lifecycleEpoch;
       const tabId = await ensureThreadWorkingTab(request.threadId);
       await rememberThreadUrls(request.threadId, urlsInText(request.text));
-      const result = turnResponseSchema.parse(await requestNative("chat.send", { threadId: request.threadId, text: request.text, clientMessageId: request.clientMessageId, model: request.model }));
-      await initializeBrowserTask(request.threadId, result.turnId, tabId);
+      const intents = (await storedList<ReviewIntent>(REVIEW_INTENTS_KEY)).filter((item) => item.threadId !== request.threadId && Date.now() - item.createdAt < 60_000);
+      await chrome.storage.session.set({ [REVIEW_INTENTS_KEY]: [...intents, { threadId: request.threadId, text: request.text.length <= 4000 ? request.text : undefined, createdAt: Date.now() }].slice(-20) });
+      const raw = await requestNative("chat.send", { threadId: request.threadId, userText: request.text, pageContext: request.pageContext, attachments: request.attachments, owner: request.owner, clientMessageId: request.clientMessageId, model: request.model });
+      const result = turnResponseSchema.extend({ replayed: z.boolean().optional(), attachments: z.array(attachmentSummarySchema).max(5).optional() }).parse(raw);
+      if (epoch !== lifecycleEpoch) throw new Error("This browser session was cleared before the message was accepted.");
+      if (!result.replayed) await initializeBrowserTask(request.threadId, result.turnId, tabId);
+      await chrome.storage.session.set({ [REVIEW_INTENTS_KEY]: (await storedList<ReviewIntent>(REVIEW_INTENTS_KEY)).filter((item) => item.threadId !== request.threadId) });
       return result;
     }
-    case "CHAT_INTERRUPT": return requestNative("chat.interrupt", { threadId: request.threadId, turnId: request.turnId });
+    case "CHAT_CANCEL_SEND": return requestNative("chat.cancelSend", { threadId: request.threadId, clientMessageId: request.clientMessageId });
+    case "CHAT_INTERRUPT":
+      await cancelBrowserTask(request.threadId, request.turnId);
+      return requestNative("chat.interrupt", { threadId: request.threadId, turnId: request.turnId });
     case "BROWSER_TASK_CANCEL": return cancelBrowserTask(request.threadId, request.turnId);
     case "WORKING_TAB_FOCUS": return focusThreadWorkingTab(request.threadId);
     case "PAGE_ATTACH": return captureCurrentPage();
