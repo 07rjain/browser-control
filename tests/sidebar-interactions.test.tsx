@@ -67,6 +67,13 @@ async function ready() {
   await screen.findByRole("button", { name: "Attach the current page" });
 }
 
+async function enableAutoReview() {
+  // A real browser cannot select this option until the companion capability
+  // check completes. fireEvent otherwise bypasses the disabled option.
+  await vi.waitFor(() => expect((screen.getByRole("option", { name: "Auto review" }) as HTMLOptionElement).disabled).toBe(false));
+  await act(async () => fireEvent.change(screen.getByRole("combobox", { name: "Agent permission" }), { target: { value: "auto" } }));
+}
+
 function emit(event: string, data: unknown) {
   for (const listener of listeners) listener({ source: "codex-sidebar-background", event, data } as SidebarEvent, { id: "sidebar-test" });
 }
@@ -148,7 +155,7 @@ describe("sidebar interactions", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open settings" }));
     fireEvent.click(screen.getByRole("tab", { name: "Agent" }));
     const select = screen.getByRole("combobox", { name: "Agent permission" });
-    await act(async () => fireEvent.change(select, { target: { value: "auto" } }));
+    await enableAutoReview();
     expect(stored.codexSidebarBrowserPermissionMode).toBe("ask");
     expect(stored.codexSidebarAutoReview).toEqual({ version: 2, enabled: true, model: "gpt-6-luna", systemPrompt: DEFAULT_REVIEW_SYSTEM_PROMPT });
     fireEvent.click(screen.getByText("Auto review settings"));
@@ -165,7 +172,7 @@ describe("sidebar interactions", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open settings" }));
     fireEvent.click(screen.getByRole("tab", { name: "Agent" }));
     const permission = screen.getByRole("combobox", { name: "Agent permission" });
-    await act(async () => fireEvent.change(permission, { target: { value: "auto" } }));
+    await enableAutoReview();
     fireEvent.click(screen.getByText("Auto review settings"));
     const model = screen.getByRole("combobox", { name: "Reviewer model" });
     expect(within(model).getByRole("option", { name: "Beta" })).toBeTruthy();
@@ -193,7 +200,7 @@ describe("sidebar interactions", () => {
   it("rejects an empty prompt while retaining the saved prompt", async () => {
     await ready(); fireEvent.click(screen.getByRole("button", { name: "Open settings" }));
     fireEvent.click(screen.getByRole("tab", { name: "Agent" }));
-    await act(async () => fireEvent.change(screen.getByRole("combobox", { name: "Agent permission" }), { target: { value: "auto" } }));
+    await enableAutoReview();
     fireEvent.click(screen.getByText("Auto review settings"));
     fireEvent.change(screen.getByRole("textbox", { name: "Reviewer system prompt" }), { target: { value: "  " } });
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Save prompt" })));

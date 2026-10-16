@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { encodeNativeMessage, LengthPrefixedJsonDecoder } from "../bridge/protocol.mjs";
 import { LEGACY_THREAD_ERROR } from "../bridge/restricted-threads.mjs";
 import { stopProbeProcess } from "./probe-process.mjs";
+import { APP_SERVER_ARGS, codexInvocation } from "../bridge/codex-launch.mjs";
 import { probeCodexTools, probeCodexImageInput, probeCodexReviewerTools } from "./probe-codex-tools.mjs";
 
 import { probeReviewerConcurrency } from "./reviewer-compatibility.mjs";
@@ -14,6 +15,12 @@ import { probeChatSettings } from "./probe-chat-settings.mjs";
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const temporaryHome = mkdtempSync(join(tmpdir(), "codex-sidebar-smoke-"));
 const codexBinary = process.env.CODEX_BIN || "codex";
+const invocation = codexInvocation({ env: { ...process.env, CODEX_BIN: codexBinary } });
+const prefix = invocation.args.slice(0, -APP_SERVER_ARGS.length);
+const version = execFileSync(invocation.command, [...prefix, "--version"], {
+  env: { ...process.env, CODEX_HOME: temporaryHome }, encoding: "utf8", timeout: 15_000, windowsHide: true,
+}).trim();
+process.stdout.write(`Bridge probe uses ${JSON.stringify(invocation)}; ${version}\n`);
 const unsafeHost = spawn(process.execPath, [join(repositoryRoot, "bridge", "native-host.mjs")], {
   env: {
     ...process.env,
@@ -52,12 +59,14 @@ const host = spawn(process.execPath, [join(repositoryRoot, "bridge", "native-hos
 const decoder = new LengthPrefixedJsonDecoder();
 const pending = new Map();
 let stderr = "";
+let lastBridgeEvent = "";
 
 host.stderr.on("data", (chunk) => {
   stderr += chunk.toString("utf8");
 });
 host.stdout.on("data", (chunk) => {
   for (const message of decoder.push(chunk)) {
+    if (message.type === "event" && ["bridge.status", "bridge.error"].includes(message.event)) lastBridgeEvent = JSON.stringify(message.data);
     if (message.type !== "response") continue;
     const request = pending.get(message.id);
     if (!request) continue;
@@ -71,7 +80,7 @@ function request(method, params) {
   const id = crypto.randomUUID();
   host.stdin.write(encodeNativeMessage({ type: "request", id, method, params }));
   return new Promise((resolveRequest, rejectRequest) => {
-    const timeout = setTimeout(() => rejectRequest(new Error(`Timed out: ${method}`)), 15_000);
+    const timeout = setTimeout(() => rejectRequest(new Error(`Timed out: ${method}. ${stderr}\n${lastBridgeEvent}`)), 15_000);
     pending.set(id, {
       resolve: (value) => {
         clearTimeout(timeout);
