@@ -27,6 +27,47 @@ function storageArea(data: Record<string, unknown>) {
 describe("service-worker browser orchestration", () => {
   beforeEach(() => vi.resetModules());
 
+  it.each([
+    { errors: ["workspace routing discovery timed out"], attempts: 2, recovered: true },
+    { errors: ["workspace routing discovery timed out", "workspace routing discovery timed out"], attempts: 2, recovered: false },
+    { errors: ["workspace routing discovery unauthorized (401)"], attempts: 1, recovered: false },
+    { errors: ["required ChatGPT backend conflicts with workspace routing"], attempts: 1, recovered: false },
+  ])("bounds account-check recovery for $errors", async ({ errors, attempts, recovered }) => {
+    let onMessage: (message: unknown) => void = () => {};
+    const account = { type: "chatgpt", email: null, planType: "test" };
+    const replies = [...errors];
+    const nativeRequests: NativeRequest[] = [];
+    const port = {
+      onMessage: { addListener: (listener: typeof onMessage) => { onMessage = listener; } },
+      onDisconnect: { addListener: vi.fn() },
+      postMessage: (message: NativeRequest) => {
+        nativeRequests.push(message);
+        const error = replies.shift();
+        queueMicrotask(() => onMessage({ type: "response", id: message.id, ok: !error, ...(error ? { error } : { data: { account, requiresOpenaiAuth: true } }) }));
+      },
+    };
+    vi.stubGlobal("chrome", {
+      runtime: {
+        id: "extension-id", connectNative: () => port, sendMessage: vi.fn(async () => undefined),
+        onMessage: { addListener: vi.fn() }, onInstalled: { addListener: vi.fn() }, onStartup: { addListener: vi.fn() },
+      },
+      sidePanel: { setPanelBehavior: vi.fn(async () => undefined) },
+      tabs: { onRemoved: { addListener: vi.fn() } },
+    });
+    const { serviceWorkerTestHooks } = await import("../src/background/service-worker");
+    const check = () => serviceWorkerTestHooks.routeRequest({ type: "ACCOUNT_READ", requestId: crypto.randomUUID() });
+    const outcomes = await Promise.allSettled([check(), check()]);
+    if (recovered) {
+      expect(outcomes).toEqual(Array.from({ length: 2 }, () => ({ status: "fulfilled", value: { account, requiresOpenaiAuth: true } })));
+    } else {
+      expect(outcomes).toEqual(Array.from({ length: 2 }, () => ({ status: "rejected", reason: expect.objectContaining({ message: errors.at(-1) }) })));
+    }
+    expect(nativeRequests.map((request) => request.method)).toEqual(Array.from({ length: attempts }, () => "account.read"));
+    // A failed check must not poison Retry connection or cache an account.
+    await expect(check()).resolves.toEqual({ account, requiresOpenaiAuth: true });
+    expect(nativeRequests).toHaveLength(attempts + 1);
+  });
+
   it("keeps a task active after its working tab closes and allows a background replacement", async () => {
     const sessionData: Record<string, unknown> = {
       codexSidebarThreadWorkingTabs: [{ threadId: "thread-recover", tabId: 12, updatedAt: Date.now() }],

@@ -4,6 +4,13 @@ export function isMissingNativeHost(message: string | null | undefined): boolean
   return /native messaging host not found/i.test(message ?? "");
 }
 
+export function isWorkspaceRoutingTimeout(message: string | null | undefined): boolean {
+  return message === "workspace routing discovery timed out";
+}
+
+export const WORKSPACE_ROUTING_TIMEOUT_MESSAGE =
+  "Codex timed out while checking your ChatGPT workspace. Check your internet connection, VPN or proxy, then choose Retry connection.";
+
 export const LEGACY_THREAD_ERROR =
   "This chat was created before Browser Control limited Codex's built-in tools, so it can no longer be continued.";
 

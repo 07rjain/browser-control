@@ -150,6 +150,20 @@ npm run test:installed-host
 
 `test:bridge` exercises a real signed-out Codex App Server/native-host exchange. It does not replace testing the installed extension in Chrome.
 
+## GitHub CI
+
+The [Desktop compatibility workflow](.github/workflows/compatibility.yml) runs on pushes, pull requests, and manual dispatch. One job runs independently on Ubuntu, Windows, and macOS, each with Node.js 24 and the verified Codex CLI 0.162.1.
+
+| Check | Purpose |
+| --- | --- |
+| `npm ci` | Reproduce the exact dependency versions in the lockfile. |
+| Typecheck and lint | Catch incompatible types and static code errors. |
+| `npm test` | Check observable UI, protocol, safety-policy, lifecycle, and platform behavior. |
+| `npm run test:bridge` | Exercise the real Codex/native protocol using a signed-out temporary home and local synthetic providers. |
+| `npm run build:release` and `npm run test:release` | Build extension/companion archives, then verify the extracted companion starts correctly. |
+
+This catches differences in Windows executable/shim resolution, POSIX launchers, paths, and packaging before changes reach users. It builds and checks artifacts without publishing them. It does not exercise a live signed-in ChatGPT workspace or the installed browser UI; those require the installed-host and manual Chrome checks.
+
 ## Manual Chrome testing
 
 Manual testing is required for browser-visible or browser-action changes because unit tests cannot fully reproduce Chrome permissions, native messaging, side-panel lifecycle, dynamic DOM updates, or real site behavior.
@@ -250,6 +264,12 @@ Unsupported surfaces such as protected Chrome pages, cross-origin frames, canvas
 No host access is granted at installation. Full access can request the manifest's optional normal-web all-sites patterns from an explicit user gesture; Ask every time removes them. Cookies, history, bookmarks, downloads, `webRequest`, and debugger access are never requested.
 
 ## Troubleshooting
+
+**workspace routing discovery timed out:** Codex is checking the server routing for your ChatGPT account/workspace. CLI 0.162.1 limits that discovery to 15 seconds. Browser Control shares simultaneous account checks and retries this specific transient failure once. If it persists, the sidebar keeps the companion marked connected and offers **Retry connection** with network/VPN/proxy guidance. It does not clear sign-in, reinstall the companion, bypass workspace routing, or resend any chat/browser action. Rebuild and reload the unpacked extension to apply this recovery change. `npm run test:installed-host` verifies the real installed companion and prints only whether a ChatGPT account is present, without account identifiers or credentials.
+
+Connection-recovery manual checklist: reopen the signed-in sidebar; confirm a transient timeout can reach chat; check a persistent timeout offers workspace guidance and Retry without reinstall/sign-in prompts; select Retry and verify Connecting disables repeats; disconnect while a check is pending and confirm a late result cannot restore chat; inspect both extension consoles. Browser control was unavailable on 2026-10-17, so these manual UI scenarios remain pending. Regression tests use injected native replies and component events; they do not reproduce a live ChatGPT routing outage.
+
+Connection-recovery local validation on 2026-10-17 (macOS 27.0.1, Node 20.20.1, Codex CLI 0.162.1, base `7f55e75` plus connection fixes): 230 automated tests passed with one Windows-only skip; typecheck, lint, bridge smoke, release build, and extracted-release smoke passed. The real installed-host smoke passed and confirmed an existing ChatGPT sign-in without printing account identifiers. Five targeted checks failed against the original code for the expected recovery/concurrency/UI defects, then passed after repair. GitHub's checked `main` run at `b030c5f` passed on all three operating systems; these local changes need a push before GitHub can run them.
 
 **Native host not found:** from any folder, run `git clone --depth 1 -b feat/desktop-companion https://github.com/07rjain/browser-control.git "$HOME/browser-control" || git -C "$HOME/browser-control" pull --ff-only && node "$HOME/browser-control/scripts/install-native-host.mjs"`. Node, Codex, and the extension can be installed in any order. Then choose **Retry connection** in the side panel.
 

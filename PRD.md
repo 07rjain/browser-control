@@ -103,6 +103,8 @@ Chrome documents that the Side Panel API is available to Manifest V3 extensions 
 - The extension never reads cookies from `chatgpt.com`, scrapes an existing ChatGPT session, or stores raw credentials in bundled code, page storage, or logs.
 - Authentication uses an officially documented Codex mechanism. The development MVP uses a native-messaging companion around Codex app-server; Codex owns credentials and the companion exposes only a narrow authenticated protocol to the extension.
 - The extension displays the authenticated account state returned by the supported Codex interface without claiming unsupported account attributes.
+- Concurrent startup/reconnect account checks share one in-flight request. Retry the exact Codex workspace-discovery timeout once; authentication, routing-policy and other failures stop immediately. Recovery must not replay a login, chat turn or browser action, or bypass Codex's selected-workspace routing.
+- A persistent workspace timeout shows the companion as connected with a retryable ChatGPT workspace/network error. A pending retry disables repeated reconnect clicks, and stale account responses after disconnect, sign-out or deletion cannot restore the previous session. No new permissions, credential handling or external services are introduced.
 - Failed, canceled, or expired login returns the user to a retryable signed-out state.
 - Sign-out clears local extension session metadata and invokes the supported Codex logout path.
 

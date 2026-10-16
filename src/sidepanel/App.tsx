@@ -19,7 +19,7 @@ import {
 } from "../shared/page-tools";
 import { AUTO_REVIEW_SETTINGS_KEY, DEFAULT_AUTO_REVIEW, REVIEW_MODEL, DEFAULT_REVIEW_SYSTEM_PROMPT, REQUIRED_REVIEW_INSTRUCTIONS, MAX_REVIEW_SYSTEM_PROMPT, autoReviewSettingsSchema, readAutoReviewSettings, reviewCapabilitiesSchema, type AutoReviewSettings } from "../shared/auto-review";
 import { IDLE_RECORDING_VIEW, MAX_RECORDING_STEPS, MAX_SKILL_DOCUMENT_CHARS, recordingStepSummary, type RecordingView } from "../shared/skill-recording";
-import { COMPANION_INSTALL_COMMAND, isLegacyThreadError, isMissingNativeHost } from "../shared/companion-setup";
+import { COMPANION_INSTALL_COMMAND, isLegacyThreadError, isMissingNativeHost, isWorkspaceRoutingTimeout, WORKSPACE_ROUTING_TIMEOUT_MESSAGE } from "../shared/companion-setup";
 import { activityStepLabel, groupToolStatuses, hasBrowserActivityForTurn, latestToolStatuses, summarizeToolStatuses, visibleActivityFormFields, type ToolStatus } from "./activity";
 import { settleCanceledMessages, type ChatMessage } from "./chat-state";
 import { MAX_ATTACHED_FILES, readAttachedFile, type AttachedFile } from "./attached-files";
@@ -316,6 +316,7 @@ function StarterIcon({ id }: { id: StarterTask["id"] }) {
 
 export default function App() {
   const [authState, setAuthState] = useState<AuthState>("checking");
+  const accountCheckGeneration = useRef(0);
   const [account, setAccount] = useState<Account | null>(null);
   const [login, setLogin] = useState<LoginDetails | null>(null);
   const [threadId, setThreadId] = useState<string | null>(null);
@@ -409,14 +410,20 @@ export default function App() {
   const activeBrowserTask = streaming && hasBrowserActivityForTurn(toolStatuses, activeTurnId);
 
   const refreshAccount = useCallback(async () => {
+    const generation = ++accountCheckGeneration.current;
+    setAuthState((current) => current === "ready" || current === "authenticating" ? current : "checking");
+    setError(null);
     try {
       const result = await sendRequest<{ account: Account | null }>({ type: "ACCOUNT_READ" });
+      if (generation !== accountCheckGeneration.current) return;
       setAccount(result.account);
       setAuthState(result.account?.type === "chatgpt" ? "ready" : "signed-out");
       setError(null);
     } catch (cause) {
-      setAuthState("offline");
-      setError(cause instanceof Error ? cause.message : "The local companion is unavailable.");
+      if (generation !== accountCheckGeneration.current) return;
+      const message = cause instanceof Error ? cause.message : "The local companion is unavailable.";
+      setAuthState(isWorkspaceRoutingTimeout(message) ? "workspace-unavailable" : "offline");
+      setError(message);
     }
   }, []);
 
@@ -665,7 +672,10 @@ export default function App() {
       if (message?.source !== "codex-sidebar-background") return;
       switch (message.event) {
         case "bridge.status":
-          if ((message.data as { connected?: boolean })?.connected === false) setAuthState("offline");
+          if ((message.data as { connected?: boolean })?.connected === false) {
+            accountCheckGeneration.current++;
+            setAuthState("offline");
+          }
           break;
         case "auth.updated":
         case "auth.loginCompleted":
@@ -776,6 +786,7 @@ export default function App() {
   }, [refreshAccount, refreshSkills, showCompletionNotice]);
 
   const signIn = async () => {
+    accountCheckGeneration.current++;
     setAuthState("authenticating");
     setError(null);
     setCompletionNotice(null);
@@ -790,12 +801,14 @@ export default function App() {
   };
 
   const cancelLogin = async () => {
+    accountCheckGeneration.current++;
     if (login) await sendRequest({ type: "AUTH_CANCEL", loginId: login.loginId }).catch(() => undefined);
     setLogin(null);
     setAuthState("signed-out");
   };
 
   const signOut = async () => {
+    accountCheckGeneration.current++;
     await sendRequest({ type: "AUTH_LOGOUT" });
     setAccount(null);
     setLogin(null);
@@ -1394,6 +1407,7 @@ export default function App() {
 
   const deleteAllLocalData = async () => {
     if (!confirm("Delete all Browser Control data from this browser and computer, including local conversations and the Browser Control ChatGPT sign-in? The installed companion will be kept.")) return;
+    accountCheckGeneration.current++;
     setError(null);
     preparationRef.current?.abort();
     sendAbortRef.current?.abort();
@@ -1505,7 +1519,7 @@ export default function App() {
             </div>
             <button className="text-button login-cancel" onClick={() => void cancelLogin()}>Cancel</button>
           </section>
-        ) : authState !== "offline" && (
+        ) : authState !== "offline" && authState !== "workspace-unavailable" && (
           <button className="primary-button welcome-action rise" onClick={() => void signIn()} disabled={authState === "checking"}>
             {authState === "checking" ? "Connecting…" : "Sign in with ChatGPT"}
           </button>
@@ -1526,11 +1540,11 @@ export default function App() {
             {desktopOs === "linux" && <p>Use a normal Chrome or Brave package. Snap and Flatpak builds cannot start the companion.</p>}
             <p>Leave this panel open, then choose Retry connection.</p>
           </section>
-        ) : error && <div className="error-banner" role="alert">{error}</div>}
-        {(authState === "offline" || authState === "error") && (
+        ) : error && <div className="error-banner" role="alert">{isWorkspaceRoutingTimeout(error) ? WORKSPACE_ROUTING_TIMEOUT_MESSAGE : error}</div>}
+        {(authState === "offline" || authState === "error" || authState === "workspace-unavailable") && (
           <div className="connection-actions">
             <button className="secondary-button" onClick={() => void refreshAccount()}>Retry connection</button>
-            {!isMissingNativeHost(error) && (
+            {!isMissingNativeHost(error) && !isWorkspaceRoutingTimeout(error) && (
               <button className="text-button" onClick={() => void sendRequest({ type: "OPEN_EXTERNAL", url: COMPANION_SUPPORT_URL })}>
                 Install or update companion
               </button>

@@ -39,7 +39,9 @@ function request(method) {
   const id = crypto.randomUUID();
   host.stdin.write(encodeNativeMessage({ type: "request", id, method }));
   return new Promise((resolveRequest, rejectRequest) => {
-    const timeout = setTimeout(() => rejectRequest(new Error(`Timed out: ${method}\n${stderr}`)), 15_000);
+    // Codex's signed-in workspace discovery alone can take 15 seconds. Leave
+    // enough time to receive its actual error rather than masking it here.
+    const timeout = setTimeout(() => rejectRequest(new Error(`Timed out: ${method}\n${stderr}`)), 30_000);
     pending.set(id, {
       resolve: (value) => {
         clearTimeout(timeout);
@@ -55,11 +57,12 @@ function request(method) {
 
 try {
   const status = await request("bridge.status");
-  await request("account.read");
+  const account = await request("account.read");
   const catalog = await request("models.list");
   if (status.connected !== true) throw new Error("Installed host did not connect.");
   if (!Array.isArray(catalog.models)) throw new Error("Installed host returned an invalid model catalog.");
   process.stdout.write("Installed native host passed a Chrome-like environment smoke test.\n");
+  process.stdout.write(`Account state: ${account.account?.type === "chatgpt" ? "signed in with ChatGPT" : "no ChatGPT account"}.\n`);
 } finally {
   await stopProbeProcess(host);
 }

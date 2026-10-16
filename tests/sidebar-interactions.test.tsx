@@ -15,11 +15,13 @@ let restoredNotice: unknown;
 let reviewerAvailable: boolean;
 let chatPrompt: string;
 let chatSettingsError: string | null;
+let readAccount: () => Promise<unknown>;
 
 beforeEach(() => {
   stored = {}; requests = []; restoredNotice = null; reviewerAvailable = true;
   chatPrompt = DEFAULT_CHAT_SYSTEM_PROMPT; chatSettingsError = null;
   capture = async () => page;
+  readAccount = async () => ({ account: { type: "chatgpt", email: null, planType: "test" } });
   listeners.clear();
   vi.stubGlobal("chrome", {
     runtime: {
@@ -30,7 +32,7 @@ beforeEach(() => {
         requests.push(request);
         let data: unknown = {};
         switch (request.type) {
-          case "ACCOUNT_READ": data = { account: { type: "chatgpt", email: null, planType: "test" } }; break;
+          case "ACCOUNT_READ": data = await readAccount(); break;
           case "AUTO_REVIEW_READ": data = { version: 2, available: reviewerAvailable, configurableModel: true, editableSystemPrompt: true }; break;
           case "CHAT_SETTINGS_READ": data = { version: 1, systemPrompt: chatPrompt }; break;
           case "CHAT_SETTINGS_WRITE": {
@@ -79,6 +81,36 @@ function emit(event: string, data: unknown) {
 }
 
 describe("sidebar interactions", () => {
+  it("distinguishes a workspace timeout from a missing companion and reconnects without a new login", async () => {
+    readAccount = async () => { throw new Error("workspace routing discovery timed out"); };
+    render(<App />);
+    const retry = await screen.findByRole("button", { name: "Retry connection" });
+    expect(screen.getByRole("alert").textContent).toMatch(/ChatGPT workspace.*connection.*VPN.*proxy/);
+    expect(screen.getByText("Companion connected")).toBeTruthy();
+    expect(screen.queryByText(/Not responding/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Install or update companion" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Sign in with ChatGPT" })).toBeNull();
+    let finish: (value: unknown) => void = () => {};
+    readAccount = () => new Promise((resolve) => { finish = resolve; });
+    await act(async () => fireEvent.click(retry));
+    expect((screen.getByRole("button", { name: "Connecting…" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByRole("button", { name: "Retry connection" })).toBeNull();
+    await act(async () => finish({ account: { type: "chatgpt", email: null, planType: "test" } }));
+    await screen.findByRole("button", { name: "Attach the current page" });
+    expect(requests.some((request) => ["AUTH_LOGIN", "AUTH_LOGOUT", "DELETE_ALL_LOCAL_DATA", "CHAT_SEND"].includes(String(request.type)))).toBe(false);
+  });
+
+  it("ignores a late account result after the companion disconnects", async () => {
+    await ready();
+    let finish: (value: unknown) => void = () => {};
+    readAccount = () => new Promise((resolve) => { finish = resolve; });
+    await act(async () => emit("auth.updated", {}));
+    await act(async () => emit("bridge.status", { connected: false }));
+    await screen.findByRole("button", { name: "Retry connection" });
+    await act(async () => finish({ account: { type: "chatgpt", email: null, planType: "test" } }));
+    expect(screen.getByRole("button", { name: "Retry connection" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Attach the current page" })).toBeNull();
+  });
   it("shows one settings section at a time, keeps drafts across sections, and supports keyboard navigation and dismissal", async () => {
     await ready(); fireEvent.click(screen.getByRole("button", { name: "Open settings" }));
     const settings = screen.getByRole("dialog", { name: "Settings" });
