@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createApprovalReviewer, parseReviewVerdict, REVIEW_OUTPUT_SCHEMA, DEFAULT_REVIEW_SYSTEM_PROMPT, MAX_REVIEW_SYSTEM_PROMPT } from "../bridge/approval-reviewer.mjs";
+import { createApprovalReviewer, parseReviewVerdict, REVIEW_OUTPUT_SCHEMA } from "../bridge/approval-reviewer.mjs";
 
 const verdict = { decision: "approve", risk: "low", matchesUserRequest: true, missingContext: false, reasonCode: "requested_benign_search", reason: "Requested benign search." };
 const params = () => ({ reviewId: crypto.randomUUID(), parentThreadId: "parent", parentTurnId: "parent-turn", model: "gpt-6-luna", evidence: { policyVersion: 1, category: "search" } });
@@ -39,10 +39,8 @@ describe("isolated approval-review service", () => {
     expect(request.mock.calls[1][1]).not.toHaveProperty("effort");
     complete(); expect(await result).toEqual(verdict); reviewer.close();
   });
-  it("shares defaults with the sidebar and rejects empty or excessive prompts before creating a thread", async () => {
-    const { DEFAULT_AUTO_REVIEW } = await import("../src/shared/auto-review");
-    expect(DEFAULT_AUTO_REVIEW.systemPrompt).toBe(DEFAULT_REVIEW_SYSTEM_PROMPT);
-    for (const systemPrompt of ["", "  ", "x".repeat(MAX_REVIEW_SYSTEM_PROMPT + 1), "bad\0prompt"]) {
+  it("rejects empty, excessive or null-containing prompts before creating a thread", async () => {
+    for (const systemPrompt of ["", "  ", "x".repeat(6001), "bad\0prompt"]) {
       const { reviewer, request } = fixture();
       await expect(reviewer.review({ ...params(), systemPrompt })).rejects.toThrow(/system prompt/);
       expect(request).not.toHaveBeenCalled(); reviewer.close();

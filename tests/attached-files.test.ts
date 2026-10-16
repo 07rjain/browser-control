@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { formatFileContext, isTextFile, readAttachedFile } from "../src/sidepanel/attached-files";
+import { readAttachedFile } from "../src/sidepanel/attached-files";
 import { attachmentOperationSchema, parsePageRange } from "../src/shared/attachments";
 import { imageDimensions } from "../src/sidepanel/attachments/prepare";
 
@@ -25,15 +25,11 @@ describe("attached files", () => {
     header.setUint32(16, 640); header.setUint32(20, 480);
     expect(imageDimensions(png)).toEqual({ width: 640, height: 480, mime: "image/png" });
   });
-  it("accepts text files and rejects other kinds", () => {
-    expect(isTextFile({ name: "notes.md", type: "" })).toBe(true);
-    expect(isTextFile({ name: "data.bin", type: "application/octet-stream" })).toBe(false);
-    expect(isTextFile({ name: "page.html", type: "text/html" })).toBe(true);
-  });
-
-  it("keeps text, truncates long files, and refuses binary contents", async () => {
-    const notes = new File(["hello"], "notes.txt", { type: "text/plain" });
-    await expect(readAttachedFile(notes)).resolves.toMatchObject({ name: "notes.txt", text: "hello", truncated: false });
+  it("reads text and Markdown, truncates long files, and refuses unsupported or binary contents", async () => {
+    for (const [name, type] of [["notes.txt", "text/plain"], ["notes.md", ""], ["page.data", "text/html"]]) {
+      await expect(readAttachedFile(new File(["hello"], name, { type }))).resolves.toMatchObject({ name, kind: "text", text: "hello", truncated: false });
+    }
+    await expect(readAttachedFile(new File(["hello"], "data.bin", { type: "application/octet-stream" }))).rejects.toThrow(/unsupported/);
 
     const long = new File(["a".repeat(24_010)], "long.txt", { type: "text/plain" });
     const truncated = await readAttachedFile(long);
@@ -43,12 +39,5 @@ describe("attached files", () => {
     const binary = new File([new Uint8Array([65, 0, 66])], "secret.txt", { type: "text/plain" });
     await expect(readAttachedFile(binary)).rejects.toThrow(/not a text file/);
     await expect(readAttachedFile(new File([new Uint8Array([255, 254, 65])], "invalid.txt"))).rejects.toThrow(/UTF-8/);
-  });
-
-  it("wraps file text so the model can tell it from the user's request", () => {
-    const context = formatFileContext([{ name: "notes.txt", text: "alpha", truncated: false }]);
-    expect(context).toContain("BEGIN USER-ATTACHED UNTRUSTED FILE: notes.txt");
-    expect(context).toContain("alpha");
-    expect(context).toContain("END USER-ATTACHED UNTRUSTED FILE");
   });
 });

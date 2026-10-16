@@ -2,7 +2,7 @@ import { FILE_LIMITS } from "../shared/attachments";
 import { checkCanceled, prepareImage, preparePdf, type PreparedFile } from "./attachments/prepare";
 
 export const MAX_ATTACHED_FILES = FILE_LIMITS.count;
-export const MAX_FILE_CHARACTERS = FILE_LIMITS.fileCharacters;
+const MAX_FILE_CHARACTERS = FILE_LIMITS.fileCharacters;
 const MAX_FILE_BYTES = FILE_LIMITS.documentBytes;
 
 const TEXT_EXTENSIONS = new Set([
@@ -21,7 +21,7 @@ const TEXT_TYPES = new Set([
 
 export type AttachedFile = PreparedFile;
 
-export function isTextFile(file: { name: string; type: string }): boolean {
+function isTextFile(file: { name: string; type: string }): boolean {
   if (file.type.startsWith("text/") || TEXT_TYPES.has(file.type)) return true;
   const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
   return TEXT_EXTENSIONS.has(extension);
@@ -50,11 +50,4 @@ export async function readAttachedFile(file: File, options: { signal?: AbortSign
     truncated: raw.length > MAX_FILE_CHARACTERS,
     kind: "text", bytes: file.size, pages: [], ready: true,
   };
-}
-
-export function formatFileContext(files: readonly (Pick<AttachedFile, "name" | "text" | "truncated"> & { id?: string })[]): string {
-  return files.map((file) => {
-    const note = file.truncated ? " (truncated)" : "";
-    return `\n\n--- BEGIN USER-ATTACHED UNTRUSTED FILE: ${file.name}${note} ---\n${file.text}\n--- END USER-ATTACHED UNTRUSTED FILE ---`;
-  }).join("");
 }

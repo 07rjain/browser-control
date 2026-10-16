@@ -5,7 +5,7 @@ import type { PageTargetDescription } from "../src/background/page-policy";
 import type { PageToolCall } from "../src/shared/page-tools";
 
 const call: PageToolCall = { namespace: "page", tool: "submit", callId: "search-call", requestId: 1, threadId: "thread", turnId: "turn", arguments: { idempotencyKey: "search-000001", ref: { id: "e1", snapshotId: "snapshot", tabId: 12, origin: "https://example.com" } } };
-export function searchTarget(): PageTargetDescription {
+function searchTarget(): PageTargetDescription {
   return { refId: "e1", snapshotId: "snapshot", role: "button", label: "Search", tag: "button", inputType: null, disabled: false, sensitive: false, sameOrigin: true, newTab: false, download: false, formAssociated: true, submitter: true,
     form: { action: "https://example.com/search", method: "GET", target: "_self", fields: [{ name: "Search", value: "blue otter", sensitive: false }], review: { complete: true, label: "Search", role: "search", hasUndo: false, values: [{ name: "q", value: "blue otter" }] } } };
 }
@@ -54,11 +54,10 @@ describe("automatic-review code gates", () => {
     expect(candidate(target, "Save a private draft with Hello otter")).toMatchObject({ evidence: { category: "draft" } });
     target.form!.action = "https://example.com/notes"; target.form!.review.label = "Private note";
     expect(candidate(target, "Create a private note with Hello otter")).toHaveProperty("reason");
-    target.form!.review.values.push({ name: "status", value: "published" });
-    expect(candidate(target, "Create a private note with Hello otter")).toHaveProperty("reason");
-    target.form!.review.values.pop();
     target.form!.review.hasUndo = true;
     expect(candidate(target, "Create a private note with Hello otter")).toMatchObject({ evidence: { category: "private_record" } });
+    target.form!.review.values.push({ name: "status", value: "published" });
+    expect(candidate(target, "Create a private note with Hello otter")).toHaveProperty("reason");
   });
   it("binds the decision to the exact call, values, origin and element snapshot", async () => {
     const target = searchTarget(); const result = candidate(target);

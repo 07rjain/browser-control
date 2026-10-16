@@ -4,8 +4,8 @@ import { CODEX_THREAD_RESTRICTIONS } from "./protocol.mjs";
 
 const reviewerConfig = JSON.parse(readFileSync(new URL("./reviewer-config.json", import.meta.url), "utf8"));
 export const REVIEW_MODEL = reviewerConfig.defaultModel;
-export const DEFAULT_REVIEW_SYSTEM_PROMPT = reviewerConfig.systemPrompt;
-export const MAX_REVIEW_SYSTEM_PROMPT = reviewerConfig.maxSystemPromptChars;
+const DEFAULT_REVIEW_SYSTEM_PROMPT = reviewerConfig.systemPrompt;
+const MAX_REVIEW_SYSTEM_PROMPT = reviewerConfig.maxSystemPromptChars;
 const validModel = (model) => typeof model === "string" && /^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,119}$/.test(model);
 const reasons = ["requested_benign_search", "requested_preference", "requested_draft", "requested_private_record", "requires_human", "unclear_intent", "missing_context", "unsafe", "unavailable", "timeout", "canceled", "invalid_result", "busy", "budget", "recovered"];
 export const REVIEW_OUTPUT_SCHEMA = { type: "object", properties: {
