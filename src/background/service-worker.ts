@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { attachmentSummarySchema } from "../shared/attachments";
+import { chatSettingsSchema } from "../shared/chat-settings";
 import { AUTO_REVIEW_SETTINGS_KEY, DEFAULT_AUTO_REVIEW, REVIEW_MODEL, REVIEW_TIMEOUT_MS, readAutoReviewSettings, reviewCapabilitiesSchema, reviewVerdictSchema, verdictApproves, type AutoReviewSettings, type ReviewActivity } from "../shared/auto-review";
 import { reviewCandidate, reviewFingerprint, reviewedTarget } from "./auto-review-policy";
 import { freshCompletionNotice } from "../shared/completion-notice";
@@ -1354,6 +1355,8 @@ async function routeRequest(input: unknown): Promise<unknown> {
       pendingPrompts.clear();
       return requestNative(request.type === "AUTH_LOGOUT" ? "auth.logout" : "data.deleteAll");
     case "AUTO_REVIEW_READ": return reviewCapabilitiesSchema.parse(await requestNative("approval.capabilities"));
+    case "CHAT_SETTINGS_READ": return chatSettingsSchema.parse(await requestNative("chat.settingsRead"));
+    case "CHAT_SETTINGS_WRITE": return chatSettingsSchema.parse(await requestNative("chat.settingsWrite", request.settings));
     case "MODELS_READ": return modelsResponseSchema.parse(await requestNative("models.list"));
     case "ATTACHMENTS_REQUEST": return requestNative("attachments.request", request.request, NATIVE_TIMEOUT_MS);
     case "SKILLS_LIST": return skillsListResponseSchema.parse(await requestNative("skills.list"));

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { conversationSnapshotSchema } from "./conversation-state";
 import { attachmentOperationSchema } from "./attachments";
+import { chatSettingsSchema } from "./chat-settings";
 
 export const pageAttachmentSchema = z.object({
   title: z.string().max(500),
@@ -35,6 +36,8 @@ export const uiRequestSchema = z.discriminatedUnion("type", [
   requestBase.extend({ type: z.literal("DELETE_ALL_LOCAL_DATA") }),
   requestBase.extend({ type: z.literal("MODELS_READ") }),
   requestBase.extend({ type: z.literal("AUTO_REVIEW_READ") }),
+  requestBase.extend({ type: z.literal("CHAT_SETTINGS_READ") }),
+  requestBase.extend({ type: z.literal("CHAT_SETTINGS_WRITE"), settings: chatSettingsSchema }),
   requestBase.extend({ type: z.literal("ATTACHMENTS_REQUEST"), request: attachmentOperationSchema }),
   requestBase.extend({ type: z.literal("CHAT_START"), model: z.string().min(1).max(120).optional() }),
   requestBase.extend({ type: z.literal("CHAT_RESUME"), threadId: z.string().min(1), model: z.string().min(1).max(120).optional() }),

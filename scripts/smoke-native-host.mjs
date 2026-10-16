@@ -9,6 +9,7 @@ import { resolveCodexBinary } from "./host-paths.mjs";
 import { probeCodexTools, probeCodexImageInput, probeCodexReviewerTools } from "./probe-codex-tools.mjs";
 
 import { probeReviewerConcurrency } from "./reviewer-compatibility.mjs";
+import { probeChatSettings } from "./probe-chat-settings.mjs";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const temporaryHome = mkdtempSync(join(tmpdir(), "codex-sidebar-smoke-"));
@@ -139,6 +140,7 @@ try {
     if (error.message === LEGACY_THREAD_ERROR) throw new Error("chat.resume refused a restricted thread.");
   });
   process.stdout.write("Native bridge smoke test passed (isolated, signed-out account).\n");
+  process.stdout.write(`Main chat prompt probe: ${JSON.stringify(await probeChatSettings(codexBinary))}\n`);
   for (const model of ["gpt-6-luna", "gpt-6.1-sol", "gpt-6-astra", "probe-unknown-model"]) await probeCodexReviewerTools(codexBinary, model);
   await probeReviewerConcurrency(codexBinary);
   process.stdout.write("Reviewer isolation and concurrent structured-output probes passed.\n");

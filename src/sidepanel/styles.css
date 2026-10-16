@@ -207,13 +207,13 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .menu-card .settings-delete-button { color: var(--danger); }
 .menu-card .settings-logout-button small { overflow: hidden; color: var(--muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .menu-card .settings-logout-button:disabled { opacity: 0.5; cursor: default; }
-.reviewer-settings { margin: 0 0 10px; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
-.reviewer-settings summary { padding: 8px; color: var(--text); font-size: 11px; cursor: pointer; }
-.menu-card .reviewer-prompt { display: block; width: 100%; min-height: 150px; max-height: 360px; margin-top: 6px; padding: 8px; resize: vertical; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); font: 11px/1.5 ui-monospace, monospace; }
-.reviewer-settings-actions { display: flex; gap: 4px; padding: 0 8px 8px; }
-.menu-card .reviewer-settings-actions button { width: auto; border: 1px solid var(--border); text-align: center; font-size: 10px; }
-.menu-card .reviewer-settings-actions button:disabled { opacity: .5; cursor: default; }
-.menu-card .reviewer-settings-error { color: var(--danger); }
+.reviewer-settings, .prompt-settings { margin: 0 0 10px; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.reviewer-settings summary, .prompt-settings summary { padding: 8px; color: var(--text); font-size: 11px; cursor: pointer; }
+.menu-card .reviewer-prompt, .menu-card .system-prompt { display: block; width: 100%; min-height: 150px; max-height: 360px; margin-top: 6px; padding: 8px; resize: vertical; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); font: 11px/1.5 ui-monospace, monospace; }
+.reviewer-settings-actions, .prompt-settings-actions { display: flex; gap: 4px; padding: 0 8px 8px; }
+.menu-card .reviewer-settings-actions button, .menu-card .prompt-settings-actions button { width: auto; border: 1px solid var(--border); text-align: center; font-size: 10px; }
+.menu-card .reviewer-settings-actions button:disabled, .menu-card .prompt-settings-actions button:disabled { opacity: .5; cursor: default; }
+.menu-card .reviewer-settings-error, .menu-card .prompt-settings-error { color: var(--danger); }
 .reviewer-response-rules summary { color: var(--muted); font-size: 10px; }
 .menu-hint { margin: 0 8px 7px; color: var(--muted); font-size: 10px; line-height: 1.4; }
 .model-visibility { margin: 0 8px 10px; padding: 8px 0; border: 1px solid var(--border); border-radius: 8px; }

@@ -2,6 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_REVIEW_SYSTEM_PROMPT } from "../src/shared/auto-review";
+import { DEFAULT_CHAT_SYSTEM_PROMPT } from "../src/shared/chat-settings";
 import App from "../src/sidepanel/App";
 import type { SidebarEvent } from "../src/shared/protocol";
 
@@ -12,9 +13,12 @@ let capture: () => Promise<unknown>;
 let requests: Array<Record<string, unknown>>;
 let restoredNotice: unknown;
 let reviewerAvailable: boolean;
+let chatPrompt: string;
+let chatSettingsError: string | null;
 
 beforeEach(() => {
   stored = {}; requests = []; restoredNotice = null; reviewerAvailable = true;
+  chatPrompt = DEFAULT_CHAT_SYSTEM_PROMPT; chatSettingsError = null;
   capture = async () => page;
   listeners.clear();
   vi.stubGlobal("chrome", {
@@ -28,6 +32,12 @@ beforeEach(() => {
         switch (request.type) {
           case "ACCOUNT_READ": data = { account: { type: "chatgpt", email: null, planType: "test" } }; break;
           case "AUTO_REVIEW_READ": data = { version: 2, available: reviewerAvailable, configurableModel: true, editableSystemPrompt: true }; break;
+          case "CHAT_SETTINGS_READ": data = { version: 1, systemPrompt: chatPrompt }; break;
+          case "CHAT_SETTINGS_WRITE": {
+            if (chatSettingsError) return { ok: false, error: chatSettingsError };
+            chatPrompt = (request.settings as { systemPrompt: string }).systemPrompt;
+            data = { version: 1, systemPrompt: chatPrompt }; break;
+          }
           case "MODELS_READ": data = { models: [{ id: "alpha", name: "Alpha", isDefault: true }, { id: "beta", name: "Beta", isDefault: false }] }; break;
           case "RECORDING_READ": data = { status: "idle" }; break;
           case "SKILLS_LIST": data = { skills: [] }; break;
@@ -59,6 +69,46 @@ function emit(event: string, data: unknown) {
 }
 
 describe("sidebar interactions", () => {
+  it("loads, edits, saves and resets the main prompt independently of reviewer settings", async () => {
+    await ready(); fireEvent.click(screen.getByRole("button", { name: "Open settings" }));
+    fireEvent.click(screen.getByText("Main chat system prompt"));
+    const prompt = await screen.findByRole("textbox", { name: "Main system prompt" }) as HTMLTextAreaElement;
+    await vi.waitFor(() => expect(prompt.disabled).toBe(false));
+    expect(prompt.value).toBe(DEFAULT_CHAT_SYSTEM_PROMPT);
+    const custom = "  Use concise replies.\nExplain browser results clearly.  ";
+    fireEvent.change(prompt, { target: { value: custom } });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Save main prompt" })));
+    expect(requests).toContainEqual(expect.objectContaining({ type: "CHAT_SETTINGS_WRITE", settings: { version: 1, systemPrompt: custom } }));
+    expect(screen.getByText(/Main system prompt saved/)).toBeTruthy();
+    expect(stored.codexSidebarAutoReview).toBeUndefined();
+    cleanup(); await ready(); fireEvent.click(screen.getByRole("button", { name: "Open settings" }));
+    fireEvent.click(screen.getByText("Main chat system prompt"));
+    const restored = await screen.findByRole("textbox", { name: "Main system prompt" }) as HTMLTextAreaElement;
+    await vi.waitFor(() => expect(restored.value).toBe(custom));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Reset main prompt to default" })));
+    expect(restored.value).toBe(DEFAULT_CHAT_SYSTEM_PROMPT);
+    expect(requests.at(-1)).toMatchObject({ type: "CHAT_SETTINGS_WRITE", settings: { version: 1, systemPrompt: DEFAULT_CHAT_SYSTEM_PROMPT } });
+  });
+
+  it("rejects invalid main prompts and retains the draft when saving fails", async () => {
+    await ready(); fireEvent.click(screen.getByRole("button", { name: "Open settings" }));
+    fireEvent.click(screen.getByText("Main chat system prompt"));
+    const prompt = await screen.findByRole("textbox", { name: "Main system prompt" }) as HTMLTextAreaElement;
+    await vi.waitFor(() => expect(prompt.disabled).toBe(false));
+    for (const value of ["  ", "x".repeat(12001), "bad\0prompt"]) {
+      fireEvent.change(prompt, { target: { value } });
+      await act(async () => fireEvent.click(screen.getByRole("button", { name: "Save main prompt" })));
+      expect(screen.getByRole("alert").textContent).toMatch(/non-empty main system prompt/);
+    }
+    expect(requests.filter((request) => request.type === "CHAT_SETTINGS_WRITE")).toHaveLength(0);
+    chatSettingsError = "Unable to write local settings.";
+    fireEvent.change(prompt, { target: { value: "Keep this draft." } });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Save main prompt" })));
+    expect(screen.getByRole("alert").textContent).toBe(chatSettingsError);
+    expect(prompt.value).toBe("Keep this draft.");
+    expect(chatPrompt).toBe(DEFAULT_CHAT_SYSTEM_PROMPT);
+  });
+
   it("opts into Auto review with legacy Ask storage and an independent Luna model", async () => {
     await ready();
     fireEvent.click(screen.getByRole("button", { name: "Open settings" }));

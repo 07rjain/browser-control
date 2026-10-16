@@ -249,6 +249,20 @@ No host access is granted at installation. Full access can request the manifest'
 Authentication architecture is recorded in [ADR 0001](docs/decisions/0001-native-codex-bridge.md). Page-control architecture and policy are recorded in [ADR 0002](docs/decisions/0002-supervised-page-control.md).
 
 
+### Main chat system prompt
+
+Open **Settings → Main chat system prompt** to inspect or edit the main assistant's full default prompt. Choose **Save main prompt**, then start a new chat; **Reset main prompt to default** restores the built-in text. Saved changes apply to new chats and forks. Existing chats keep their original prompt, including after restarting the companion. This is separate from the reviewer prompt under Auto review settings.
+
+The prompt accepts up to 12,000 characters and preserves whitespace and line breaks. Empty, whitespace-only, oversized, or null-containing prompts are rejected. Editing is disabled while the current chat runs. A failed save retains the draft. Settings requires the updated companion; saving is acknowledged by the host rather than silently ignored by an older version.
+
+The prompt is stored locally at `~/.codex-sidebar/chat-settings.json`, with owner-only file permissions, and is removed by **Delete all local data**. It is sent to the existing model provider as chat instructions when a new conversation runs. Saving alone starts no inference. Browser permission checks and tool restrictions remain enforced by code. No new Chrome permission, model provider, or API key is needed.
+
+`npm run test:bridge` exercises the real companion and Codex app-server against a synthetic localhost Responses provider. It verifies exact prompt bytes for new chats and forks, preservation of existing-chat instructions, persistence across host restart, invalid-input rejection, reset, and local-data deletion. Codex CLI 0.162.1 accepts `baseInstructions` on thread creation/resume/fork, but the local executable probe confirmed that resuming an already loaded thread does not replace its base prompt; the new-chat behavior avoids claiming an update that did not happen. See the [official app-server lifecycle documentation](https://learn.chatgpt.com/docs/app-server).
+
+Manual checklist: reload `dist/` after rebuilding and refreshing the companion, expand the main prompt setting, edit/save/reopen it, reject a whitespace-only edit, reset it, verify reviewer settings retain their values, and inspect the sidebar and worker consoles. Live inference requires one fresh approved synthetic send under the repository's manual testing protocol.
+
+Main prompt validation, 2026-10-16: typecheck, lint, all **211 active tests** (one existing Windows skip), bridge probes, build, and installed-host smoke test passed. The companion and both new runtime files match their source hashes. The localhost probe completed six synthetic turns through the real native host and Codex, covering new chats, existing-chat preservation before and after restart, forks, and reset; invalid writes and local-data deletion also passed. The original default prompt was preserved exactly. Manual Chrome validation is **blocked**: the computer-control native pipe failed to start, and discovery exposed no Chrome UI surface. No Chrome UI scenario is marked passed for this change; the checklist above remains outstanding. No live model send was performed.
+
 ### Auto review
 
 Settings → Agent permission → **Auto review** enables an independent reviewer, defaulting to `gpt-6-luna`. It uses the existing Codex sign-in and additional model usage, while the composer keeps its own selected model. CLI **0.162.1** and the updated companion are required; an unavailable model, slow response, invalid result, exhausted budget or incomplete evidence falls back to your normal confirmation card. Open **Auto review settings** to select any model in your Codex model list, regardless of composer model visibility. An unavailable model or unsupported structured result asks you; the companion never silently substitutes another model.

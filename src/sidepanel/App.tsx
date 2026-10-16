@@ -27,6 +27,7 @@ import { FILE_LIMITS, type AttachmentSummary, type AttachmentOperation } from ".
 import { checkCanceled, preparePdf, releasePreparedFile } from "./attachments/prepare";
 import { uploadPreparedFiles, type AttachmentTransport } from "./attachments/transfer";
 import { FileCards, SentFiles } from "./attachments/FileCards";
+import ChatPromptSettings from "./ChatPromptSettings";
 import { COMPLETION_NOTICE_DURATION_MS, freshCompletionNotice, type CompletionNotice } from "../shared/completion-notice";
 import { greetingFor, selectedModelLabel, setupSteps, STARTER_TASKS, type AuthState, type StarterTask } from "./welcome";
 import {
@@ -1659,6 +1660,7 @@ export default function App() {
                 })}
               </div>
             </fieldset>
+            <ChatPromptSettings disabled={streaming} request={sendRequest} />
             <label>
               Agent permission
               <select
