@@ -19,6 +19,7 @@ import {
 } from "../shared/page-tools";
 import { AUTO_REVIEW_SETTINGS_KEY, DEFAULT_AUTO_REVIEW, REVIEW_MODEL, DEFAULT_REVIEW_SYSTEM_PROMPT, REQUIRED_REVIEW_INSTRUCTIONS, MAX_REVIEW_SYSTEM_PROMPT, autoReviewSettingsSchema, readAutoReviewSettings, reviewCapabilitiesSchema, type AutoReviewSettings } from "../shared/auto-review";
 import { IDLE_RECORDING_VIEW, MAX_RECORDING_STEPS, MAX_SKILL_DOCUMENT_CHARS, recordingStepSummary, type RecordingView } from "../shared/skill-recording";
+import { skillRecordingOfferEventSchema, skillRecordingOfferSchema } from "../shared/skill-offer";
 import { COMPANION_INSTALL_COMMAND, isLegacyThreadError, isMissingNativeHost, isWorkspaceRoutingTimeout, WORKSPACE_ROUTING_TIMEOUT_MESSAGE } from "../shared/companion-setup";
 import { activityStepLabel, groupToolStatuses, hasBrowserActivityForTurn, latestToolStatuses, summarizeToolStatuses, visibleActivityFormFields, type ToolStatus } from "./activity";
 import { settleCanceledMessages, type ChatMessage } from "./chat-state";
@@ -383,6 +384,8 @@ export default function App() {
   const threadReadyRef = useRef(false);
   const inFlightPayloadRef = useRef<RetryPayload | null>(null);
   const turnExecutedToolRef = useRef(false);
+  const activeTurnIdentityRef = useRef<string | null>(null);
+  const teachingOfferTurnRef = useRef<string | null>(null);
   const stopRequestedRef = useRef(false);
   const completionSoundEnabledRef = useRef(false);
   const conversationSaveEpoch = useRef(0);
@@ -690,9 +693,26 @@ export default function App() {
             setRecordingError(null);
           }
           break;
+        case "skill.recordingOffered": {
+          const parsed = skillRecordingOfferEventSchema.safeParse(message.data);
+          if (!parsed.success || stopRequestedRef.current) break;
+          const offer = parsed.data;
+          if (inFlightPayloadRef.current?.threadId !== offer.threadId || (activeTurnIdentityRef.current && activeTurnIdentityRef.current !== offer.turnId)) break;
+          activeTurnIdentityRef.current = offer.turnId;
+          teachingOfferTurnRef.current = offer.turnId;
+          setMessages((current) => {
+            const index = current.findLastIndex((item) => item.role === "assistant" && (item.id === offer.turnId || item.streaming));
+            if (index < 0 || current[index].recordingOffer) return current;
+            return current.map((item, itemIndex) => itemIndex === index
+              ? { ...item, id: offer.turnId, recordingOffer: { reason: offer.reason, description: offer.description, state: "pending" } }
+              : item);
+          });
+          break;
+        }
         case "chat.delta": {
           if (stopRequestedRef.current) break;
           const data = message.data as { turnId: string; delta: string };
+          activeTurnIdentityRef.current = data.turnId;
           setActiveTurnId(data.turnId);
           setMessages((current) => {
             const index = current.findLastIndex((item) => item.role === "assistant" && item.streaming);
@@ -720,19 +740,26 @@ export default function App() {
         case "chat.turnCompleted": {
           const wasStopped = stopRequestedRef.current;
           const completedBrowserTask = turnExecutedToolRef.current;
+          const offerTurnId = teachingOfferTurnRef.current;
+          const offeredRecording = offerTurnId !== null;
           const data = message.data as { turn?: { status?: string; error?: { message?: string } } };
           const failed = !wasStopped && data.turn?.status === "failed";
           stopRequestedRef.current = false;
           turnExecutedToolRef.current = false;
+          activeTurnIdentityRef.current = null;
+          teachingOfferTurnRef.current = null;
           setActiveTurnId(null);
           setIsSending(false);
+          if (offerTurnId) setMessages((current) => current.map((item) => item.id === offerTurnId && item.recordingOffer?.state === "pending"
+            ? { ...item, recordingOffer: wasStopped ? undefined : { ...item.recordingOffer, state: "offered" } }
+            : item));
           setRetryPayload(failed && !completedBrowserTask ? inFlightPayloadRef.current : null);
           inFlightPayloadRef.current = null;
           if (failed) {
             setError(data.turn?.error?.message ?? "Codex could not process this message. Check the selected model and attachments before retrying.");
             setMessages((current) => current.map((item) => item.streaming ? { ...item, streaming: false, failed: true } : item));
           } else setMessages(settleCanceledMessages);
-          if (completedBrowserTask && !wasStopped && !failed) {
+          if (completedBrowserTask && !wasStopped && !failed && !offeredRecording) {
             showCompletionNotice("Task complete — you can check the result when you’re ready.");
             if (completionSoundEnabledRef.current) void playCompletionSound();
           }
@@ -740,6 +767,12 @@ export default function App() {
         }
         case "chat.error": {
           const wasStopped = stopRequestedRef.current;
+          const offerTurnId = teachingOfferTurnRef.current;
+          teachingOfferTurnRef.current = null;
+          activeTurnIdentityRef.current = null;
+          if (offerTurnId) setMessages((current) => current.map((item) => item.id === offerTurnId && item.recordingOffer?.state === "pending"
+            ? { ...item, recordingOffer: wasStopped ? undefined : { ...item.recordingOffer, state: "offered" } }
+            : item));
           stopRequestedRef.current = false;
           setActiveTurnId(null);
           setIsSending(false);
@@ -1017,6 +1050,17 @@ export default function App() {
     setMenuOpen(false);
   };
 
+  const openOfferedRecording = (message: ChatMessage) => {
+    const parsed = skillRecordingOfferSchema.safeParse(message.recordingOffer);
+    if (!parsed.success || parsed.data.state !== "offered" || streaming || recordingActive) return;
+    setRecordWhen(parsed.data.description);
+    setRecordComposerOpen(true);
+    setMenuOpen(false);
+    setMessages((current) => current.map((item) => item.id === message.id && item.recordingOffer
+      ? { ...item, recordingOffer: { ...item.recordingOffer, state: "opened" } }
+      : item));
+  };
+
   const grantRecordingSite = async () => {
     if (!recording.pendingOriginPattern) return;
     const originPattern = recording.pendingOriginPattern;
@@ -1082,6 +1126,8 @@ export default function App() {
     setRetryPayload(null);
     inFlightPayloadRef.current = payload;
     turnExecutedToolRef.current = false;
+    activeTurnIdentityRef.current = null;
+    teachingOfferTurnRef.current = null;
     stopRequestedRef.current = false;
     const controller = new AbortController();
     sendAbortRef.current = controller;
@@ -1147,7 +1193,10 @@ export default function App() {
       if (result.replayed) {
         setMessages(settleCanceledMessages);
         showCompletionNotice("This message was already accepted by Codex and was not sent twice. Check the conversation before starting another request.");
-      } else setActiveTurnId(result.turnId);
+      } else {
+        activeTurnIdentityRef.current = result.turnId;
+        setActiveTurnId(result.turnId);
+      }
       setIsSending(false);
     } catch (cause) {
       setIsSending(false);
@@ -1257,9 +1306,12 @@ export default function App() {
     preparationRef.current?.abort();
     sendAbortRef.current?.abort();
     stopRequestedRef.current = true;
+    teachingOfferTurnRef.current = null;
     setIsSending(false);
     setError(null);
-    setMessages(settleCanceledMessages);
+    setMessages((current) => settleCanceledMessages(current.map((message) => message.streaming || message.id === activeTurnId
+      ? { ...message, recordingOffer: undefined }
+      : message)));
     setToolApproval(null);
     setToolPermission(null);
     if (!threadId) return;
@@ -1878,6 +1930,7 @@ export default function App() {
           </section>
         ) : (
           messages.map((message) => {
+            const offer = skillRecordingOfferSchema.safeParse(message.recordingOffer);
             const activity = message.role === "assistant"
               ? activitiesByTurn.get(message.id) ?? (message.streaming && activeTurnId ? activitiesByTurn.get(activeTurnId) : undefined)
               : undefined;
@@ -1931,6 +1984,17 @@ export default function App() {
                     </div>
                   )}
                 </article>}
+                {message.role === "assistant" && offer.success && offer.data.state === "offered" && !message.streaming && activeTurnId !== message.id && (
+                  <section className="skill-offer-card" aria-label="Learn this workflow">
+                    <p>{offer.data.reason}</p>
+                    <div className="recording-actions">
+                      <button type="button" className="primary-button" disabled={streaming || recordingActive} onClick={() => openOfferedRecording(message)}>Teach a skill</button>
+                      <button type="button" className="secondary-button" onClick={() => setMessages((current) => current.map((item) => item.id === message.id && item.recordingOffer
+                        ? { ...item, recordingOffer: { ...item.recordingOffer, state: "dismissed" } }
+                        : item))}>Dismiss</button>
+                    </div>
+                  </section>
+                )}
               </div>
             );
           })

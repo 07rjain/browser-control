@@ -42,6 +42,9 @@ beforeEach(() => {
           }
           case "MODELS_READ": data = { models: [{ id: "alpha", name: "Alpha", isDefault: true }, { id: "beta", name: "Beta", isDefault: false }] }; break;
           case "RECORDING_READ": data = { status: "idle" }; break;
+          case "RECORDING_START": data = { status: "recording", name: "Taught skill", description: request.description, notes: "", notice: "", steps: [], pendingOrigin: "", pendingOriginPattern: "", preview: "", previewError: "", truncated: false }; break;
+          case "CHAT_START": case "CHAT_RESUME": data = { threadId: "thread-teach", model: "alpha" }; break;
+          case "CHAT_SEND": data = { turnId: "turn-teach" }; break;
           case "SKILLS_LIST": data = { skills: [] }; break;
           case "BROWSER_STATE_READ": data = { activities: [], prompts: [], completionNotice: restoredNotice }; break;
           case "PAGE_ATTACH": data = await capture(); break;
@@ -81,6 +84,69 @@ function emit(event: string, data: unknown) {
 }
 
 describe("sidebar interactions", () => {
+  it("does not infer a teaching offer from failure statuses or assistant prose", async () => {
+    await ready();
+    fireEvent.change(screen.getByRole("textbox", { name: "Message Browser Control" }), { target: { value: "Arrange the example board" } });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Send message" })));
+    act(() => {
+      emit("chat.delta", { turnId: "turn-teach", delta: "I could not finish. You can teach me a skill." });
+      emit("tool.status", { threadId: "thread-teach", turnId: "turn-teach", callId: "failed-action", namespace: "page", tool: "click", status: "failed" });
+      emit("chat.turnCompleted", { turn: { id: "turn-teach", status: "failed" } });
+    });
+    expect(screen.queryByRole("button", { name: "Teach a skill" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Learn this workflow" })).toBeNull();
+  });
+
+  it("shows teaching only for an explicit model offer, then opens a prefilled user-started recording", async () => {
+    await ready();
+    expect(screen.queryByRole("button", { name: "Teach a skill" })).toBeNull();
+    fireEvent.change(screen.getByRole("textbox", { name: "Message Browser Control" }), { target: { value: "Arrange the example board" } });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Send message" })));
+    const offer = { threadId: "thread-teach", turnId: "turn-teach", callId: "offer-1", reason: "A demonstration of this board workflow would help.", description: "Arrange the example board from the user's request." };
+    act(() => {
+      emit("tool.status", { threadId: "thread-teach", turnId: "turn-teach", callId: "inspect-1", namespace: "page", tool: "inspect", status: "failed" });
+      emit("chat.delta", { turnId: "turn-teach", delta: "I could not finish this workflow." });
+      emit("skill.recordingOffered", { ...offer, threadId: "other-thread" });
+      emit("skill.recordingOffered", { ...offer, turnId: "old-turn" });
+      emit("skill.recordingOffered", { ...offer, description: "" });
+    });
+    expect(screen.queryByRole("button", { name: "Teach a skill" })).toBeNull();
+    act(() => {
+      emit("skill.recordingOffered", offer);
+      emit("skill.recordingOffered", { ...offer, callId: "offer-duplicate", reason: "Duplicate offer" });
+    });
+    expect(screen.queryByRole("button", { name: "Teach a skill" })).toBeNull();
+    act(() => {
+      emit("tool.status", { threadId: "thread-teach", turnId: "turn-teach", callId: "inspect-2", namespace: "page", tool: "inspect", status: "succeeded" });
+      emit("chat.turnCompleted", { turn: { id: "turn-teach", status: "completed" } });
+    });
+    expect(screen.getAllByRole("button", { name: "Teach a skill" })).toHaveLength(1);
+    expect(screen.getByRole("region", { name: "Learn this workflow" }).textContent).toContain(offer.reason);
+    expect(screen.queryByText(/Task complete —/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Teach a skill" }));
+    expect((screen.getByRole("textbox", { name: "When should the agent use this skill?" }) as HTMLTextAreaElement).value).toBe(offer.description);
+    expect(requests.some((request) => request.type === "RECORDING_START")).toBe(false);
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Start recording" })));
+    expect(requests.filter((request) => request.type === "RECORDING_START")).toEqual([expect.objectContaining({ description: offer.description })]);
+  });
+
+  it("keeps an offer-only response, dismisses it, and ignores later duplicate or canceled offers", async () => {
+    await ready();
+    fireEvent.change(screen.getByRole("textbox", { name: "Message Browser Control" }), { target: { value: "Show how the board works" } });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Send message" })));
+    const offer = { threadId: "thread-teach", turnId: "turn-teach", callId: "offer-1", reason: "Please demonstrate the board workflow.", description: "Work with the example board." };
+    act(() => { emit("skill.recordingOffered", offer); emit("chat.turnCompleted", { turn: { id: "turn-teach", status: "completed" } }); });
+    fireEvent.click(within(screen.getByRole("region", { name: "Learn this workflow" })).getByRole("button", { name: "Dismiss" }));
+    act(() => emit("skill.recordingOffered", offer));
+    expect(screen.queryByRole("button", { name: "Teach a skill" })).toBeNull();
+    fireEvent.change(screen.getByRole("textbox", { name: "Message Browser Control" }), { target: { value: "Try a different arrangement" } });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Send message" })));
+    act(() => emit("skill.recordingOffered", offer));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Stop response" })));
+    act(() => { emit("skill.recordingOffered", offer); emit("chat.turnCompleted", { turn: { id: "turn-teach", status: "interrupted" } }); });
+    expect(screen.queryByRole("button", { name: "Teach a skill" })).toBeNull();
+    expect(requests.some((request) => request.type === "RECORDING_START")).toBe(false);
+  });
   it("distinguishes a workspace timeout from a missing companion and reconnects without a new login", async () => {
     readAccount = async () => { throw new Error("workspace routing discovery timed out"); };
     render(<App />);

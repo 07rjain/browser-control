@@ -443,6 +443,8 @@ Do not request persistent required `<all_urls>`, `history`, `bookmarks`, `downlo
 
 ### Phase 7 — Record a demonstration
 
+- The answering model may call `skills.offer_recording` with a reason and skill description when a user demonstration could resolve its inability to complete a supported browser workflow. This explicit tool call is the sole trigger for a contextual **Teach a skill** card in the chat; tool failures and assistant prose never create it automatically. Do not offer teaching for prohibited actions, permission refusals, connection/authentication failures, or user cancellation.
+- Bind one offer to its exact thread/turn and retain it with that assistant response in local history. Show it after the turn ends; dismissing or opening it must persist. A user click opens the existing recording form prefilled with the suggested description. Starting recording, origin permissions, review and saving remain explicit user actions. An offer grants no access, captures no page data, writes no skill and suppresses a misleading task-complete notice. No new Chrome permission, remote service, or reviewer inference is added.
 - Let the user record a skill by using the real page. The agent does not perform the demonstration.
 - Store the site, action, role, and accessible name. Do not store selectors, coordinates, live element ids, query strings, or secrets.
 - Treat control labels as page text. Quote them in the saved skill and tell the model they are not instructions.

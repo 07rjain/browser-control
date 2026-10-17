@@ -312,6 +312,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .message-actions button:hover { background: var(--soft); color: var(--text); }
 .message-actions button:disabled { opacity: 0.4; cursor: default; }
 .turn-block { min-width: 0; }
+.skill-offer-card { margin: 8px 0 12px; padding: 12px; border: 1px solid var(--border); border-radius: 14px; background: var(--panel-solid); }
+.skill-offer-card p { margin: 0 0 10px; font-size: 12px; line-height: 1.5; color: var(--muted); overflow-wrap: anywhere; }
 .thinking { display: inline-flex; gap: 4px; padding: 8px 0; }
 .thinking i { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); animation: pulse 1.2s infinite ease-in-out; }
 .thinking i:nth-child(2) { animation-delay: 0.15s; }
