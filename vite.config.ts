@@ -2,6 +2,7 @@ import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import { resolve } from "node:path";
 import { readFileSync, readdirSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 function pdfAssets(): Plugin {
   const directories = ["cmaps", "standard_fonts", "wasm"];
@@ -26,7 +27,14 @@ function pdfAssets(): Plugin {
 
 export default defineConfig({
   plugins: [react(), pdfAssets()],
+  resolve: {
+    // KaTeX's browser HTML parser inserts styled markup into a template, which
+    // violates extension CSP. Use its pure parser and let React create the DOM.
+    alias: [{ find: /^hast-util-from-html-isomorphic$/, replacement: fileURLToPath(import.meta.resolve("hast-util-from-html-isomorphic")) }],
+  },
   build: {
+    // Small KaTeX fonts must stay local files: font-src 'self' excludes data URLs.
+    assetsInlineLimit: (filePath) => /\.(?:woff2?|ttf)$/.test(filePath) ? false : undefined,
     // Chrome extension pages can reject Vite's generated modulepreload links as
     // cross-world resources. Static module imports still load the shared chunks.
     modulePreload: false,

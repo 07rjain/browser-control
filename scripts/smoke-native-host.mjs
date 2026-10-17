@@ -105,6 +105,15 @@ try {
   if (!Array.isArray(catalog.models) || catalog.models.some((model) => !model.id || !model.name)) {
     throw new Error("Codex returned an invalid model catalog.");
   }
+  // Exercise the larger document through Chrome's length-prefixed transport,
+  // including multibyte text, without using the user's home or a model request.
+  const skillHeader = "---\nname: Long recording\ndescription: Native transport limit probe.\n---\n";
+  const skillDocument = skillHeader + "界".repeat(240_000 - skillHeader.length);
+  const savedSkill = await request("skills.save", { markdown: skillDocument });
+  if (savedSkill.name !== "Long recording" || readFileSync(join(temporaryHome, "skills", "long-recording", "SKILL.md"), "utf8") !== skillDocument) {
+    throw new Error("Native transport did not save the complete 240,000-character skill.");
+  }
+  process.stdout.write("240,000-character skill native-transport probe passed.\n");
   if (process.env.LIVE_BROWSER_LOGIN === "1") {
     const login = await request("auth.login");
     if (login.type !== "chatgpt") throw new Error("Unexpected browser-login response type.");

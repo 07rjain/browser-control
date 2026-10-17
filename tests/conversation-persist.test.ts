@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { SIDEBAR_STATE_STORAGE_KEY, type ConversationSnapshot } from "../src/shared/conversation-state";
+import { conversationSnapshotSchema, readStoredSidebarState, SIDEBAR_STATE_STORAGE_KEY, type ConversationSnapshot } from "../src/shared/conversation-state";
 
 function snapshot(id: string, text: string, savedAt: number): ConversationSnapshot {
   const record = {
@@ -24,6 +24,28 @@ function snapshot(id: string, text: string, savedAt: number): ConversationSnapsh
 
 describe("conversation persistence", () => {
   beforeEach(() => vi.resetModules());
+
+  it("stores teaching offers with their response and retains dismissals through validated saves and restoration", async () => {
+    const data: Record<string, unknown> = {};
+    vi.stubGlobal("chrome", { storage: { local: {
+      get: vi.fn(async (key: string) => ({ [key]: data[key] })),
+      set: vi.fn(async (values: Record<string, unknown>) => Object.assign(data, values)),
+    } } });
+    const persist = await import("../src/background/conversation-persist");
+    const state = snapshot("teach", "Please show me this workflow.", Date.now());
+    const message = { id: "offered-turn", role: "assistant" as const, text: "I could not finish.", recordingOffer: { reason: "Learning from a demonstration would help.", description: "Arrange the example board.", state: "offered" as const } };
+    state.messages.push(message);
+    state.conversationHistory[0]!.messages = state.messages;
+    await persist.saveConversationSnapshot(conversationSnapshotSchema.parse(state));
+    expect(readStoredSidebarState(data[SIDEBAR_STATE_STORAGE_KEY])?.messages.at(-1)?.recordingOffer).toEqual(message.recordingOffer);
+    state.messages[state.messages.length - 1] = { ...message, recordingOffer: { ...message.recordingOffer, state: "dismissed" } };
+    state.savedAt += 1;
+    state.conversationHistory[0]!.updatedAt += 1;
+    await persist.saveConversationSnapshot(conversationSnapshotSchema.parse(state));
+    const restored = readStoredSidebarState(data[SIDEBAR_STATE_STORAGE_KEY]);
+    expect(restored?.messages.at(-1)?.recordingOffer?.state).toBe("dismissed");
+    expect(restored?.conversationHistory[0]?.messages.at(-1)?.recordingOffer?.state).toBe("dismissed");
+  });
 
   it("unions overlapping saves so the later snapshot cannot erase the earlier conversation", async () => {
     const data: Record<string, unknown> = {};

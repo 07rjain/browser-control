@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { attachmentSummarySchema } from "./attachments";
+import { skillRecordingOfferSchema } from "./skill-offer";
 
 export const SIDEBAR_STATE_STORAGE_KEY = "codexSidebarState";
 export const MAX_STORED_CONVERSATIONS = 30;
@@ -10,6 +11,7 @@ const storedMessageSchema = z.object({
   text: z.string().max(100_000),
   streaming: z.boolean().optional(),
   failed: z.boolean().optional(),
+  recordingOffer: skillRecordingOfferSchema.optional(),
   attachments: z.array(attachmentSummarySchema).max(5).optional(),
 });
 

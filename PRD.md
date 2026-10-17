@@ -103,6 +103,8 @@ Chrome documents that the Side Panel API is available to Manifest V3 extensions 
 - The extension never reads cookies from `chatgpt.com`, scrapes an existing ChatGPT session, or stores raw credentials in bundled code, page storage, or logs.
 - Authentication uses an officially documented Codex mechanism. The development MVP uses a native-messaging companion around Codex app-server; Codex owns credentials and the companion exposes only a narrow authenticated protocol to the extension.
 - The extension displays the authenticated account state returned by the supported Codex interface without claiming unsupported account attributes.
+- Concurrent startup/reconnect account checks share one in-flight request. Retry the exact Codex workspace-discovery timeout once; authentication, routing-policy and other failures stop immediately. Recovery must not replay a login, chat turn or browser action, or bypass Codex's selected-workspace routing.
+- A persistent workspace timeout shows the companion as connected with a retryable ChatGPT workspace/network error. A pending retry disables repeated reconnect clicks, and stale account responses after disconnect, sign-out or deletion cannot restore the previous session. No new permissions, credential handling or external services are introduced.
 - Failed, canceled, or expired login returns the user to a retryable signed-out state.
 - Sign-out clears local extension session metadata and invokes the supported Codex logout path.
 
@@ -134,6 +136,7 @@ If this gate fails, stop and request a product decision. Do not improvise authen
 - The composer remains responsive while a turn streams.
 - User and assistant messages are visually distinct and rendered safely without executable HTML.
 - Markdown supports, at minimum, paragraphs, lists, links, inline code, and fenced code blocks.
+- Render inline and display LaTeX equations with the existing Markdown pipeline plus packaged remark-math/KaTeX. Support dollar and backslash delimiters, retain literal code and common currency text, keep incomplete/invalid expressions readable, expose MathML, and scroll wide display equations within the answer. Preserve original Markdown for Copy, history and forks. Keep KaTeX untrusted, bound macro expansion and size, package fonts locally, and parse generated markup without DOM HTML insertion or a CSP relaxation. No Chrome permission or external rendering service is added.
 - External links clearly indicate their destination and open in a new tab only after user activation.
 - Stop cancels the active turn through the bridge and leaves the transcript in a valid state.
 - Retry never duplicates browser actions from the failed turn.
@@ -441,12 +444,18 @@ Do not request persistent required `<all_urls>`, `history`, `bookmarks`, `downlo
 
 ### Phase 7 — Record a demonstration
 
+- When the user explicitly asks to create, teach or record a browser skill (including “Help me record a skill”), instruct the answering model to call `skills.offer_recording` once, without requiring an earlier failure. It may also offer recording when a user demonstration could resolve its inability to complete a supported browser workflow. Require a reason; the workflow description is optional when unknown. This explicit tool call is the sole trigger for a contextual **Record skill** button centered directly below the answer, with **Copy** and **Fork** on a separate row underneath. Give the enabled button the composer's animated border highlight; reduced motion uses a static highlight. Tool failures and assistant prose never create it automatically. Do not offer teaching for prohibited actions, permission refusals, connection/authentication failures, or user cancellation.
+- Bind one offer to its exact thread/turn and retain it with that assistant response in local history. Show it after the turn ends; dismissing or opening it must persist. Keep the button available after opening/canceling the form, including after reload, until dismissed; disable it during an active task or recording. A user click opens the existing recording form prefilled with the suggested description, or blank if none was supplied. Keep Start recording disabled until the user supplies a description. Starting recording, origin permissions, review and saving remain explicit user actions. An offer grants no access, captures no page data, writes no skill and suppresses a misleading task-complete notice. No new Chrome permission, remote service, or reviewer inference is added.
+- Give the main model an accurate product capability overview covering general chat, writing/math, explicit page/file attachments, supervised page/tab actions, recording/reusing/managing skills, settings and chat controls. A general capability question alone must not offer recording or inspect browser/skill bodies. Refresh app/tool guidance on thread start/resume without rewriting stored conversation base prompts or saved custom system prompts.
 - Let the user record a skill by using the real page. The agent does not perform the demonstration.
 - Store the site, action, role, and accessible name. Do not store selectors, coordinates, live element ids, query strings, or secrets.
 - Treat control labels as page text. Quote them in the saved skill and tell the model they are not instructions.
 - Accept only trusted page events. Inject the packaged recorder only after the browser-control origin grant, and only in the top frame.
 - Refuse to start while a browser task is active, and refuse chat or browser tools while a recording is open.
 - Show a review before anything is written. The user can delete steps, add notes, and choose which typed examples to keep.
+- Retain up to 120 steps per recording and up to 240,000 characters per saved skill document. Persist the full step list across service-worker restarts, show overflow explicitly, and apply the same document limit when generating, saving, and reading skills.
+- Done must drain pending typing and scroll events before opening review, without blocking the recorder message queue. A disconnected or unresponsive recorder must reach review with a capture warning. Cancel must never restore a discarded draft.
+- Stop/Cancel followed by a new recording, and returning to a previously recorded tab, must reconnect without duplicate page listeners. Same-origin iframe controls must retain their semantic roles and sensitive-field/purchase protections.
 - Save `~/.codex-sidebar/skills/<name>/SKILL.md` through the companion, then refresh the existing catalog.
 - Privacy: recordings stay on this computer. Passwords, one-time codes, payment fields, and purchase controls are skipped. Other typed values are omitted unless the user keeps them in review. Saved skills are sent to the model only when a later request matches.
 

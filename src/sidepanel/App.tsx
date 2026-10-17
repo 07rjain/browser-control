@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import AssistantMarkdown from "./AssistantMarkdown";
 import { messageTextSize, SIDEBAR_STATE_STORAGE_KEY, type ConversationSnapshot } from "../shared/conversation-state";
-import { isSafeHttpUrl, sanitizeMarkdownUrl, type PageAttachment, type SidebarEvent, type SidebarSkill, type UiResponse } from "../shared/protocol";
+import { type PageAttachment, type SidebarEvent, type SidebarSkill, type UiResponse } from "../shared/protocol";
 import {
   BROWSER_PERMISSION_MODE_KEY,
   BROWSER_TASK_ACTION_LIMIT_KEY,
@@ -18,8 +17,9 @@ import {
   type BrowserPermissionMode,
 } from "../shared/page-tools";
 import { AUTO_REVIEW_SETTINGS_KEY, DEFAULT_AUTO_REVIEW, REVIEW_MODEL, DEFAULT_REVIEW_SYSTEM_PROMPT, REQUIRED_REVIEW_INSTRUCTIONS, MAX_REVIEW_SYSTEM_PROMPT, autoReviewSettingsSchema, readAutoReviewSettings, reviewCapabilitiesSchema, type AutoReviewSettings } from "../shared/auto-review";
-import { IDLE_RECORDING_VIEW, recordingStepSummary, type RecordingView } from "../shared/skill-recording";
-import { COMPANION_INSTALL_COMMAND, isLegacyThreadError, isMissingNativeHost } from "../shared/companion-setup";
+import { IDLE_RECORDING_VIEW, MAX_RECORDING_STEPS, MAX_SKILL_DOCUMENT_CHARS, recordingStepSummary, type RecordingView } from "../shared/skill-recording";
+import { skillRecordingOfferEventSchema, skillRecordingOfferSchema } from "../shared/skill-offer";
+import { COMPANION_INSTALL_COMMAND, isLegacyThreadError, isMissingNativeHost, isWorkspaceRoutingTimeout, WORKSPACE_ROUTING_TIMEOUT_MESSAGE } from "../shared/companion-setup";
 import { activityStepLabel, groupToolStatuses, hasBrowserActivityForTurn, latestToolStatuses, summarizeToolStatuses, visibleActivityFormFields, type ToolStatus } from "./activity";
 import { settleCanceledMessages, type ChatMessage } from "./chat-state";
 import { MAX_ATTACHED_FILES, readAttachedFile, type AttachedFile } from "./attached-files";
@@ -271,7 +271,7 @@ function RecordingReview({
       {recording.previewError && <p className="recording-error">{recording.previewError}</p>}
       {recording.preview && (
         <details>
-          <summary>File to save</summary>
+          <summary>File to save · {recording.preview.length.toLocaleString()} / {MAX_SKILL_DOCUMENT_CHARS.toLocaleString()} characters</summary>
           <pre className="recording-preview">{recording.preview}</pre>
         </details>
       )}
@@ -316,6 +316,7 @@ function StarterIcon({ id }: { id: StarterTask["id"] }) {
 
 export default function App() {
   const [authState, setAuthState] = useState<AuthState>("checking");
+  const accountCheckGeneration = useRef(0);
   const [account, setAccount] = useState<Account | null>(null);
   const [login, setLogin] = useState<LoginDetails | null>(null);
   const [threadId, setThreadId] = useState<string | null>(null);
@@ -382,6 +383,8 @@ export default function App() {
   const threadReadyRef = useRef(false);
   const inFlightPayloadRef = useRef<RetryPayload | null>(null);
   const turnExecutedToolRef = useRef(false);
+  const activeTurnIdentityRef = useRef<string | null>(null);
+  const teachingOfferTurnRef = useRef<string | null>(null);
   const stopRequestedRef = useRef(false);
   const completionSoundEnabledRef = useRef(false);
   const conversationSaveEpoch = useRef(0);
@@ -409,14 +412,20 @@ export default function App() {
   const activeBrowserTask = streaming && hasBrowserActivityForTurn(toolStatuses, activeTurnId);
 
   const refreshAccount = useCallback(async () => {
+    const generation = ++accountCheckGeneration.current;
+    setAuthState((current) => current === "ready" || current === "authenticating" ? current : "checking");
+    setError(null);
     try {
       const result = await sendRequest<{ account: Account | null }>({ type: "ACCOUNT_READ" });
+      if (generation !== accountCheckGeneration.current) return;
       setAccount(result.account);
       setAuthState(result.account?.type === "chatgpt" ? "ready" : "signed-out");
       setError(null);
     } catch (cause) {
-      setAuthState("offline");
-      setError(cause instanceof Error ? cause.message : "The local companion is unavailable.");
+      if (generation !== accountCheckGeneration.current) return;
+      const message = cause instanceof Error ? cause.message : "The local companion is unavailable.";
+      setAuthState(isWorkspaceRoutingTimeout(message) ? "workspace-unavailable" : "offline");
+      setError(message);
     }
   }, []);
 
@@ -665,7 +674,10 @@ export default function App() {
       if (message?.source !== "codex-sidebar-background") return;
       switch (message.event) {
         case "bridge.status":
-          if ((message.data as { connected?: boolean })?.connected === false) setAuthState("offline");
+          if ((message.data as { connected?: boolean })?.connected === false) {
+            accountCheckGeneration.current++;
+            setAuthState("offline");
+          }
           break;
         case "auth.updated":
         case "auth.loginCompleted":
@@ -680,9 +692,26 @@ export default function App() {
             setRecordingError(null);
           }
           break;
+        case "skill.recordingOffered": {
+          const parsed = skillRecordingOfferEventSchema.safeParse(message.data);
+          if (!parsed.success || stopRequestedRef.current) break;
+          const offer = parsed.data;
+          if (inFlightPayloadRef.current?.threadId !== offer.threadId || (activeTurnIdentityRef.current && activeTurnIdentityRef.current !== offer.turnId)) break;
+          activeTurnIdentityRef.current = offer.turnId;
+          teachingOfferTurnRef.current = offer.turnId;
+          setMessages((current) => {
+            const index = current.findLastIndex((item) => item.role === "assistant" && (item.id === offer.turnId || item.streaming));
+            if (index < 0 || current[index].recordingOffer) return current;
+            return current.map((item, itemIndex) => itemIndex === index
+              ? { ...item, id: offer.turnId, recordingOffer: { reason: offer.reason, description: offer.description, state: "pending" } }
+              : item);
+          });
+          break;
+        }
         case "chat.delta": {
           if (stopRequestedRef.current) break;
           const data = message.data as { turnId: string; delta: string };
+          activeTurnIdentityRef.current = data.turnId;
           setActiveTurnId(data.turnId);
           setMessages((current) => {
             const index = current.findLastIndex((item) => item.role === "assistant" && item.streaming);
@@ -710,19 +739,26 @@ export default function App() {
         case "chat.turnCompleted": {
           const wasStopped = stopRequestedRef.current;
           const completedBrowserTask = turnExecutedToolRef.current;
+          const offerTurnId = teachingOfferTurnRef.current;
+          const offeredRecording = offerTurnId !== null;
           const data = message.data as { turn?: { status?: string; error?: { message?: string } } };
           const failed = !wasStopped && data.turn?.status === "failed";
           stopRequestedRef.current = false;
           turnExecutedToolRef.current = false;
+          activeTurnIdentityRef.current = null;
+          teachingOfferTurnRef.current = null;
           setActiveTurnId(null);
           setIsSending(false);
+          if (offerTurnId) setMessages((current) => current.map((item) => item.id === offerTurnId && item.recordingOffer?.state === "pending"
+            ? { ...item, recordingOffer: wasStopped ? undefined : { ...item.recordingOffer, state: "offered" } }
+            : item));
           setRetryPayload(failed && !completedBrowserTask ? inFlightPayloadRef.current : null);
           inFlightPayloadRef.current = null;
           if (failed) {
             setError(data.turn?.error?.message ?? "Codex could not process this message. Check the selected model and attachments before retrying.");
             setMessages((current) => current.map((item) => item.streaming ? { ...item, streaming: false, failed: true } : item));
           } else setMessages(settleCanceledMessages);
-          if (completedBrowserTask && !wasStopped && !failed) {
+          if (completedBrowserTask && !wasStopped && !failed && !offeredRecording) {
             showCompletionNotice("Task complete — you can check the result when you’re ready.");
             if (completionSoundEnabledRef.current) void playCompletionSound();
           }
@@ -730,6 +766,12 @@ export default function App() {
         }
         case "chat.error": {
           const wasStopped = stopRequestedRef.current;
+          const offerTurnId = teachingOfferTurnRef.current;
+          teachingOfferTurnRef.current = null;
+          activeTurnIdentityRef.current = null;
+          if (offerTurnId) setMessages((current) => current.map((item) => item.id === offerTurnId && item.recordingOffer?.state === "pending"
+            ? { ...item, recordingOffer: wasStopped ? undefined : { ...item.recordingOffer, state: "offered" } }
+            : item));
           stopRequestedRef.current = false;
           setActiveTurnId(null);
           setIsSending(false);
@@ -776,6 +818,7 @@ export default function App() {
   }, [refreshAccount, refreshSkills, showCompletionNotice]);
 
   const signIn = async () => {
+    accountCheckGeneration.current++;
     setAuthState("authenticating");
     setError(null);
     setCompletionNotice(null);
@@ -790,12 +833,14 @@ export default function App() {
   };
 
   const cancelLogin = async () => {
+    accountCheckGeneration.current++;
     if (login) await sendRequest({ type: "AUTH_CANCEL", loginId: login.loginId }).catch(() => undefined);
     setLogin(null);
     setAuthState("signed-out");
   };
 
   const signOut = async () => {
+    accountCheckGeneration.current++;
     await sendRequest({ type: "AUTH_LOGOUT" });
     setAccount(null);
     setLogin(null);
@@ -1004,6 +1049,17 @@ export default function App() {
     setMenuOpen(false);
   };
 
+  const openOfferedRecording = (message: ChatMessage) => {
+    const parsed = skillRecordingOfferSchema.safeParse(message.recordingOffer);
+    if (!parsed.success || !["offered", "opened"].includes(parsed.data.state) || streaming || recordingActive) return;
+    setRecordWhen(parsed.data.description);
+    setRecordComposerOpen(true);
+    setMenuOpen(false);
+    setMessages((current) => current.map((item) => item.id === message.id && item.recordingOffer
+      ? { ...item, recordingOffer: { ...item.recordingOffer, state: "opened" } }
+      : item));
+  };
+
   const grantRecordingSite = async () => {
     if (!recording.pendingOriginPattern) return;
     const originPattern = recording.pendingOriginPattern;
@@ -1069,6 +1125,8 @@ export default function App() {
     setRetryPayload(null);
     inFlightPayloadRef.current = payload;
     turnExecutedToolRef.current = false;
+    activeTurnIdentityRef.current = null;
+    teachingOfferTurnRef.current = null;
     stopRequestedRef.current = false;
     const controller = new AbortController();
     sendAbortRef.current = controller;
@@ -1134,7 +1192,10 @@ export default function App() {
       if (result.replayed) {
         setMessages(settleCanceledMessages);
         showCompletionNotice("This message was already accepted by Codex and was not sent twice. Check the conversation before starting another request.");
-      } else setActiveTurnId(result.turnId);
+      } else {
+        activeTurnIdentityRef.current = result.turnId;
+        setActiveTurnId(result.turnId);
+      }
       setIsSending(false);
     } catch (cause) {
       setIsSending(false);
@@ -1244,9 +1305,12 @@ export default function App() {
     preparationRef.current?.abort();
     sendAbortRef.current?.abort();
     stopRequestedRef.current = true;
+    teachingOfferTurnRef.current = null;
     setIsSending(false);
     setError(null);
-    setMessages(settleCanceledMessages);
+    setMessages((current) => settleCanceledMessages(current.map((message) => message.streaming || message.id === activeTurnId
+      ? { ...message, recordingOffer: undefined }
+      : message)));
     setToolApproval(null);
     setToolPermission(null);
     if (!threadId) return;
@@ -1394,6 +1458,7 @@ export default function App() {
 
   const deleteAllLocalData = async () => {
     if (!confirm("Delete all Browser Control data from this browser and computer, including local conversations and the Browser Control ChatGPT sign-in? The installed companion will be kept.")) return;
+    accountCheckGeneration.current++;
     setError(null);
     preparationRef.current?.abort();
     sendAbortRef.current?.abort();
@@ -1505,7 +1570,7 @@ export default function App() {
             </div>
             <button className="text-button login-cancel" onClick={() => void cancelLogin()}>Cancel</button>
           </section>
-        ) : authState !== "offline" && (
+        ) : authState !== "offline" && authState !== "workspace-unavailable" && (
           <button className="primary-button welcome-action rise" onClick={() => void signIn()} disabled={authState === "checking"}>
             {authState === "checking" ? "Connecting…" : "Sign in with ChatGPT"}
           </button>
@@ -1526,11 +1591,11 @@ export default function App() {
             {desktopOs === "linux" && <p>Use a normal Chrome or Brave package. Snap and Flatpak builds cannot start the companion.</p>}
             <p>Leave this panel open, then choose Retry connection.</p>
           </section>
-        ) : error && <div className="error-banner" role="alert">{error}</div>}
-        {(authState === "offline" || authState === "error") && (
+        ) : error && <div className="error-banner" role="alert">{isWorkspaceRoutingTimeout(error) ? WORKSPACE_ROUTING_TIMEOUT_MESSAGE : error}</div>}
+        {(authState === "offline" || authState === "error" || authState === "workspace-unavailable") && (
           <div className="connection-actions">
             <button className="secondary-button" onClick={() => void refreshAccount()}>Retry connection</button>
-            {!isMissingNativeHost(error) && (
+            {!isMissingNativeHost(error) && !isWorkspaceRoutingTimeout(error) && (
               <button className="text-button" onClick={() => void sendRequest({ type: "OPEN_EXTERNAL", url: COMPANION_SUPPORT_URL })}>
                 Install or update companion
               </button>
@@ -1864,6 +1929,9 @@ export default function App() {
           </section>
         ) : (
           messages.map((message) => {
+            const offer = skillRecordingOfferSchema.safeParse(message.recordingOffer);
+            const showRecordingOffer = message.role === "assistant" && offer.success && ["offered", "opened"].includes(offer.data.state) && !message.streaming && activeTurnId !== message.id;
+            const showResponseActions = message.role === "assistant" && Boolean(message.text) && !message.streaming && !message.failed;
             const activity = message.role === "assistant"
               ? activitiesByTurn.get(message.id) ?? (message.streaming && activeTurnId ? activitiesByTurn.get(activeTurnId) : undefined)
               : undefined;
@@ -1876,33 +1944,31 @@ export default function App() {
                     complete={!message.streaming && activeTurnId !== message.id}
                   />
                 )}
-                {(message.role === "user" || message.text || message.streaming) && <article className={`message message-${message.role} ${message.failed ? "message-failed" : ""}`}>
+                {(message.role === "user" || message.text || message.streaming || showRecordingOffer) && <article className={`message message-${message.role} ${message.failed ? "message-failed" : ""}`}>
                   <span className="message-role">{message.role === "user" ? "You" : "Browser Control"}</span>
                   {message.role === "assistant" ? (
                     message.text ? (
-                      <ReactMarkdown
-                        remarkPlugins={[remarkGfm]}
-                        urlTransform={sanitizeMarkdownUrl}
-                        components={{
-                          img: () => null,
-                          a: ({ children, href, title }) => {
-                            const safeHref = href && isSafeHttpUrl(href) ? href : undefined;
-                            if (!safeHref) return <span>{children}</span>;
-                            return <a href={safeHref} title={title} target="_blank" rel="noreferrer noopener">{children}</a>;
-                          },
-                        }}
-                      >
-                        {message.text}
-                      </ReactMarkdown>
-                    ) : (
+                      <AssistantMarkdown text={message.text} />
+                    ) : message.streaming ? (
                       <span className="thinking"><i /><i /><i /><span className="sr-only">Browser Control is thinking</span></span>
-                    )
+                    ) : null
                   ) : (
                     <p>{message.text}</p>
                   )}
                   {message.role === "user" && message.attachments?.length ? <SentFiles files={message.attachments} threadId={threadId} transport={attachmentTransport} /> : null}
-                  {message.role === "assistant" && message.text && !message.streaming && !message.failed && (
-                    <div className="message-actions" aria-label="Response actions">
+                  {showRecordingOffer && (
+                    <div className="message-actions recording-offer-actions" role="group" aria-label="Skill recording">
+                      <button type="button" className="record-skill-action" disabled={streaming || recordingActive} data-tooltip={offer.data.reason} aria-description={offer.data.reason} onClick={() => openOfferedRecording(message)}>
+                        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><rect x="3" y="6" width="12" height="12" rx="2" /><path d="m15 10 6-3v10l-6-3z" /></svg>
+                        Record skill
+                      </button>
+                      <button type="button" className="record-skill-dismiss" aria-label="Dismiss recording offer" data-tooltip="Dismiss recording offer" onClick={() => setMessages((current) => current.map((item) => item.id === message.id && item.recordingOffer
+                        ? { ...item, recordingOffer: { ...item.recordingOffer, state: "dismissed" } }
+                        : item))}><span aria-hidden="true">×</span></button>
+                    </div>
+                  )}
+                  {showResponseActions && (
+                    <div className="message-actions" role="group" aria-label="Response actions">
                       <button type="button" onClick={() => void copyMessage(message)} data-tooltip="Copy this response">
                         <span aria-hidden="true">▣</span> {copiedMessageId === message.id ? "Copied" : "Copy"}
                       </button>
@@ -1973,6 +2039,7 @@ export default function App() {
           <section className="recording-panel" aria-label="Skill recording">
             <p className="eyebrow">{recording.status === "review" ? "Review skill" : "Recording a skill"}</p>
             <h2>{recording.name || "Taught skill"}</h2>
+            <p>{recording.steps.length} / {MAX_RECORDING_STEPS} steps</p>
             {recording.notice && <p>{recording.notice}</p>}
             {recordingError && <p className="recording-error">{recordingError}</p>}
             {recording.status === "needs-permission" && recording.pendingOriginPattern && (
@@ -2056,6 +2123,7 @@ export default function App() {
             event.preventDefault();
             void startRecording();
           }}>
+            <p>Record up to {MAX_RECORDING_STEPS} steps, then review before saving. Skill documents can contain up to {MAX_SKILL_DOCUMENT_CHARS.toLocaleString()} characters.</p>
             <label>
               When should the agent use this skill?
               <textarea

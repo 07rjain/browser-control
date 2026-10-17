@@ -84,7 +84,7 @@ export function isAllowedDynamicTool(namespace, tool) {
 }
 
 export function isHostSkillTool(namespace, tool) {
-  return namespace === "skills" && tool === "read";
+  return namespace === "skills" && (tool === "read" || tool === "offer_recording");
 }
 
 // Codex built-in tools run inside the app-server, outside the dynamic-tool

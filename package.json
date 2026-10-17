@@ -22,11 +22,17 @@
     "uninstall:host:mac": "node scripts/uninstall-native-host.mjs"
   },
   "dependencies": {
+    "hast-util-from-html-isomorphic": "^2.0.0",
+    "katex": "^0.16.47",
     "pdfjs-dist": "5.6.205",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-markdown": "^10.1.0",
+    "rehype-katex": "^7.0.1",
     "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0",
+    "remark-parse": "^11.0.0",
+    "unified": "^11.0.5",
     "zod": "^4.4.3"
   },
   "devDependencies": {
@@ -34,6 +40,7 @@
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@types/chrome": "^0.2.6",
+    "@types/mdast": "^4.0.4",
     "@types/node": "^26.2.0",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",

@@ -4,7 +4,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 export const MAX_SKILL_NAME_CHARS = 100;
 export const MAX_SKILL_DESCRIPTION_CHARS = 500;
-export const MAX_SKILL_FILE_CHARS = 24_000;
+export const MAX_SKILL_FILE_CHARS = 240_000;
 export const MAX_CATALOG_SKILLS = 40;
 const CATALOG_CHAR_BUDGET = 8_000;
 const MAX_SKILL_DEPTH = 6;
@@ -220,7 +220,7 @@ export function writeNamedSkill(root, markdown) {
   const tempPath = join(directoryReal, `.skill-draft-${process.pid}`);
   const finalPath = join(directoryReal, "SKILL.md");
   try {
-    writeFileSync(tempPath, markdown.endsWith("\n") ? markdown : `${markdown}\n`, { mode: 0o600, flag: "wx" });
+    writeFileSync(tempPath, markdown, { mode: 0o600, flag: "wx" });
     renameSync(tempPath, finalPath);
     const confirmed = parseSkillDocument(readFileSync(finalPath, "utf8"));
     if (!confirmed || confirmed.error || confirmed.name !== parsed.name || confirmed.description !== parsed.description) {

@@ -8,6 +8,7 @@ import {
 import {
   ACTIVE_BROWSER_TASK_WINDOW_MS,
   IDLE_RECORDING_VIEW,
+  MAX_RECORDING_STEPS,
   RECORDER_PORT_NAME,
   RECORDING_SESSION_KEY,
   appendRecordingStep,
@@ -29,7 +30,9 @@ const sessionSchema = z.object({
   description: z.string().max(500),
   name: z.string().max(100),
   notes: z.string().max(4_000),
-  steps: z.array(storedRecordingStepSchema).max(80),
+  steps: z.array(storedRecordingStepSchema).max(MAX_RECORDING_STEPS),
+  stopping: z.boolean().optional(),
+  captureWarning: z.string().max(200).optional(),
   observedTabId: z.number().int().positive().optional(),
   pendingOrigin: z.string().max(300).optional(),
   pendingOriginPattern: z.string().max(300).optional(),
@@ -42,7 +45,13 @@ const sessionSchema = z.object({
 type RecordingSession = z.infer<typeof sessionSchema>;
 
 const recorderPorts = new Map<number, chrome.runtime.Port>();
+const pendingFlushes = new Map<string, {
+  nonce: string;
+  port: chrome.runtime.Port;
+  finish: (captured: boolean) => void;
+}>();
 let queue: Promise<unknown> = Promise.resolve();
+let pendingStop: Promise<RecordingView> | null = null;
 
 function enqueue<T>(work: () => Promise<T>): Promise<T> {
   const run = queue.then(work, work);
@@ -77,20 +86,21 @@ function viewFrom(session: RecordingSession | null): RecordingView {
   const preview = session.status === "review"
     ? previewSkillDocument(session)
     : { preview: "", previewError: "" };
-  let notice = "";
+  const notices = session.captureWarning ? [session.captureWarning] : [];
   if (session.status === "needs-permission" && session.pendingOrigin) {
-    notice = `Allow browser actions on ${session.pendingOrigin} to keep recording.`;
+    notices.push(`Allow browser actions on ${session.pendingOrigin} to keep recording.`);
   } else if (session.status === "recording" && session.observedTabId === undefined) {
-    notice = "Open a normal http or https page to continue recording.";
-  } else if (session.truncated) {
-    notice = "The step list is full. Stop and delete steps you do not want.";
+    notices.push("Open a normal http or https page to continue recording.");
+  }
+  if (session.truncated) {
+    notices.push(`The ${MAX_RECORDING_STEPS}-step list is full. Stop and delete steps you do not want.`);
   }
   return {
     status: session.status,
     description: session.description,
     name: session.name,
     notes: session.notes,
-    notice,
+    notice: notices.join(" "),
     pendingOrigin: session.pendingOrigin ?? "",
     pendingOriginPattern: session.pendingOriginPattern ?? "",
     steps: session.steps,
@@ -137,6 +147,7 @@ async function activeBrowserTask(): Promise<boolean> {
 
 function stopPorts(): void {
   for (const port of recorderPorts.values()) {
+    finishPortFlushes(port);
     try {
       port.postMessage({ type: "STOP" });
     } catch {
@@ -149,6 +160,33 @@ function stopPorts(): void {
     }
   }
   recorderPorts.clear();
+}
+
+function finishPortFlushes(port: chrome.runtime.Port): void {
+  for (const pending of pendingFlushes.values()) {
+    if (pending.port === port) pending.finish(false);
+  }
+}
+
+function flushRecorder(session: RecordingSession): Promise<boolean> {
+  if (session.observedTabId === undefined) return Promise.resolve(true);
+  const port = recorderPorts.get(session.observedTabId);
+  if (!port) return Promise.resolve(false);
+  const requestId = crypto.randomUUID();
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => finish(false), 3_000);
+    const finish = (captured: boolean): void => {
+      clearTimeout(timer);
+      pendingFlushes.delete(requestId);
+      resolve(captured);
+    };
+    pendingFlushes.set(requestId, { nonce: session.nonce, port, finish });
+    try {
+      port.postMessage({ type: "FLUSH", nonce: session.nonce, requestId });
+    } catch {
+      finish(false);
+    }
+  });
 }
 
 async function rememberOrigin(originPattern: string): Promise<void> {
@@ -272,17 +310,36 @@ export function startSkillRecording(description: string): Promise<RecordingView>
 }
 
 export function stopSkillRecording(): Promise<RecordingView> {
-  return enqueue(async () => {
-    const session = await loadSession();
-    if (!session || session.status === "review") throw new Error("There is no skill recording to stop.");
-    session.status = "review";
-    session.observedTabId = undefined;
-    session.pendingOrigin = undefined;
-    session.pendingOriginPattern = undefined;
-    stopPorts();
-    await saveSession(session);
-    return publish(session);
-  });
+  if (pendingStop) return pendingStop;
+  const stopping = (async () => {
+    const drain = await enqueue(async () => {
+      const session = await loadSession();
+      if (!session || session.status === "review") throw new Error("There is no skill recording to stop.");
+      session.stopping = true;
+      await saveSession(session);
+      return { nonce: session.nonce, flushed: flushRecorder(session) };
+    });
+    // STEP messages and their acknowledgement use the same queue. Wait outside
+    // it so the final input can be persisted before the review is generated.
+    const captured = await drain.flushed;
+    return enqueue(async () => {
+      const session = await loadSession();
+      if (!session || session.nonce !== drain.nonce) throw new Error("This skill recording was canceled.");
+      session.status = "review";
+      session.stopping = undefined;
+      if (!captured) session.captureWarning = "The page disconnected or did not finish recording. The last typing or scroll may be missing; check the steps before saving.";
+      session.observedTabId = undefined;
+      session.pendingOrigin = undefined;
+      session.pendingOriginPattern = undefined;
+      stopPorts();
+      await saveSession(session);
+      return publish(session);
+    });
+  })();
+  pendingStop = stopping;
+  const clear = (): void => { if (pendingStop === stopping) pendingStop = null; };
+  void stopping.then(clear, clear);
+  return stopping;
 }
 
 export function cancelSkillRecording(): Promise<RecordingView> {
@@ -359,7 +416,7 @@ export function saveSkillRecording(
 export async function forgetRecordingTab(tabId: number): Promise<void> {
   await enqueue(async () => {
     const session = await loadSession();
-    if (!session || session.status === "review" || session.observedTabId !== tabId) return;
+    if (!session || session.stopping || session.status === "review" || session.observedTabId !== tabId) return;
     session.observedTabId = undefined;
     await saveSession(session);
     publish(session);
@@ -369,7 +426,7 @@ export async function forgetRecordingTab(tabId: number): Promise<void> {
 export function followRecordingActivation(tabId: number): void {
   void enqueue(async () => {
     const session = await loadSession();
-    if (!session || session.status === "review") return;
+    if (!session || session.stopping || session.status === "review") return;
     const next = await followTab(session, tabId);
     await saveSession(next);
     publish(next);
@@ -380,7 +437,7 @@ export function noteRecordingNavigation(tabId: number, url: string | undefined):
   if (!url) return;
   void enqueue(async () => {
     const session = await loadSession();
-    if (!session || session.status !== "recording") return;
+    if (!session || session.stopping || session.status !== "recording") return;
     if (session.observedTabId !== undefined && session.observedTabId !== tabId) return;
     if (session.observedTabId === undefined) {
       const active = await focusedActiveTab();
@@ -414,6 +471,7 @@ export function acceptRecorderPort(port: chrome.runtime.Port): void {
     const allowed = originPattern ? await hasRememberedControlAccess(originPattern) : false;
     if (
       !session ||
+      session.stopping ||
       session.status !== "recording" ||
       session.observedTabId !== tabId ||
       !location ||
@@ -433,10 +491,13 @@ export function acceptRecorderPort(port: chrome.runtime.Port): void {
     }
     recorderPorts.set(tabId, port);
     port.onDisconnect.addListener(() => {
-      if (recorderPorts.get(tabId) === port) recorderPorts.delete(tabId);
+      void enqueue(async () => {
+        if (recorderPorts.get(tabId) === port) recorderPorts.delete(tabId);
+        finishPortFlushes(port);
+      });
     });
     port.onMessage.addListener((message: unknown) => {
-      void enqueue(() => ingestRecorderStep(tabId, message));
+      void enqueue(() => ingestRecorderStep(tabId, port, message));
     });
     try {
       port.postMessage({ type: "START", nonce: session.nonce });
@@ -446,11 +507,17 @@ export function acceptRecorderPort(port: chrome.runtime.Port): void {
   });
 }
 
-async function ingestRecorderStep(tabId: number, message: unknown): Promise<void> {
+async function ingestRecorderStep(tabId: number, port: chrome.runtime.Port, message: unknown): Promise<void> {
+  if (recorderPorts.get(tabId) !== port) return;
   const parsed = recorderMessageSchema.safeParse(message);
   if (!parsed.success) return;
   const session = await loadSession();
   if (!session || session.status !== "recording" || session.nonce !== parsed.data.nonce || session.observedTabId !== tabId) return;
+  if (parsed.data.type === "FLUSHED") {
+    const pending = pendingFlushes.get(parsed.data.requestId);
+    if (pending?.nonce === session.nonce && pending.port === port) pending.finish(true);
+    return;
+  }
   const tab = await chrome.tabs.get(tabId).catch(() => undefined);
   const location = tab?.url ? publicLocation(tab.url) : null;
   if (!location) return;

@@ -307,10 +307,18 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .message pre code { padding: 0; background: none; }
 .message a { color: #3972c7; text-underline-offset: 2px; }
 .message-failed { opacity: 0.65; }
-.message-actions { position: relative; display: flex; align-items: center; gap: 3px; margin-top: 8px; }
+.message .katex { font-size: 1.1em; }
+.message .katex-display { max-width: 100%; overflow-x: auto; overflow-y: hidden; padding: 8px 2px; margin: 12px 0; }
+.message .katex-display > .katex { width: max-content; min-width: 100%; }
+.message .katex-error { color: var(--danger) !important; white-space: pre-wrap; overflow-wrap: anywhere; }
+.message-actions { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 3px; margin-top: 8px; }
 .message-actions button { min-height: 28px; display: inline-flex; align-items: center; gap: 5px; padding: 4px 7px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); cursor: pointer; font-size: 10px; font-weight: 650; }
 .message-actions button:hover { background: var(--soft); color: var(--text); }
 .message-actions button:disabled { opacity: 0.4; cursor: default; }
+.recording-offer-actions { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); margin-top: 14px; margin-bottom: 8px; }
+.message-actions .record-skill-action { grid-column: 2; position: relative; min-height: 34px; padding: 6px 12px; border: 1px solid var(--border-strong); background: var(--soft); color: var(--text); font-size: 12px; }
+.record-skill-dismiss { justify-self: start; }
+.record-skill-action svg { width: 14px; height: 14px; flex: none; }
 .turn-block { min-width: 0; }
 .thinking { display: inline-flex; gap: 4px; padding: 8px 0; }
 .thinking i { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); animation: pulse 1.2s infinite ease-in-out; }
@@ -354,11 +362,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .composer { position: relative; padding: 7px; border: 1px solid var(--border-strong); border-radius: 17px; background: var(--panel-solid); box-shadow: 0 8px 28px rgba(25, 25, 24, 0.07); }
 .composer:focus-within { border-color: color-mix(in srgb, #5d8cff 55%, var(--border)); box-shadow: 0 0 0 3px rgba(93, 140, 255, 0.1); }
 @property --composer-border-angle { syntax: "<angle>"; initial-value: 0deg; inherits: false; }
-.composer-running::before {
+.composer-running::before,
+.record-skill-action:not(:disabled)::before {
   content: "";
   position: absolute;
   inset: -2px;
-  border-radius: 19px;
   padding: 2px;
   background: conic-gradient(from var(--composer-border-angle), transparent 35%, #5d8cff 55%, #a78bfa 70%, transparent 85%);
   mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
@@ -366,6 +374,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   pointer-events: none;
   animation: composer-border-run 2.4s linear infinite;
 }
+.composer-running::before { border-radius: 19px; }
+.record-skill-action::before { border-radius: 10px; }
 @keyframes composer-border-run { to { --composer-border-angle: 360deg; } }
 .composer textarea { width: 100%; min-height: 42px; max-height: 150px; resize: none; field-sizing: content; padding: 8px 9px; border: 0; outline: 0; overflow-y: auto; background: transparent; color: var(--text); line-height: 1.45; }
 .composer textarea::placeholder { color: var(--muted); }
@@ -458,7 +468,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .composer-running::before { animation: none; background: #5d8cff; }
+  .composer-running::before, .record-skill-action:not(:disabled)::before { animation: none; background: #5d8cff; }
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
 }
 .file-card { list-style: none; padding: 12px; border: 1px solid var(--border, #5555); border-radius: 12px; display: grid; gap: 7px; min-width: 0; }

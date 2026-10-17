@@ -4,6 +4,7 @@ import { chatSettingsSchema } from "../shared/chat-settings";
 import { AUTO_REVIEW_SETTINGS_KEY, DEFAULT_AUTO_REVIEW, REVIEW_MODEL, REVIEW_TIMEOUT_MS, readAutoReviewSettings, reviewCapabilitiesSchema, reviewVerdictSchema, verdictApproves, type AutoReviewSettings, type ReviewActivity } from "../shared/auto-review";
 import { reviewCandidate, reviewFingerprint, reviewedTarget } from "./auto-review-policy";
 import { freshCompletionNotice } from "../shared/completion-notice";
+import { isWorkspaceRoutingTimeout } from "../shared/companion-setup";
 import {
   accountSchema,
   nativeEnvelopeSchema,
@@ -165,6 +166,7 @@ interface StoredPendingPrompt {
 }
 
 let nativePort: chrome.runtime.Port | null = null;
+let pendingAccountRead: Promise<z.infer<typeof accountResponseSchema>> | null = null;
 const pendingNative = new Map<string, PendingNativeRequest>();
 const pendingApprovals = new Map<string, PendingApproval>();
 const pendingPermissions = new Map<string, PendingPermission>();
@@ -256,6 +258,28 @@ function requestNative(method: string, params?: unknown, timeoutMs = NATIVE_TIME
     pendingNative.set(id, { resolve, reject, timeout });
     port.postMessage({ type: "request", id, method, params });
   });
+}
+
+function readAccount(): Promise<z.infer<typeof accountResponseSchema>> {
+  if (pendingAccountRead) return pendingAccountRead;
+  const epoch = lifecycleEpoch;
+  const read = (async () => {
+    try {
+      return accountResponseSchema.parse(await requestNative("account.read"));
+    } catch (error) {
+      // account/read performs Codex's network workspace discovery. Retry that
+      // idempotent check once; never replay a chat, login, or browser action.
+      if (epoch !== lifecycleEpoch || !(error instanceof Error) || !isWorkspaceRoutingTimeout(error.message)) throw error;
+      return accountResponseSchema.parse(await requestNative("account.read"));
+    }
+  })().then((account) => {
+    if (epoch !== lifecycleEpoch) throw new Error("The account changed while connecting. Retry connection.");
+    return account;
+  });
+  pendingAccountRead = read;
+  const clear = (): void => { if (pendingAccountRead === read) pendingAccountRead = null; };
+  void read.then(clear, clear);
+  return read;
 }
 
 function toolKey(call: BrowserToolCall): string {
@@ -1331,12 +1355,13 @@ async function routeRequest(input: unknown): Promise<unknown> {
     case "COMPLETION_NOTICE_DISMISS":
       await chrome.storage.session.remove(COMPLETION_NOTICE_KEY);
       return { dismissed: true };
-    case "ACCOUNT_READ": return accountResponseSchema.parse(await requestNative("account.read"));
+    case "ACCOUNT_READ": return readAccount();
     case "AUTH_LOGIN": return loginResponseSchema.parse(await requestNative("auth.login"));
     case "AUTH_CANCEL": return requestNative("auth.cancel", { loginId: request.loginId });
     case "AUTH_LOGOUT":
     case "DELETE_ALL_LOCAL_DATA":
       lifecycleEpoch++;
+      pendingAccountRead = null;
       for (const key of observedTasks) {
         retiredTasks.add(key);
         setTimeout(() => { retiredTasks.delete(key); observedTasks.delete(key); }, TASK_TOMBSTONE_TTL_MS);

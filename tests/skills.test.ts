@@ -33,6 +33,17 @@ afterEach(() => {
 });
 
 describe("sidebar skill discovery", () => {
+  it("round-trips a 240,000-character skill and rejects a larger document", () => {
+    const root = skillRoot();
+    const header = '---\nname: Long skill\ndescription: A complete long document.\n---\n';
+    const markdown = header + "界".repeat(240_000 - header.length);
+    writeNamedSkill(root, markdown);
+    const discovered = discoverSkillsOnDisk(root);
+    const restored = readSkillInstructions(discovered.skills, "Long skill");
+    expect(restored.length).toBe(240_000);
+    expect(restored === markdown).toBe(true);
+    expect(() => writeNamedSkill(root, markdown + "x")).toThrow(/too long/);
+  });
   it("stores a Windows reserved skill name in a safe folder", () => {
     const root = skillRoot();
     writeNamedSkill(root, "---\r\nname: Con\r\ndescription: Keep a reserved Windows name usable.\r\n---\r\nOpen the page.\r\n");
