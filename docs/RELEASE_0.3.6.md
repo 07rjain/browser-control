@@ -54,7 +54,32 @@ smoke check. The locally installed 0.3.6 companion also passed the Chrome-style
 launch check and confirmed an existing ChatGPT sign-in. GitHub's compatibility
 matrix passed on Linux, Windows, and macOS for base commit `bbf2691`.
 
+The release commit `26816cf` also passed all three GitHub compatibility jobs:
+https://github.com/07rjain/browser-control/actions/runs/39026518536
+
 Earlier feature-specific browser evidence and outstanding manual
 scenarios are recorded in README.md. Windows/Linux desktop browser acceptance
 and a complete live recording/save cycle remain pending; automated checks are
 not a substitute for those scenarios.
+
+## Submission record
+
+On October 17, 2026, the 0.3.6 extension ZIP was uploaded to the existing
+Chrome Web Store item `mpdfhhhjgbpdpfnkjbnboebdjokfjglf`. The dashboard confirmed
+Draft version 0.3.6, the unchanged Chrome permission list, successful submission,
+and **Pending review**. Automatic publication after approval is enabled; this
+record does not mean Google has approved or published the update.
+
+The Store description and reviewer instructions were updated. The public
+privacy policy now describes chosen file attachments, local upload retention,
+custom prompts, and Auto review. Its deployment was verified before submission.
+
+The matching companion and checksum were published and verified at:
+https://github.com/07rjain/browser-control-support/releases/tag/companion-v0.3.6
+
+Archive SHA-256 values:
+
+```text
+4103e39b87dcac524651bf25bbe8f06deba4241e2bd277d534895c74bf603f03  browser-control-extension-0.3.6.zip
+3fd8594d4b3d61a7926f4924eb7b37b212ccfc03602f8dbec579dbf45daafc40  browser-control-companion-macos-0.3.6.zip
+```

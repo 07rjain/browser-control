@@ -211,11 +211,11 @@ Messaging between the extension and companion remains local to the computer.
 
 ## Reviewer test instructions
 
-Browser Control requires a separately installed macOS companion and an eligible
+Browser Control requires a separately installed macOS, Windows, or Linux companion and an eligible
 ChatGPT/Codex account. No publisher-managed test credential is embedded in the
 extension. Do not use the publisher's personal account.
 
-1. On macOS with current Chrome, install Node.js 20+ and a compatible Codex CLI.
+1. On a supported OS with current Chrome or Brave, install Node.js 20+ and a compatible Codex CLI.
    Confirm `node --version` and `codex --version` in Terminal.
 2. Download the companion and `SHA256SUMS` from
    https://github.com/07rjain/browser-control-support/releases, verify the release as
@@ -241,6 +241,13 @@ Do not test passwords, payment details, authentication codes, purchases, real
 messages, real form submission, or private page data. Contact
 cu.16bcs2797@gmail.com if the reviewer environment cannot install the companion
 or access an eligible test account.
+
+The dashboard's 500-character field was saved with this 490-character copy for
+0.3.6:
+
+```text
+macOS/Windows/Linux, Node 20+, Codex CLI 0.162.1 and eligible reviewer-owned ChatGPT/Codex account required. Install companion 0.3.6 from https://github.com/07rjain/browser-control-support/releases: node scripts/install-native-host.mjs. Restart browser and sign in. Test chat, local image/text/PDF attachments, Copy/Fork, math, Settings prompts, Auto review and Stop on disposable pages. Ask "Help me record a skill"; open/cancel its form. No real secrets, payments or external submissions.
+```
 
 ## Distribution
 
