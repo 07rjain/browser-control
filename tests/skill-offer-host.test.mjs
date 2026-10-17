@@ -16,6 +16,7 @@ it("accepts one model-owned offer per active turn without starting recording, an
     { name: "empty", arguments: { ...args, reason: " " }, start: true },
     { name: "long-reason", arguments: { ...args, reason: "x".repeat(301) } },
     { name: "long-description", arguments: { ...args, description: "x".repeat(501) } },
+    { name: "invalid-description", arguments: { ...args, description: 123 } },
     { name: "null", arguments: { ...args, reason: "bad\0text" } },
     { name: "extra", arguments: { ...args, path: "/unavailable" } },
     { name: "foreign", arguments: args, threadId: "reviewer-or-foreign" },
@@ -23,6 +24,7 @@ it("accepts one model-owned offer per active turn without starting recording, an
     { name: "accepted", arguments: JSON.stringify(args) },
     { name: "duplicate", arguments: { ...args, reason: "A duplicate should not replace the first offer." } },
     { name: "late", arguments: args, finish: true },
+    { name: "requested", arguments: { reason: "You asked to record a browser skill." }, start: true, turnId: "turn-requested" },
   ];
   const fixture = `import { createInterface } from "node:readline";
 import { writeFileSync } from "node:fs";
@@ -36,7 +38,7 @@ function callNext() {
     writeFileSync(process.env.OFFER_RESULTS, JSON.stringify(results));
     send({ method: "warning", params: { message: "Offer fixture finished" } }); return;
   }
-  if (step.start) send({ method: "turn/started", params: { threadId: base.threadId, turn: { id: base.turnId } } });
+  if (step.start) send({ method: "turn/started", params: { threadId: base.threadId, turn: { id: step.turnId || base.turnId } } });
   if (step.finish) send({ method: "turn/completed", params: { threadId: base.threadId, turn: { id: base.turnId, status: "completed" } } });
   send({ id: step.name, method: "item/tool/call", params: { ...base, ...step, callId: step.name } });
 }
@@ -90,15 +92,16 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     await Promise.race([done, deadline]);
     expect(events.filter((event) => event.event === "skill.recordingOffered")).toEqual([
       { type: "event", event: "skill.recordingOffered", data: { threadId: base.threadId, turnId: base.turnId, callId: "accepted", ...args } },
+      { type: "event", event: "skill.recordingOffered", data: { threadId: base.threadId, turnId: "turn-requested", callId: "requested", reason: "You asked to record a browser skill.", description: "" } },
     ]);
     const replies = JSON.parse(readFileSync(join(home, "results.json"), "utf8"));
-    expect(replies.filter((reply) => reply.success).map((reply) => reply.id)).toEqual(["accepted", "duplicate"]);
-    expect(replies.filter((reply) => !reply.success).map((reply) => reply.id)).toEqual(["inactive", "empty", "long-reason", "long-description", "null", "extra", "foreign", "stale", "late"]);
+    expect(replies.filter((reply) => reply.success).map((reply) => reply.id)).toEqual(["accepted", "duplicate", "requested"]);
+    expect(replies.filter((reply) => !reply.success).map((reply) => reply.id)).toEqual(["inactive", "empty", "long-reason", "long-description", "invalid-description", "null", "extra", "foreign", "stale", "late"]);
     expect(events.some((event) => ["tool.request", "recording.status"].includes(event.event))).toBe(false);
     expect(existsSync(join(home, "skills"))).toBe(false);
     const tools = JSON.parse(readFileSync(join(home, "tools.json"), "utf8"));
     expect(tools.find((tool) => tool.name === "skills").tools.find((tool) => tool.name === "offer_recording").inputSchema).toMatchObject({
-      required: ["reason", "description"], additionalProperties: false,
+      required: ["reason"], additionalProperties: false,
       properties: { reason: { maxLength: 300 }, description: { maxLength: 500 } },
     });
   } finally {

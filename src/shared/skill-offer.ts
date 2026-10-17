@@ -2,7 +2,7 @@ import { z } from "zod";
 
 const offerFields = {
   reason: z.string().trim().min(1).max(300).refine((value) => !value.includes("\0")),
-  description: z.string().trim().min(1).max(500).refine((value) => !value.includes("\0")),
+  description: z.string().trim().max(500).refine((value) => !value.includes("\0")),
 };
 
 export const skillRecordingOfferSchema = z.object({

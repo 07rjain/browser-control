@@ -59,7 +59,7 @@ export async function probeChatSettings(codexBinary) {
   const bodies = [];
   let offerRecording = false;
   const offerCallId = "call-teaching-probe";
-  const offer = { reason: "A demonstration would help with this workflow.", description: "Arrange the example board from the user's request." };
+  const offer = { reason: "You asked to record a browser skill." };
   const provider = createServer((request, response) => {
     let raw = "";
     request.on("data", (chunk) => { raw += chunk; });
@@ -98,6 +98,7 @@ export async function probeChatSettings(codexBinary) {
       assert.ok(developerText.includes(prompt), "Codex must receive the saved prompt verbatim as instructions");
       assert.equal(body.model, "gpt-6.1-sol");
       assert.match(JSON.stringify(body.input), /Do not access local files/);
+      assert.match(developerText.join("\n"), /When the user explicitly asks to create, teach, or record a browser skill/);
       return result.turnId;
     };
     const firstTurn = await send(started.threadId, custom);
@@ -119,12 +120,12 @@ export async function probeChatSettings(codexBinary) {
     await send(reset.threadId, defaults.systemPrompt);
     offerRecording = true;
     const beforeOffer = bodies.length;
-    const offeredTurn = await client.request("chat.send", { threadId: reset.threadId, clientMessageId: randomUUID(), text: "Offer teaching if learning this board workflow would help." });
+    const offeredTurn = await client.request("chat.send", { threadId: reset.threadId, clientMessageId: randomUUID(), text: "Help me record a skill" });
     assert.equal((await client.finished(offeredTurn.turnId)).status, "completed");
     assert.equal(bodies.length, beforeOffer + 2, "Codex must receive the dynamic tool result and finish its response");
     const offers = client.events.filter((event) => event.event === "skill.recordingOffered");
     assert.equal(offers.length, 1);
-    assert.deepEqual(offers[0].data, { threadId: reset.threadId, turnId: offeredTurn.turnId, callId: offerCallId, ...offer });
+    assert.deepEqual(offers[0].data, { threadId: reset.threadId, turnId: offeredTurn.turnId, callId: offerCallId, ...offer, description: "" });
     const result = bodies.at(-1).input.find((item) => item.type === "function_call_output" && item.call_id === offerCallId);
     assert.match(JSON.stringify(result), /Record skill button/);
     await client.request("data.deleteAll");

@@ -107,7 +107,7 @@ describe("sidebar interactions", () => {
       emit("chat.delta", { turnId: "turn-teach", delta: "I could not finish this workflow." });
       emit("skill.recordingOffered", { ...offer, threadId: "other-thread" });
       emit("skill.recordingOffered", { ...offer, turnId: "old-turn" });
-      emit("skill.recordingOffered", { ...offer, description: "" });
+      emit("skill.recordingOffered", { ...offer, description: 123 });
     });
     expect(screen.queryByRole("button", { name: "Record skill" })).toBeNull();
     act(() => {
@@ -135,6 +135,25 @@ describe("sidebar interactions", () => {
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Start recording" })));
     expect(requests.filter((request) => request.type === "RECORDING_START")).toEqual([expect.objectContaining({ description: offer.description })]);
     expect((screen.getByRole("button", { name: "Record skill" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("opens an undescribed recording request in a blank form and waits for the user's workflow", async () => {
+    await ready();
+    fireEvent.change(screen.getByRole("textbox", { name: "Message Browser Control" }), { target: { value: "Help me record a skill" } });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Send message" })));
+    act(() => {
+      emit("skill.recordingOffered", { threadId: "thread-teach", turnId: "turn-teach", callId: "requested-offer", reason: "Record your browser workflow, then review and save it.", description: "" });
+      emit("chat.delta", { turnId: "turn-teach", delta: "Click Record skill below and describe the workflow in the form." });
+      emit("chat.turnCompleted", { turn: { id: "turn-teach", status: "completed" } });
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Record skill" }));
+    const description = screen.getByRole("textbox", { name: "When should the agent use this skill?" }) as HTMLTextAreaElement;
+    expect(description.value).toBe("");
+    expect((screen.getByRole("button", { name: "Start recording" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(requests.some((request) => request.type === "RECORDING_START")).toBe(false);
+    fireEvent.change(description, { target: { value: "Arrange the example board." } });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Start recording" })));
+    expect(requests.filter((request) => request.type === "RECORDING_START")).toEqual([expect.objectContaining({ description: "Arrange the example board." })]);
   });
 
   it("keeps an offer-only response, dismisses it, and ignores later duplicate or canceled offers", async () => {
@@ -232,7 +251,7 @@ describe("sidebar interactions", () => {
     await vi.waitFor(() => expect(restored.value).toBe(custom));
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Reset main prompt to default" })));
     expect(restored.value).toBe(DEFAULT_CHAT_SYSTEM_PROMPT);
-    expect(requests.at(-1)).toMatchObject({ type: "CHAT_SETTINGS_WRITE", settings: { version: 1, systemPrompt: DEFAULT_CHAT_SYSTEM_PROMPT } });
+    expect(requests.findLast((request) => request.type === "CHAT_SETTINGS_WRITE")).toMatchObject({ settings: { version: 1, systemPrompt: DEFAULT_CHAT_SYSTEM_PROMPT } });
   });
 
   it("rejects invalid main prompts and retains the draft when saving fails", async () => {
