@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import AssistantMarkdown from "./AssistantMarkdown";
 import { messageTextSize, SIDEBAR_STATE_STORAGE_KEY, type ConversationSnapshot } from "../shared/conversation-state";
-import { isSafeHttpUrl, sanitizeMarkdownUrl, type PageAttachment, type SidebarEvent, type SidebarSkill, type UiResponse } from "../shared/protocol";
+import { type PageAttachment, type SidebarEvent, type SidebarSkill, type UiResponse } from "../shared/protocol";
 import {
   BROWSER_PERMISSION_MODE_KEY,
   BROWSER_TASK_ACTION_LIMIT_KEY,
@@ -1949,20 +1948,7 @@ export default function App() {
                   <span className="message-role">{message.role === "user" ? "You" : "Browser Control"}</span>
                   {message.role === "assistant" ? (
                     message.text ? (
-                      <ReactMarkdown
-                        remarkPlugins={[remarkGfm]}
-                        urlTransform={sanitizeMarkdownUrl}
-                        components={{
-                          img: () => null,
-                          a: ({ children, href, title }) => {
-                            const safeHref = href && isSafeHttpUrl(href) ? href : undefined;
-                            if (!safeHref) return <span>{children}</span>;
-                            return <a href={safeHref} title={title} target="_blank" rel="noreferrer noopener">{children}</a>;
-                          },
-                        }}
-                      >
-                        {message.text}
-                      </ReactMarkdown>
+                      <AssistantMarkdown text={message.text} />
                     ) : message.streaming ? (
                       <span className="thinking"><i /><i /><i /><span className="sr-only">Browser Control is thinking</span></span>
                     ) : null
@@ -1976,7 +1962,7 @@ export default function App() {
                         <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><rect x="3" y="6" width="12" height="12" rx="2" /><path d="m15 10 6-3v10l-6-3z" /></svg>
                         Record skill
                       </button>
-                      <button type="button" aria-label="Dismiss recording offer" data-tooltip="Dismiss recording offer" onClick={() => setMessages((current) => current.map((item) => item.id === message.id && item.recordingOffer
+                      <button type="button" className="record-skill-dismiss" aria-label="Dismiss recording offer" data-tooltip="Dismiss recording offer" onClick={() => setMessages((current) => current.map((item) => item.id === message.id && item.recordingOffer
                         ? { ...item, recordingOffer: { ...item.recordingOffer, state: "dismissed" } }
                         : item))}><span aria-hidden="true">×</span></button>
                     </div>
