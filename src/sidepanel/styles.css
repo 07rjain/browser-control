@@ -311,7 +311,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .message-actions button { min-height: 28px; display: inline-flex; align-items: center; gap: 5px; padding: 4px 7px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); cursor: pointer; font-size: 10px; font-weight: 650; }
 .message-actions button:hover { background: var(--soft); color: var(--text); }
 .message-actions button:disabled { opacity: 0.4; cursor: default; }
-.message-actions .record-skill-action { margin-left: 5px; padding-inline: 9px; border: 1px solid var(--border-strong); background: var(--soft); color: var(--text); }
+.recording-offer-actions { margin-top: 14px; margin-bottom: 8px; }
+.message-actions .record-skill-action { min-height: 34px; padding: 6px 12px; border: 1px solid var(--border-strong); background: var(--soft); color: var(--text); font-size: 12px; }
 .record-skill-action svg { width: 14px; height: 14px; flex: none; }
 .turn-block { min-width: 0; }
 .thinking { display: inline-flex; gap: 4px; padding: 8px 0; }

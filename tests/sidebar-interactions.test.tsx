@@ -96,7 +96,7 @@ describe("sidebar interactions", () => {
     expect(screen.queryByRole("button", { name: "Record skill" })).toBeNull();
   });
 
-  it("offers recording beside Copy and Fork, and keeps it available after canceling the prefilled form", async () => {
+  it("offers recording separately from Copy and Fork, and keeps it available after canceling the prefilled form", async () => {
     await ready();
     expect(screen.queryByRole("button", { name: "Record skill" })).toBeNull();
     fireEvent.change(screen.getByRole("textbox", { name: "Message Browser Control" }), { target: { value: "Arrange the example board" } });
@@ -120,7 +120,7 @@ describe("sidebar interactions", () => {
       emit("chat.turnCompleted", { turn: { id: "turn-teach", status: "completed" } });
     });
     const actions = screen.getByLabelText("Response actions");
-    expect(within(actions).getByRole("button", { name: "Record skill" })).toBeTruthy();
+    expect(within(actions).queryByRole("button", { name: "Record skill" })).toBeNull();
     expect(within(actions).getByRole("button", { name: /Copy/ })).toBeTruthy();
     expect(within(actions).getByRole("button", { name: /Fork/ })).toBeTruthy();
     expect(screen.getAllByRole("button", { name: "Record skill" })).toHaveLength(1);

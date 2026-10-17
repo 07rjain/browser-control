@@ -1970,9 +1970,19 @@ export default function App() {
                     <p>{message.text}</p>
                   )}
                   {message.role === "user" && message.attachments?.length ? <SentFiles files={message.attachments} threadId={threadId} transport={attachmentTransport} /> : null}
-                  {(showResponseActions || showRecordingOffer) && (
+                  {showRecordingOffer && (
+                    <div className="message-actions recording-offer-actions" role="group" aria-label="Skill recording">
+                      <button type="button" className="record-skill-action" disabled={streaming || recordingActive} data-tooltip={offer.data.reason} aria-description={offer.data.reason} onClick={() => openOfferedRecording(message)}>
+                        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><rect x="3" y="6" width="12" height="12" rx="2" /><path d="m15 10 6-3v10l-6-3z" /></svg>
+                        Record skill
+                      </button>
+                      <button type="button" aria-label="Dismiss recording offer" data-tooltip="Dismiss recording offer" onClick={() => setMessages((current) => current.map((item) => item.id === message.id && item.recordingOffer
+                        ? { ...item, recordingOffer: { ...item.recordingOffer, state: "dismissed" } }
+                        : item))}><span aria-hidden="true">×</span></button>
+                    </div>
+                  )}
+                  {showResponseActions && (
                     <div className="message-actions" role="group" aria-label="Response actions">
-                      {showResponseActions && <>
                       <button type="button" onClick={() => void copyMessage(message)} data-tooltip="Copy this response">
                         <span aria-hidden="true">▣</span> {copiedMessageId === message.id ? "Copied" : "Copy"}
                       </button>
@@ -1984,16 +1994,6 @@ export default function App() {
                       >
                         <span aria-hidden="true">⑂</span> {forkingMessageId === message.id ? "Forking…" : "Fork"}
                       </button>
-                      </>}
-                      {showRecordingOffer && <>
-                        <button type="button" className="record-skill-action" disabled={streaming || recordingActive} data-tooltip={offer.data.reason} aria-description={offer.data.reason} onClick={() => openOfferedRecording(message)}>
-                          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><rect x="3" y="6" width="12" height="12" rx="2" /><path d="m15 10 6-3v10l-6-3z" /></svg>
-                          Record skill
-                        </button>
-                        <button type="button" aria-label="Dismiss recording offer" data-tooltip="Dismiss recording offer" onClick={() => setMessages((current) => current.map((item) => item.id === message.id && item.recordingOffer
-                          ? { ...item, recordingOffer: { ...item.recordingOffer, state: "dismissed" } }
-                          : item))}><span aria-hidden="true">×</span></button>
-                      </>}
                     </div>
                   )}
                 </article>}
