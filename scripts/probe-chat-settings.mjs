@@ -126,7 +126,7 @@ export async function probeChatSettings(codexBinary) {
     assert.equal(offers.length, 1);
     assert.deepEqual(offers[0].data, { threadId: reset.threadId, turnId: offeredTurn.turnId, callId: offerCallId, ...offer });
     const result = bodies.at(-1).input.find((item) => item.type === "function_call_output" && item.call_id === offerCallId);
-    assert.match(JSON.stringify(result), /Teach a skill offer/);
+    assert.match(JSON.stringify(result), /Record skill button/);
     await client.request("data.deleteAll");
     assert.equal(existsSync(join(home, "chat-settings.json")), false);
     assert.deepEqual(await client.request("chat.settingsRead"), defaults);

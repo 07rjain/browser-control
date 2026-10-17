@@ -277,7 +277,7 @@ const dynamicTools = [
       {
         type: "function",
         name: "offer_recording",
-        description: "Offer a Teach a skill button when you could not complete the user's supported browser workflow and learning from their demonstration would help. Use your own assessment, once per task, after safe recovery attempts. Do not use for prohibited actions, denied permissions, authentication/network failures, or user cancellation. This only offers a button; the user chooses whether to record, review and save.",
+        description: "Offer a Record skill button beside this response when you could not complete the user's supported browser workflow and learning from their demonstration would help. Use your own assessment, once per task, after safe recovery attempts. Do not use for prohibited actions, denied permissions, authentication/network failures, or user cancellation. This only offers a button; the user chooses whether to record, review and save.",
         inputSchema: {
           type: "object",
           properties: {
@@ -624,7 +624,7 @@ function answerRecordingOffer(id, params) {
       active.offered = true;
       sendEvent("skill.recordingOffered", { threadId: params.threadId, turnId: params.turnId, callId: params.callId, reason: args.reason.trim(), description: args.description.trim() });
     }
-    writeAppServer({ id, result: { success: true, contentItems: [{ type: "inputText", text: "A Teach a skill offer is attached to this response. Finish with an honest summary of the limitation. The user can choose to open the recorder after your turn ends." }] } });
+    writeAppServer({ id, result: { success: true, contentItems: [{ type: "inputText", text: "A Record skill button is attached to this response beside Copy and Fork. Finish with an honest summary of the limitation. The user can choose to open the recorder after your turn ends." }] } });
   } catch (error) {
     writeAppServer({ id, result: { success: false, contentItems: [{ type: "inputText", text: error instanceof Error ? error.message : "Unable to offer recording." }] } });
   }

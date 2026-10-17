@@ -93,13 +93,12 @@ describe("sidebar interactions", () => {
       emit("tool.status", { threadId: "thread-teach", turnId: "turn-teach", callId: "failed-action", namespace: "page", tool: "click", status: "failed" });
       emit("chat.turnCompleted", { turn: { id: "turn-teach", status: "failed" } });
     });
-    expect(screen.queryByRole("button", { name: "Teach a skill" })).toBeNull();
-    expect(screen.queryByRole("region", { name: "Learn this workflow" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Record skill" })).toBeNull();
   });
 
-  it("shows teaching only for an explicit model offer, then opens a prefilled user-started recording", async () => {
+  it("offers recording beside Copy and Fork, and keeps it available after canceling the prefilled form", async () => {
     await ready();
-    expect(screen.queryByRole("button", { name: "Teach a skill" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Record skill" })).toBeNull();
     fireEvent.change(screen.getByRole("textbox", { name: "Message Browser Control" }), { target: { value: "Arrange the example board" } });
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Send message" })));
     const offer = { threadId: "thread-teach", turnId: "turn-teach", callId: "offer-1", reason: "A demonstration of this board workflow would help.", description: "Arrange the example board from the user's request." };
@@ -110,24 +109,32 @@ describe("sidebar interactions", () => {
       emit("skill.recordingOffered", { ...offer, turnId: "old-turn" });
       emit("skill.recordingOffered", { ...offer, description: "" });
     });
-    expect(screen.queryByRole("button", { name: "Teach a skill" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Record skill" })).toBeNull();
     act(() => {
       emit("skill.recordingOffered", offer);
       emit("skill.recordingOffered", { ...offer, callId: "offer-duplicate", reason: "Duplicate offer" });
     });
-    expect(screen.queryByRole("button", { name: "Teach a skill" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Record skill" })).toBeNull();
     act(() => {
       emit("tool.status", { threadId: "thread-teach", turnId: "turn-teach", callId: "inspect-2", namespace: "page", tool: "inspect", status: "succeeded" });
       emit("chat.turnCompleted", { turn: { id: "turn-teach", status: "completed" } });
     });
-    expect(screen.getAllByRole("button", { name: "Teach a skill" })).toHaveLength(1);
-    expect(screen.getByRole("region", { name: "Learn this workflow" }).textContent).toContain(offer.reason);
+    const actions = screen.getByLabelText("Response actions");
+    expect(within(actions).getByRole("button", { name: "Record skill" })).toBeTruthy();
+    expect(within(actions).getByRole("button", { name: /Copy/ })).toBeTruthy();
+    expect(within(actions).getByRole("button", { name: /Fork/ })).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: "Record skill" })).toHaveLength(1);
     expect(screen.queryByText(/Task complete —/)).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Teach a skill" }));
+    fireEvent.click(screen.getByRole("button", { name: "Record skill" }));
     expect((screen.getByRole("textbox", { name: "When should the agent use this skill?" }) as HTMLTextAreaElement).value).toBe(offer.description);
     expect(requests.some((request) => request.type === "RECORDING_START")).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("textbox", { name: "When should the agent use this skill?" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Record skill" }));
+    expect((screen.getByRole("textbox", { name: "When should the agent use this skill?" }) as HTMLTextAreaElement).value).toBe(offer.description);
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Start recording" })));
     expect(requests.filter((request) => request.type === "RECORDING_START")).toEqual([expect.objectContaining({ description: offer.description })]);
+    expect((screen.getByRole("button", { name: "Record skill" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("keeps an offer-only response, dismisses it, and ignores later duplicate or canceled offers", async () => {
@@ -136,15 +143,15 @@ describe("sidebar interactions", () => {
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Send message" })));
     const offer = { threadId: "thread-teach", turnId: "turn-teach", callId: "offer-1", reason: "Please demonstrate the board workflow.", description: "Work with the example board." };
     act(() => { emit("skill.recordingOffered", offer); emit("chat.turnCompleted", { turn: { id: "turn-teach", status: "completed" } }); });
-    fireEvent.click(within(screen.getByRole("region", { name: "Learn this workflow" })).getByRole("button", { name: "Dismiss" }));
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss recording offer" }));
     act(() => emit("skill.recordingOffered", offer));
-    expect(screen.queryByRole("button", { name: "Teach a skill" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Record skill" })).toBeNull();
     fireEvent.change(screen.getByRole("textbox", { name: "Message Browser Control" }), { target: { value: "Try a different arrangement" } });
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Send message" })));
     act(() => emit("skill.recordingOffered", offer));
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Stop response" })));
     act(() => { emit("skill.recordingOffered", offer); emit("chat.turnCompleted", { turn: { id: "turn-teach", status: "interrupted" } }); });
-    expect(screen.queryByRole("button", { name: "Teach a skill" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Record skill" })).toBeNull();
     expect(requests.some((request) => request.type === "RECORDING_START")).toBe(false);
   });
   it("distinguishes a workspace timeout from a missing companion and reconnects without a new login", async () => {

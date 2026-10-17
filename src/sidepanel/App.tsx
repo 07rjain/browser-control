@@ -1052,7 +1052,7 @@ export default function App() {
 
   const openOfferedRecording = (message: ChatMessage) => {
     const parsed = skillRecordingOfferSchema.safeParse(message.recordingOffer);
-    if (!parsed.success || parsed.data.state !== "offered" || streaming || recordingActive) return;
+    if (!parsed.success || !["offered", "opened"].includes(parsed.data.state) || streaming || recordingActive) return;
     setRecordWhen(parsed.data.description);
     setRecordComposerOpen(true);
     setMenuOpen(false);
@@ -1931,6 +1931,8 @@ export default function App() {
         ) : (
           messages.map((message) => {
             const offer = skillRecordingOfferSchema.safeParse(message.recordingOffer);
+            const showRecordingOffer = message.role === "assistant" && offer.success && ["offered", "opened"].includes(offer.data.state) && !message.streaming && activeTurnId !== message.id;
+            const showResponseActions = message.role === "assistant" && Boolean(message.text) && !message.streaming && !message.failed;
             const activity = message.role === "assistant"
               ? activitiesByTurn.get(message.id) ?? (message.streaming && activeTurnId ? activitiesByTurn.get(activeTurnId) : undefined)
               : undefined;
@@ -1943,7 +1945,7 @@ export default function App() {
                     complete={!message.streaming && activeTurnId !== message.id}
                   />
                 )}
-                {(message.role === "user" || message.text || message.streaming) && <article className={`message message-${message.role} ${message.failed ? "message-failed" : ""}`}>
+                {(message.role === "user" || message.text || message.streaming || showRecordingOffer) && <article className={`message message-${message.role} ${message.failed ? "message-failed" : ""}`}>
                   <span className="message-role">{message.role === "user" ? "You" : "Browser Control"}</span>
                   {message.role === "assistant" ? (
                     message.text ? (
@@ -1961,15 +1963,16 @@ export default function App() {
                       >
                         {message.text}
                       </ReactMarkdown>
-                    ) : (
+                    ) : message.streaming ? (
                       <span className="thinking"><i /><i /><i /><span className="sr-only">Browser Control is thinking</span></span>
-                    )
+                    ) : null
                   ) : (
                     <p>{message.text}</p>
                   )}
                   {message.role === "user" && message.attachments?.length ? <SentFiles files={message.attachments} threadId={threadId} transport={attachmentTransport} /> : null}
-                  {message.role === "assistant" && message.text && !message.streaming && !message.failed && (
-                    <div className="message-actions" aria-label="Response actions">
+                  {(showResponseActions || showRecordingOffer) && (
+                    <div className="message-actions" role="group" aria-label="Response actions">
+                      {showResponseActions && <>
                       <button type="button" onClick={() => void copyMessage(message)} data-tooltip="Copy this response">
                         <span aria-hidden="true">▣</span> {copiedMessageId === message.id ? "Copied" : "Copy"}
                       </button>
@@ -1981,20 +1984,19 @@ export default function App() {
                       >
                         <span aria-hidden="true">⑂</span> {forkingMessageId === message.id ? "Forking…" : "Fork"}
                       </button>
+                      </>}
+                      {showRecordingOffer && <>
+                        <button type="button" className="record-skill-action" disabled={streaming || recordingActive} data-tooltip={offer.data.reason} aria-description={offer.data.reason} onClick={() => openOfferedRecording(message)}>
+                          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><rect x="3" y="6" width="12" height="12" rx="2" /><path d="m15 10 6-3v10l-6-3z" /></svg>
+                          Record skill
+                        </button>
+                        <button type="button" aria-label="Dismiss recording offer" data-tooltip="Dismiss recording offer" onClick={() => setMessages((current) => current.map((item) => item.id === message.id && item.recordingOffer
+                          ? { ...item, recordingOffer: { ...item.recordingOffer, state: "dismissed" } }
+                          : item))}><span aria-hidden="true">×</span></button>
+                      </>}
                     </div>
                   )}
                 </article>}
-                {message.role === "assistant" && offer.success && offer.data.state === "offered" && !message.streaming && activeTurnId !== message.id && (
-                  <section className="skill-offer-card" aria-label="Learn this workflow">
-                    <p>{offer.data.reason}</p>
-                    <div className="recording-actions">
-                      <button type="button" className="primary-button" disabled={streaming || recordingActive} onClick={() => openOfferedRecording(message)}>Teach a skill</button>
-                      <button type="button" className="secondary-button" onClick={() => setMessages((current) => current.map((item) => item.id === message.id && item.recordingOffer
-                        ? { ...item, recordingOffer: { ...item.recordingOffer, state: "dismissed" } }
-                        : item))}>Dismiss</button>
-                    </div>
-                  </section>
-                )}
               </div>
             );
           })
