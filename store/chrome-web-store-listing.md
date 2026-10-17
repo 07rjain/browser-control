@@ -1,6 +1,6 @@
 # Chrome Web Store submission draft
 
-This is the copy source for the first public listing. Reconcile it with the
+This is the copy source for the 0.3.6 listing. Reconcile it with the
 live package, privacy policy, and dashboard immediately before submission.
 
 ## Product details
@@ -31,6 +31,9 @@ Key features:
 - Chat with the models available to an eligible ChatGPT/Codex account.
 - Review and attach the current page's title, URL, selected text, and bounded
   readable text only when you choose.
+- Attach local images, text/code, Markdown, and visual or scanned PDF pages
+  using the picker, drag and drop, or pasted images. Preview attachments and
+  select PDF page ranges before sending. Export Office documents to PDF first.
 - List, open, select, reload, group, ungroup, and close browser tabs.
 - Inspect visible controls and request allowlisted clicking, filling, selecting,
   checking, keypress, scrolling, history, waiting, dragging, and form submission.
@@ -40,13 +43,20 @@ Key features:
   conversation from an earlier response.
 - Record a browser demonstration, review its steps, and save it as a local skill
   for later matching requests. Settings can disable or delete saved skills.
+- Ask to record a skill or use a contextual Record skill offer. Record up to
+  120 steps; capture starts only after you select Start recording.
+- Read locally typeset mathematical equations and edit the main chat system
+  prompt in Settings.
 - Choose Ask every time for exact-site access and supported consequential-action
   confirmations, or explicitly enable Full access once for normal HTTP and HTTPS
   pages.
+- Choose Auto review for a separate configurable reviewer model, with Luna as
+  the default, to review eligible routine actions. Risky or unclear actions
+  still ask you. Reviews use additional Codex usage and do not grant site access.
 
 Full access can perform supported submit, save, send, publish, delete, schedule,
 and tab-close actions after your request without an additional Browser Control
-confirmation card. Both modes show activity, enforce limits, support Stop, and
+confirmation card. All modes show activity, enforce limits, support Stop, and
 refuse purchases, financial transactions, passwords, payment data,
 authentication codes, private keys, CAPTCHAs, and security bypasses.
 
@@ -65,6 +75,10 @@ The companion is required because a Chrome extension cannot start Codex CLI
 directly. It runs locally through Chrome Native Messaging. Browser Control does
 not ask for an API key, scrape ChatGPT cookies, use remotely hosted executable
 code, or include publisher analytics or advertising.
+
+For version 0.3.6, install the matching 0.3.6 companion from the official support
+page. Files are prepared locally; prepared attachments and conversation context
+are sent to OpenAI only when you send a message through your Codex account.
 
 Current limitations: page inspection returns at most 80 visible interactive
 controls. Protected Chrome pages, cross-origin frames, closed shadow roots,

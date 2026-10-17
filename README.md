@@ -4,6 +4,13 @@ A Chrome side-panel extension powered by the user's ChatGPT Codex subscription t
 
 The repository contains the implemented MVP plus the approved supervised browser-control milestone: sidebar chat, managed ChatGPT sign-in, model selection, explicit current-page attachment, seven tab tools, eleven typed page tools, and message Copy/Fork actions. It does not contain remote control, unattended automation, arbitrary JavaScript/selectors, connectors, analytics, publisher API keys, or ChatGPT cookie scraping.
 
+## Version 0.3.6
+
+See the [0.3.6 release notes](docs/RELEASE_0.3.6.md) for file attachments,
+Auto review, improved skill recording, math rendering, and browser/native-host
+reliability fixes. Update the separately installed native companion to 0.3.6
+when updating the extension.
+
 ## Local file attachments
 
 Attach PNG/JPEG/WebP/GIF images, text/code files, Markdown, and PDFs from the picker, by dropping files, or by pasting an image. PDFs are rendered locally with packaged PDF.js; Codex receives selected page images and available text, including images of scanned pages. No document conversion application or container runtime is required. Export Word documents and presentations to PDF before attaching them.

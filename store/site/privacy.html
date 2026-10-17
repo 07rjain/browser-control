@@ -20,7 +20,7 @@
       <p class="eyebrow">Privacy policy</p>
       <h1>Your browser data stays under your direction.</h1>
       <p class="lede">This policy explains how Browser Control handles data when providing Codex chat, page attachment, and user-initiated browser actions.</p>
-      <p class="meta"><strong>Effective:</strong> September 24, 2026 · <strong>Publisher:</strong> Rishabh Bothra · <strong>Contact:</strong> <a href="mailto:cu.16bcs2797@gmail.com">cu.16bcs2797@gmail.com</a></p>
+      <p class="meta"><strong>Effective:</strong> October 17, 2026 · <strong>Publisher:</strong> Rishabh Bothra · <strong>Contact:</strong> <a href="mailto:cu.16bcs2797@gmail.com">cu.16bcs2797@gmail.com</a></p>
 
       <h2>Scope and single purpose</h2>
       <p>Browser Control is a Chrome side-panel extension whose single purpose is to let a user chat with Codex and request supervised actions on browser tabs and normal web pages. It uses a separately installed local companion to communicate with Codex CLI and Codex App Server. This policy covers the extension and that companion. The public product, privacy, and support pages do not contain extension telemetry or advertising trackers.</p>
@@ -29,11 +29,13 @@
       <ul>
         <li><strong>Account information:</strong> the ChatGPT account email, account type, and plan state returned by Codex for display in the side panel. Reusable authentication credentials are managed by Codex, not stored in Chrome extension storage.</li>
         <li><strong>Personal communications and user-generated content:</strong> prompts, model responses, local conversation titles and transcripts, and feedback needed to stop or retry a request.</li>
+        <li><strong>Chosen file attachments:</strong> user-selected image, text/code, Markdown, and PDF contents; selected PDF pages are rendered locally into images and available text. Filenames, bounded previews, and attachment metadata support preparation, conversation history, and forks. Source files are not modified. Preparation stays in sidebar memory until Send.</li>
         <li><strong>Website content:</strong> a page title, URL, origin, selected text, and bounded readable page text only when the user attaches a page; visible control descriptions and non-sensitive visible form values when the user requests page inspection or action.</li>
         <li><strong>Web browsing activity:</strong> open-tab titles, URLs, tab and window identifiers, active state, and the origins on which the user grants browser-control access.</li>
         <li><strong>User activity and form data:</strong> requested tab/page operations, their approval and result states, and non-sensitive values needed to fill, select, check, or review a form the user asked Browser Control to operate.</li>
         <li><strong>Recorded demonstrations:</strong> the chosen site's origin, action type, role and accessible control name. Typed example values are omitted unless the user chooses to keep them during review. Recordings skip password, payment, code, and purchase controls.</li>
         <li><strong>Preferences and diagnostics:</strong> theme, selected model, permission mode, action budget, completion-sound choice, short-lived task state, companion version/status, and bounded error messages.</li>
+        <li><strong>Custom instructions and action reviews:</strong> saved main-chat and reviewer prompts, reviewer model choices, and bounded request/action/form evidence used when the user selects Auto review. The reviewer runs through the user's existing Codex account without executable tools; activity keeps generic outcomes rather than model reasoning or raw review responses.</li>
       </ul>
       <p>Browser Control does not intentionally collect passwords, payment-card data, authentication codes, private keys, CAPTCHAs, or purchase details. Its action policy refuses those fields and transactions. Content on a page chosen by the user can nevertheless contain personal or sensitive information, so users should review context before attaching a page or requesting an action.</p>
 
@@ -46,20 +48,23 @@
         <li>Chrome session storage retains short-lived task, permission, approval, cancellation, and completion state across Manifest V3 service-worker suspension.</li>
         <li>The local companion gives Codex a dedicated home at <code>~/.codex-sidebar</code>. Codex stores its Browser Control login/session material and persistent thread data there.</li>
         <li>Reviewed skills are saved under <code>~/.codex-sidebar/skills</code>. Settings can disable or delete these skills on this computer.</li>
+        <li>Prepared attachments are saved under <code>~/.codex-sidebar/uploads</code> after transfer. Sent assets expire after 30 days and incomplete uploads after 24 hours; cleanup runs on companion startup and upload activity. Custom chat and reviewer preferences are saved locally in the dedicated companion home.</li>
         <li>The companion runtime is installed separately from the Codex data directory so deleting product data does not silently uninstall or damage the companion.</li>
       </ul>
       <p>Browser Control has no developer-operated telemetry, analytics, advertising, or conversation-storage server.</p>
 
       <h2>Data sent to others</h2>
       <p>To answer requests, prompts and any user-attached or tool-returned browser context are sent by the local companion to OpenAI's Codex service under the user's authenticated account. The names and descriptions of enabled local skills are offered to Codex; a selected skill's instructions are sent when the request uses that skill. OpenAI processes that data according to the terms and privacy choices applicable to that account. Browser Control does not send browsing data to the publisher or to advertising companies.</p>
+      <p>Sending file attachments shares their prepared images and text with OpenAI through the same account. Auto review additionally shares bounded request and proposed-action evidence with the selected reviewer model through Codex. Saved custom prompts are sent as instructions when their chat or review runs; saving them alone starts no model request. Local deletion does not change OpenAI's retention under the user's account terms and privacy choices.</p>
       <p>Messages between the extension and the native companion stay on the same computer through Chrome Native Messaging. The public documentation site is hosted by GitHub Pages; GitHub may process ordinary web-server information when someone visits these pages under GitHub's own privacy terms. Visiting this site is separate from using the extension, which includes no remote site assets.</p>
 
       <h2>Permissions and user control</h2>
       <p>Browser Control requests only Chrome permissions used for its disclosed features. Optional HTTP and HTTPS host access is not granted at installation. The user can choose exact-site grants in Ask every time mode or explicitly enable optional all-sites access in Full access mode. Chrome site controls and Browser Control settings can revoke access.</p>
+      <p>Auto review uses exact-site access and a separate reviewer for eligible actions. It cannot grant site access, approve unknown destinations, or bypass hard refusals. Risky, unclear, incomplete, or failed reviews return to the user's confirmation card. Attaching files and accepting a Record skill offer grant no browser access.</p>
       <p>A page attachment is created only after the user asks to attach the page and can be removed before sending. Browser actions start from a user's request, remain visible in activity, are bounded by an action limit, and can be stopped. Hard refusals apply in every permission mode.</p>
 
       <h2>Retention and deletion</h2>
-      <p><strong>Clear browser data and permissions</strong> removes Chrome-side transcripts, activity, settings, task state, and retained site grants. It does not delete the Codex login or persistent Codex threads on the Mac.</p>
+      <p><strong>Clear browser data and permissions</strong> removes Chrome-side transcripts, activity, settings, task state, and retained site grants. It does not delete the Codex login or persistent Codex threads on the computer.</p>
       <p><strong>Delete all Browser Control data and sign out</strong> stops active work, clears the Chrome-side data and permissions, signs out the dedicated Browser Control Codex session, and deletes the dedicated <code>~/.codex-sidebar</code> data directory. It leaves the installed companion runtime in place. The support page also explains manual removal and companion uninstall.</p>
 
       <h2>Security</h2>
