@@ -7,6 +7,8 @@ describe("companion setup", () => {
     expect(isMissingNativeHost("Specified native messaging host not found.")).toBe(true);
     expect(isMissingNativeHost("Native host has exited.")).toBe(false);
     expect(COMPANION_INSTALL_COMMAND).toContain('node "$HOME/browser-control/scripts/install-native-host.mjs"');
+    expect(COMPANION_INSTALL_COMMAND).toContain("--branch main");
+    expect(COMPANION_INSTALL_COMMAND).toContain("pull --ff-only origin main");
   });
 
   it("recognizes the companion's legacy-thread refusal", () => {

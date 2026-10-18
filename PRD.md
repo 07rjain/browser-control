@@ -65,6 +65,7 @@ The original MVP is a local, user-driven chat, attachment, and tab-tool experien
 - Local by default: keep chat metadata and settings local unless the model service requires transmission.
 - Honest capability: never imply the assistant can see a page, tab, or account state that has not been supplied.
 - Safe failure: authentication, model, permission, and browser-tool failures must leave the browser usable and explain recovery.
+- Independently updated components: a Store extension update must preserve basic chat and explicitly attached page text with the pre-file-attachment companion's `chat.send.text` contract. Current companions must consume structured page context once, without duplicating the compatibility copy. File attachments and newer settings require a refreshed companion. Regression coverage must exercise the serialized native request, not just matching-version host tests. This compatibility field shares only already attached content with the same local companion; it adds no permissions, storage or model tools.
 
 ## 4. MVP requirements
 

@@ -1413,12 +1413,20 @@ async function routeRequest(input: unknown): Promise<unknown> {
     }
     case "CHAT_SEND": {
       if (await recordingBlocksBrowserWork()) throw new Error("Finish or cancel skill recording before sending a message.");
+      // Store updates do not update the separately installed native host.
+      // Older hosts read only text; current hosts prefer raw userText and
+      // assemble the separate pageContext themselves, avoiding duplication.
+      const page = request.pageContext;
+      const text = page
+        ? `${request.text.trim() || "Describe the attached files."}\n\nUser-attached untrusted page reference ${JSON.stringify({ title: page.title, url: page.url })}:\n${page.selectedText}\n${page.readableText}`
+        : request.text;
+      if (text.length > 80_000) throw new Error("The message and attachment text exceed 80,000 characters. Remove a file or choose fewer pages.");
       const epoch = lifecycleEpoch;
       const tabId = await ensureThreadWorkingTab(request.threadId);
       await rememberThreadUrls(request.threadId, urlsInText(request.text));
       const intents = (await storedList<ReviewIntent>(REVIEW_INTENTS_KEY)).filter((item) => item.threadId !== request.threadId && Date.now() - item.createdAt < 60_000);
       await chrome.storage.session.set({ [REVIEW_INTENTS_KEY]: [...intents, { threadId: request.threadId, text: request.text.length <= 4000 ? request.text : undefined, createdAt: Date.now() }].slice(-20) });
-      const raw = await requestNative("chat.send", { threadId: request.threadId, userText: request.text, pageContext: request.pageContext, attachments: request.attachments, owner: request.owner, clientMessageId: request.clientMessageId, model: request.model });
+      const raw = await requestNative("chat.send", { threadId: request.threadId, text, userText: request.text, pageContext: request.pageContext, attachments: request.attachments, owner: request.owner, clientMessageId: request.clientMessageId, model: request.model });
       const result = turnResponseSchema.extend({ replayed: z.boolean().optional(), attachments: z.array(attachmentSummarySchema).max(5).optional() }).parse(raw);
       if (epoch !== lifecycleEpoch) throw new Error("This browser session was cleared before the message was accepted.");
       if (!result.replayed) await initializeBrowserTask(request.threadId, result.turnId, tabId);
