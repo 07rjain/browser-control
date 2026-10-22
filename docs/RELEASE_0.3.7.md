@@ -52,4 +52,20 @@ The extension archive SHA-256 is:
 4201a9043fbbdae3ad3102e58121df5272e59383dac45e4cd537590ee87eb852  browser-control-extension-0.3.7.zip
 ```
 
-Store submission status will be recorded after the upload is verified.
+The final release commit `52a3c74` passed all three desktop CI jobs, including
+the Windows native launcher, bridge, release build and extracted-package checks:
+https://github.com/07rjain/browser-control/actions/runs/39809636679
+
+## Submission record
+
+On October 22, 2026, uploaded the checked 0.3.7 extension archive to the existing
+Store item `mpdfhhhjgbpdpfnkjbnboebdjokfjglf`. The dashboard confirmed draft
+version 0.3.7 and the same permission list as published version 0.3.6. Saved
+the listing's updated companion-compatibility paragraph, then submitted after
+all release CI jobs passed.
+
+The confirmation dialog reported **Your extension was submitted for review**;
+the dashboard then showed **Pending review**. Automatic publication after
+approval is enabled. Version 0.3.7 is not yet claimed publicly available;
+Google's review is pending. The existing public companion 0.3.6 remains
+compatible and its download is unchanged.
