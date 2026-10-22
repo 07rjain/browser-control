@@ -1,6 +1,6 @@
 # Chrome Web Store submission draft
 
-This is the copy source for the 0.3.6 listing. Reconcile it with the
+This is the copy source for the 0.3.7 listing. Reconcile it with the
 live package, privacy policy, and dashboard immediately before submission.
 
 ## Product details
@@ -76,8 +76,10 @@ directly. It runs locally through Chrome Native Messaging. Browser Control does
 not ask for an API key, scrape ChatGPT cookies, use remotely hosted executable
 code, or include publisher analytics or advertising.
 
-For version 0.3.6, install the matching 0.3.6 companion from the official support
-page. Files are prepared locally; prepared attachments and conversation context
+Version 0.3.7 works with companion 0.3.6 or later from the official support
+page. Basic chat and attached page text also work with older companions; files
+and newer settings require an updated companion. Chrome updates the extension
+separately from the companion. Files are prepared locally; prepared attachments and conversation context
 are sent to OpenAI only when you send a message through your Codex account.
 
 Current limitations: page inspection returns at most 80 visible interactive
