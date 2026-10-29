@@ -106,6 +106,7 @@ Chrome documents that the Side Panel API is available to Manifest V3 extensions 
 - The extension displays the authenticated account state returned by the supported Codex interface without claiming unsupported account attributes.
 - Concurrent startup/reconnect account checks share one in-flight request. Retry the exact Codex workspace-discovery timeout once; authentication, routing-policy and other failures stop immediately. Recovery must not replay a login, chat turn or browser action, or bypass Codex's selected-workspace routing.
 - A persistent workspace timeout shows the companion as connected with a retryable ChatGPT workspace/network error. A pending retry disables repeated reconnect clicks, and stale account responses after disconnect, sign-out or deletion cannot restore the previous session. No new permissions, credential handling or external services are introduced.
+- A native disconnect retains its browser-provided failure reason even during an in-flight account check. Missing companion registration shows installation guidance and Retry; absent or invalid error details show a clear disconnected fallback. Late account success cannot replace the offline state. This changes local error presentation only and adds no permissions or data sharing.
 - Failed, canceled, or expired login returns the user to a retryable signed-out state.
 - Sign-out clears local extension session metadata and invokes the supported Codex logout path.
 

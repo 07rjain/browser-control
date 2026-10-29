@@ -164,6 +164,7 @@ npm run typecheck       # Strict TypeScript checks
 npm run lint            # ESLint
 npm test                # Unit tests
 npm run test:bridge     # Signed-out host checks, tool isolation, concurrent reviewer probe
+npm run test:browser    # Built sidebar in disposable Chromium; no account or model request
 npm run test:reviewer   # Local fake-provider reviewer protocol checks; no account inference
 npm run test:installed-host # Verify Chrome-style launch environment after host installation
 npm run test:release     # Test the extracted companion after build:release; no inference
@@ -194,6 +195,8 @@ npm run test:installed-host
 
 `test:bridge` exercises a real signed-out Codex App Server/native-host exchange. It does not replace testing the installed extension in Chrome.
 
+After building, install the test browser with `npx playwright install --with-deps chromium`, then run `npm run test:browser`. This opens the actual packaged side panel in a disposable Chromium profile. It checks a real missing-native-host disconnect and installation guidance, Retry recovery with a synthetic account, Attach → Detach → Attach → Remove with real localhost page capture, and a visible protected-page failure. Only the staged test manifest has localhost access; the shipped manifest is unchanged. It never starts the installed companion, signs in, sends a chat, or uses a real browser profile. Use `-- --headed` to watch it. This is browser regression coverage, not a signed-in agent end-to-end test.
+
 ## GitHub CI
 
 The [Desktop compatibility workflow](.github/workflows/compatibility.yml) runs on pushes, pull requests, and manual dispatch. One job runs independently on Ubuntu, Windows, and macOS, each with Node.js 24 and the verified Codex CLI 0.162.1.
@@ -205,8 +208,9 @@ The [Desktop compatibility workflow](.github/workflows/compatibility.yml) runs o
 | `npm test` | Check observable UI, protocol, safety-policy, lifecycle, and platform behavior. |
 | `npm run test:bridge` | Exercise the real Codex/native protocol using a signed-out temporary home and local synthetic providers. |
 | `npm run build:release` and `npm run test:release` | Build extension/companion archives, then verify the extracted companion starts correctly. |
+| `npm run test:browser` | Run the packaged sidebar's connection-error, retry, page-attachment toggle and protected-page checks in isolated Chromium on each desktop OS. |
 
-This catches differences in Windows executable/shim resolution, POSIX launchers, paths, and packaging before changes reach users. It builds and checks artifacts without publishing them. It does not exercise a live signed-in ChatGPT workspace or the installed browser UI; those require the installed-host and manual Chrome checks.
+This catches differences in Windows executable/shim resolution, POSIX launchers, paths, packaging and the packaged sidebar before changes reach users. It builds and checks artifacts without publishing them. It does not exercise a live signed-in ChatGPT workspace or the user's installed browser profile; those require the installed-host and manual Chrome checks.
 
 ## Manual Chrome testing
 
@@ -308,6 +312,12 @@ Unsupported surfaces such as protected Chrome pages, cross-origin frames, canvas
 No host access is granted at installation. Full access can request the manifest's optional normal-web all-sites patterns from an explicit user gesture; Ask every time removes them. Cookies, history, bookmarks, downloads, `webRequest`, and debugger access are never requested.
 
 ## Troubleshooting
+
+**“Connect the companion — Not responding”:** installing Codex and the Store extension does not register Chrome's separate native-messaging companion. Run the companion installer as the same desktop user who runs Chrome, using Node.js 20 or later; then choose **Retry connection**. A disconnect must retain the actual browser error or show an explicit fallback, even if it arrives during an account check. A missing-host error shows the installation command rather than an unexplained offline screen. Browser Control uses the existing Codex executable but keeps its sign-in separately under `~/.codex-sidebar`; after the companion connects, sign in once from the sidebar even if terminal Codex is already signed in.
+
+Linux diagnosis on **2026-10-30**: the affected Ubuntu 24.04.3 desktop had Store Browser Control installed in Chrome 156.0.8078.47, but neither its native-host registration nor companion launcher existed for the desktop user. Installed the existing `release/0.3.7` companion using that user's existing Node 22.22.0 and Codex 0.165.0. The Chrome-like installed-host check passed, and the actual Store sidebar then showed **Companion connected** and **Sign in with ChatGPT**. The user's first browser sign-in returned an HTML content-type error; their retry completed, and the actual sidebar displayed the signed-in composer. No authentication code change or chat send was performed. The manual attachment check remains outstanding because the local browser changed tabs during remote control. This machine repair is independent of the sidebar error-retention fix on `fix/page-attachment`.
+
+Local error-retention validation: the regression failed before the fix because no error alert appeared, then passed while still rejecting a late account success. Typecheck, lint, all 246 active unit tests (one Windows-only skip), production build and the signed-out bridge gate with CI-pinned Codex 0.162.1 passed. The new isolated sidebar browser check passed on macOS with Chromium 156.0.8078.4 and no sidebar console errors. The installed 0.164.0 CLI failed the existing localhost-provider prompt probe; this is separate from the passing pinned gate and is not a signed-in task result. The new Linux/Windows/macOS browser CI checks are configured but have not run for this branch yet.
 
 **Invalid request: missing field `text`:** the file-attachment update sent `userText` while older native companions expected `text`. Chrome can update the extension without updating the companion, so an older host passed an empty text item to Codex. The compatibility fix sends both fields: older hosts receive the message and explicitly attached page as text; current hosts use the raw message and structured page once. This mismatch can affect Linux, Windows, or macOS. Refresh the native companion from current `main` as described below, then fully quit/reopen the browser and select **Retry connection**. Your sign-in, history, skills and custom prompts stay in place; do not delete `~/.codex-sidebar`. File attachments and newer settings still require the updated companion.
 

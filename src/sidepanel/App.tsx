@@ -673,12 +673,17 @@ export default function App() {
       if (sender.id !== chrome.runtime.id || sender.tab !== undefined) return;
       if (message?.source !== "codex-sidebar-background") return;
       switch (message.event) {
-        case "bridge.status":
-          if ((message.data as { connected?: boolean })?.connected === false) {
+        case "bridge.status": {
+          const status = message.data as { connected?: boolean; error?: unknown } | undefined;
+          if (status?.connected === false) {
             accountCheckGeneration.current++;
             setAuthState("offline");
+            setError(typeof status.error === "string" && status.error.trim()
+              ? status.error
+              : "The native companion disconnected. Retry connection.");
           }
           break;
+        }
         case "auth.updated":
         case "auth.loginCompleted":
           void refreshAccount();

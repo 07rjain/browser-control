@@ -34,3 +34,6 @@ jobs:
       - run: npm run test:bridge
       - run: npm run build:release
       - run: npm run test:release
+      - name: Install Chromium for the isolated extension sidebar checks
+        run: npx playwright install --with-deps chromium
+      - run: npm run test:browser
