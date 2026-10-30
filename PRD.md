@@ -459,6 +459,17 @@ Do not request persistent required `<all_urls>`, `history`, `bookmarks`, `downlo
 - Save `~/.codex-sidebar/skills/<name>/SKILL.md` through the companion, then refresh the existing catalog.
 - Privacy: recordings stay on this computer. Passwords, one-time codes, payment fields, and purchase controls are skipped. Other typed values are omitted unless the user keeps them in review. Saved skills are sent to the model only when a later request matches.
 
+### Proposed next milestone — Local memory
+
+Status: planning only; implementation and release are not included in the current milestone. See [Local memory implementation plan](docs/MEMORY_IMPLEMENTATION_PLAN.md) for scope, integration points, delivery order, and acceptance gates.
+
+- Add opt-in cross-chat preferences/facts in one companion-owned `~/.codex-sidebar/memory.json` store, with a small derived profile and bounded keyword lookup. Keep taught skills separate. Do not import normal Codex memory or capture browsing history.
+- Deliver manual Settings add/edit/delete/clear, a new-chat-without-memory control, read-only model lookup, and user-reviewed remember/correct/forget cards first. The answering model cannot directly mutate memory or change permissions. Existing installations remain off until enabled; incompatible companions leave ordinary chat working.
+- Add optional learning only after the manual recall/deletion gates pass. Use bounded new user-authored text, an isolated no-tool ephemeral inference, a configurable model defaulting to `gpt-6-luna`, and a visible editable learner prompt. Exclude page/file/tool/assistant content and require review for conflicts or changes to manual records. Learning is independently opt-in and uses additional Codex usage.
+- Acceptance: demonstrate natural personalization and cross-chat recall, correction without competing current facts, expiration, and deletion that survives restart/duplicate sends/late learner results. Keep memory/reviewer/foreground events isolated and validate installed packages on Linux, Windows, and macOS.
+- Platform gate: retain Node 20+ runtime and existing per-user launch/registration; use platform-aware paths, Windows ACL-aware privacy wording, portable locking/replacement with bounded failures, and no shell-based memory logic. Add real OS filesystem/process checks and Node 20/24 runtime probes; require native Linux/Windows sidebar validation before calling memory compatible. See the plan's Linux and Windows requirements.
+- Privacy: no new Chrome permission, external memory service, telemetry, background daemon, or API key. Selected records still reach the existing model provider when used. Forgetting removes saved records from future recall; it does not erase existing chat/provider context. Disable/clear/reset cancel stale work, and Delete All Data removes the store.
+
 ### MVP release criterion
 
 The MVP is ready for a private development beta when all P0 acceptance criteria pass, no critical/high security findings remain, authentication installation is documented, and the manager plus browser-validation specialist have verified the primary journey in Chrome.
