@@ -6,8 +6,12 @@ import { stopProbeProcess } from "../scripts/probe-process.mjs";
 it("waits for inherited streams to close when a CLI wrapper already exited", async () => {
   const child = spawn(process.execPath, ["-e", `
     const { spawn } = require("node:child_process");
-    spawn(process.execPath, ["-e", 'setTimeout(() => { process.stdout.write("descendant finished"); }, 700);'], { stdio: ["ignore", "inherit", "inherit"], windowsHide: true });
-    process.exit(0);
+    const descendant = spawn(process.execPath, ["-e", 'process.send("ready"); setTimeout(() => { process.stdout.write("descendant finished"); }, 700);'], {
+      stdio: ["ignore", "inherit", "inherit", "ipc"],
+      detached: process.platform === "win32", windowsHide: true,
+    });
+    descendant.once("message", () => process.exit(0));
+    descendant.once("error", error => { process.stderr.write(error.message); process.exit(1); });
   `], { stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
   let output = "";
   child.stdout.on("data", chunk => { output += chunk; });
