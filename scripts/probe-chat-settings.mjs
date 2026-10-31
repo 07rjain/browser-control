@@ -95,10 +95,20 @@ export async function probeChatSettings(codexBinary) {
     const started = await client.request("chat.start", { model: "gpt-6.1-sol" });
     const send = async (threadId, prompt) => {
       const before = bodies.length;
-      const result = await client.request("chat.send", { threadId, clientMessageId: randomUUID(), text: "Reply with Prompt check complete. Do not use tools." });
+      const userText = "Reply with Prompt check complete. Do not use tools.";
+      const result = await client.request("chat.send", {
+        threadId, clientMessageId: randomUUID(), userText,
+        text: `${userText}\nLEGACY_FALLBACK_MUST_NOT_DUPLICATE_CONTEXT`,
+        pageContext: { title: "Probe page", url: "https://example.com/", selectedText: "", readableText: "STRUCTURED_PAGE_PROBE" },
+      });
       assert.equal((await client.finished(result.turnId)).status, "completed");
       assert.equal(bodies.length, before + 1);
       const body = bodies.at(-1);
+      const latestUserInput = body.input.filter((item) => item.type === "message" && item.role === "user").at(-1);
+      const userParts = latestUserInput.content.map((part) => part.text).join("\n");
+      assert.ok(userParts.includes(userText), "The raw user intent must reach Codex");
+      assert.equal(userParts.split("STRUCTURED_PAGE_PROBE").length - 1, 1, "Current companions must include the structured page exactly once");
+      assert.ok(!userParts.includes("LEGACY_FALLBACK_MUST_NOT_DUPLICATE_CONTEXT"), "Current companions must ignore the compatibility text copy");
       const developerText = body.input.filter((item) => item.type === "message" && item.role === "developer").flatMap((item) => item.content.map((part) => part.text));
       assert.ok(developerText.includes(prompt), "Codex must receive the saved prompt verbatim as instructions");
       assert.equal(body.model, "gpt-6.1-sol");

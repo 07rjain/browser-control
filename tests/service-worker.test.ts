@@ -27,6 +27,60 @@ function storageArea(data: Record<string, unknown>) {
 describe("service-worker browser orchestration", () => {
   beforeEach(() => vi.resetModules());
 
+  it.each(["message", "page", "message and page"])("preserves the legacy companion text contract for $0", async (kind) => {
+    const text = kind === "page" ? "" : "  Summarize this for me.  ";
+    const pageContext = kind === "message" ? undefined : {
+      title: "Example notes", url: "https://example.com/notes", origin: "https://example.com",
+      selectedText: "Selected passage.", readableText: "Page body.", characterCount: 10, truncated: false,
+    };
+    let onMessage: (message: unknown) => void = () => {};
+    const sent: Array<Record<string, unknown>> = [];
+    const port = {
+      onMessage: { addListener: (listener: typeof onMessage) => { onMessage = listener; } },
+      onDisconnect: { addListener: vi.fn() },
+      postMessage: (message: NativeRequest) => {
+        // Chrome serializes the envelope. The pre-attachment companion reads
+        // only params.text to construct its Codex text input.
+        const wire = JSON.parse(JSON.stringify(message)) as NativeRequest;
+        if (wire.method === "chat.send") sent.push(wire.params as Record<string, unknown>);
+        queueMicrotask(() => onMessage({ type: "response", id: wire.id, ok: true, data: { turnId: "turn-compatible" } }));
+      },
+    };
+    vi.stubGlobal("chrome", {
+      runtime: {
+        id: "extension-id", connectNative: () => port, sendMessage: vi.fn(async () => undefined),
+        onMessage: { addListener: vi.fn() }, onInstalled: { addListener: vi.fn() }, onStartup: { addListener: vi.fn() },
+      },
+      storage: { session: storageArea({}), local: storageArea({}) },
+      tabs: {
+        query: vi.fn(async () => [{ id: 12, url: "https://example.com/notes" }]),
+        get: vi.fn(async () => ({ id: 12, url: "https://example.com/notes" })),
+        onRemoved: { addListener: vi.fn() },
+      },
+      sidePanel: { setPanelBehavior: vi.fn(async () => undefined) },
+    });
+    const { serviceWorkerTestHooks } = await import("../src/background/service-worker");
+    await expect(serviceWorkerTestHooks.routeRequest({
+      type: "CHAT_SEND", requestId: crypto.randomUUID(), clientMessageId: crypto.randomUUID(),
+      threadId: "thread-compatible", text, pageContext,
+    })).resolves.toEqual({ turnId: "turn-compatible" });
+    expect(sent).toHaveLength(1);
+    if (pageContext) {
+      expect(sent[0].text).toEqual(expect.any(String));
+      const legacyText = sent[0].text as string;
+      for (const passage of ["untrusted page reference", pageContext.title, pageContext.url, pageContext.selectedText, pageContext.readableText]) {
+        expect(legacyText).toContain(passage);
+      }
+      expect(legacyText).toContain(text.trim() || "Describe the attached files.");
+    } else {
+      expect(sent[0].text).toBe(text);
+    }
+    // Current companions consume the raw intent and separate page instead,
+    // so the compatibility copy must not duplicate page text for them.
+    expect(sent[0].userText).toBe(text);
+    expect(sent[0].pageContext).toEqual(pageContext);
+  });
+
   it.each([
     { errors: ["workspace routing discovery timed out"], attempts: 2, recovered: true },
     { errors: ["workspace routing discovery timed out", "workspace routing discovery timed out"], attempts: 2, recovered: false },

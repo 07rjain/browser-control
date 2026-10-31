@@ -1,5 +1,14 @@
 # Install Browser Control on a new Windows or Linux desktop
 
+**Updating an existing installation (2026-10-18):** a Chrome Web Store update
+does not update your native companion. If chat reports
+``Invalid request: missing field `text` ``, refresh the companion from current
+`main`, rerun `scripts/install-native-host.mjs` and
+`scripts/smoke-installed-host.mjs`, then fully quit/reopen Chrome or Brave.
+See the [current troubleshooting steps](../README.md#troubleshooting). Keep
+`~/.codex-sidebar`; reinstalling preserves your sign-in, history and skills.
+The older test-bundle versions and validation dates below are historical.
+
 This is a **test guide**, updated on 2026-10-09. It assumes your machine has a
 web browser and internet access, but no Node.js, Codex CLI, Git, or development
 tools. You do **not** need Git, npm, or VS Code. For the pushed-source path,

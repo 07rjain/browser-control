@@ -65,6 +65,7 @@ The original MVP is a local, user-driven chat, attachment, and tab-tool experien
 - Local by default: keep chat metadata and settings local unless the model service requires transmission.
 - Honest capability: never imply the assistant can see a page, tab, or account state that has not been supplied.
 - Safe failure: authentication, model, permission, and browser-tool failures must leave the browser usable and explain recovery.
+- Independently updated components: a Store extension update must preserve basic chat and explicitly attached page text with the pre-file-attachment companion's `chat.send.text` contract. Current companions must consume structured page context once, without duplicating the compatibility copy. File attachments and newer settings require a refreshed companion. Regression coverage must exercise the serialized native request, not just matching-version host tests. This compatibility field shares only already attached content with the same local companion; it adds no permissions, storage or model tools.
 
 ## 4. MVP requirements
 
@@ -105,6 +106,7 @@ Chrome documents that the Side Panel API is available to Manifest V3 extensions 
 - The extension displays the authenticated account state returned by the supported Codex interface without claiming unsupported account attributes.
 - Concurrent startup/reconnect account checks share one in-flight request. Retry the exact Codex workspace-discovery timeout once; authentication, routing-policy and other failures stop immediately. Recovery must not replay a login, chat turn or browser action, or bypass Codex's selected-workspace routing.
 - A persistent workspace timeout shows the companion as connected with a retryable ChatGPT workspace/network error. A pending retry disables repeated reconnect clicks, and stale account responses after disconnect, sign-out or deletion cannot restore the previous session. No new permissions, credential handling or external services are introduced.
+- A native disconnect retains its browser-provided failure reason even during an in-flight account check. Missing companion registration shows installation guidance and Retry; absent or invalid error details show a clear disconnected fallback. Late account success cannot replace the offline state. This changes local error presentation only and adds no permissions or data sharing.
 - Failed, canceled, or expired login returns the user to a retryable signed-out state.
 - Sign-out clears local extension session metadata and invokes the supported Codex logout path.
 

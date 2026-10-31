@@ -4,6 +4,15 @@ A Chrome side-panel extension powered by the user's ChatGPT Codex subscription t
 
 The repository contains the implemented MVP plus the approved supervised browser-control milestone: sidebar chat, managed ChatGPT sign-in, model selection, explicit current-page attachment, seven tab tools, eleven typed page tools, and message Copy/Fork actions. It does not contain remote control, unattended automation, arbitrary JavaScript/selectors, connectors, analytics, publisher API keys, or ChatGPT cookie scraping.
 
+## Version 0.3.7
+
+See the [0.3.7 release notes](docs/RELEASE_0.3.7.md) for the older-companion chat
+compatibility fix. Plain chat and attached page text survive a Store update
+when an older companion remains installed, including on Windows and Linux.
+The existing 0.3.6 companion remains compatible; files and newer settings
+require companion 0.3.6 or later. Updating the extension does not update the
+native companion automatically.
+
 ## Version 0.3.6
 
 See the [0.3.6 release notes](docs/RELEASE_0.3.6.md) for file attachments,
@@ -165,6 +174,7 @@ npm run typecheck       # Strict TypeScript checks
 npm run lint            # ESLint
 npm test                # Unit tests
 npm run test:bridge     # Signed-out host checks, tool isolation, concurrent reviewer probe
+npm run test:browser    # Built sidebar in disposable Chromium; no account or model request
 npm run test:reviewer   # Local fake-provider reviewer protocol checks; no account inference
 npm run test:installed-host # Verify Chrome-style launch environment after host installation
 npm run test:release     # Test the extracted companion after build:release; no inference
@@ -195,6 +205,8 @@ npm run test:installed-host
 
 `test:bridge` exercises a real signed-out Codex App Server/native-host exchange. It does not replace testing the installed extension in Chrome.
 
+After building, install the test browser with `npx playwright install --with-deps chromium`, then run `npm run test:browser`. This opens the actual packaged side panel in a disposable Chromium profile. It checks a real missing-native-host disconnect and installation guidance, Retry recovery with a synthetic account, Attach → Detach → Attach → Remove with real localhost page capture, and a visible protected-page failure. Only the staged test manifest has localhost access; the shipped manifest is unchanged. It never starts the installed companion, signs in, sends a chat, or uses a real browser profile. Use `-- --headed` to watch it. This is browser regression coverage, not a signed-in agent end-to-end test.
+
 ## GitHub CI
 
 The [Desktop compatibility workflow](.github/workflows/compatibility.yml) runs on pushes, pull requests, and manual dispatch. One job runs independently on Ubuntu, Windows, and macOS, each with Node.js 24 and the verified Codex CLI 0.162.1.
@@ -206,8 +218,9 @@ The [Desktop compatibility workflow](.github/workflows/compatibility.yml) runs o
 | `npm test` | Check observable UI, protocol, safety-policy, lifecycle, and platform behavior. |
 | `npm run test:bridge` | Exercise the real Codex/native protocol using a signed-out temporary home and local synthetic providers. |
 | `npm run build:release` and `npm run test:release` | Build extension/companion archives, then verify the extracted companion starts correctly. |
+| `npm run test:browser` | Run the packaged sidebar's connection-error, retry, page-attachment toggle and protected-page checks in isolated Chromium on each desktop OS. |
 
-This catches differences in Windows executable/shim resolution, POSIX launchers, paths, and packaging before changes reach users. It builds and checks artifacts without publishing them. It does not exercise a live signed-in ChatGPT workspace or the installed browser UI; those require the installed-host and manual Chrome checks.
+This catches differences in Windows executable/shim resolution, POSIX launchers, paths, packaging and the packaged sidebar before changes reach users. It builds and checks artifacts without publishing them. It does not exercise a live signed-in ChatGPT workspace or the user's installed browser profile; those require the installed-host and manual Chrome checks.
 
 ## Manual Chrome testing
 
@@ -310,13 +323,35 @@ No host access is granted at installation. Full access can request the manifest'
 
 ## Troubleshooting
 
+**“Connect the companion — Not responding”:** installing Codex and the Store extension does not register Chrome's separate native-messaging companion. Run the companion installer as the same desktop user who runs Chrome, using Node.js 20 or later; then choose **Retry connection**. A disconnect must retain the actual browser error or show an explicit fallback, even if it arrives during an account check. A missing-host error shows the installation command rather than an unexplained offline screen. Browser Control uses the existing Codex executable but keeps its sign-in separately under `~/.codex-sidebar`; after the companion connects, sign in once from the sidebar even if terminal Codex is already signed in.
+
+Linux diagnosis on **2026-10-30**: the affected Ubuntu 24.04.3 desktop had Store Browser Control installed in Chrome 156.0.8078.47, but neither its native-host registration nor companion launcher existed for the desktop user. Installed the existing `release/0.3.7` companion using that user's existing Node 22.22.0 and Codex 0.165.0. The Chrome-like installed-host check passed, and the actual Store sidebar then showed **Companion connected** and **Sign in with ChatGPT**. The user's first browser sign-in returned an HTML content-type error; their retry completed, and the actual sidebar displayed the signed-in composer. No authentication code change or chat send was performed. The manual attachment check remains outstanding because the local browser changed tabs during remote control. This machine repair is independent of the sidebar error-retention fix on `fix/page-attachment`.
+
+Local error-retention validation: the regression failed before the fix because no error alert appeared, then passed while still rejecting a late account success. Typecheck, lint, all 246 active unit tests (one Windows-only skip), production build and the signed-out bridge gate with CI-pinned Codex 0.162.1 passed. The new isolated sidebar browser check passed on macOS with Chromium 156.0.8078.4 and no sidebar console errors. The installed 0.164.0 CLI failed the existing localhost-provider prompt probe; this is separate from the passing pinned gate and is not a signed-in task result. The new Linux/Windows/macOS browser CI checks are configured but have not run for this branch yet.
+
+**Invalid request: missing field `text`:** the file-attachment update sent `userText` while older native companions expected `text`. Chrome can update the extension without updating the companion, so an older host passed an empty text item to Codex. The compatibility fix sends both fields: older hosts receive the message and explicitly attached page as text; current hosts use the raw message and structured page once. This mismatch can affect Linux, Windows, or macOS. Refresh the native companion from current `main` as described below, then fully quit/reopen the browser and select **Retry connection**. Your sign-in, history, skills and custom prompts stay in place; do not delete `~/.codex-sidebar`. File attachments and newer settings still require the updated companion.
+
+From a current source checkout on Linux or macOS, run:
+
+```sh
+git pull --ff-only origin main
+node scripts/install-native-host.mjs
+node scripts/smoke-installed-host.mjs
+```
+
+Stop if any command fails. The installer copies the companion into its registered runtime directory; pulling source alone does not refresh that copy. On Windows, run the same `git` command and `node .\scripts\install-native-host.mjs`, then `node .\scripts\smoke-installed-host.mjs`, from your ordinary PowerShell. If you originally downloaded source as a ZIP, download/extract current `main` instead of running `git pull`. The compatibility patch must also reach the installed extension (rebuilt/reloaded `dist/` for development, or a subsequent Store update).
+
+Compatibility validation on **2026-10-18**, branch `fix/legacy-companion-chat-text`, base `2737ee5` plus this patch: three serialized service-worker regressions failed before the fix because `text` was absent, then passed for plain messages, page-only messages and messages with a page. All **246 active tests** passed (one Windows-only skip), along with typecheck, lint, release build, packaged-companion smoke and real bridge probes on **Codex 0.162.1 and 0.163.0**. A temporary copy of the actual pre-attachment companion (`a1f35b2^`) reproduced the exact `Invalid request: missing field` error with `userText` alone; adding `text` made plain/page requests pass real Codex request validation. That legacy probe used a signed-out temporary home and no remote inference; it did not validate a completed answer. Current-host localhost probes verified raw intent and exactly one structured page, with no compatibility-copy duplication. CI runs these boundary tests on all three desktop operating systems; this local run was on macOS.
+
+**Actual Chrome sidebar — passed:** Chrome **155.0.8059.82**, macOS **27.0.1**, rebuilt unpacked `dist/`, ID `mpdfhhhjgbpdpfnkjbnboebdjokfjglf`, version 0.3.6, **GPT-6.1-Sol**, default Full access. Loaded the build into the `rishabh` Chrome profile and connected using the existing local companion/account. From `chrome://extensions`, sent the specifically approved prompt once: “Reply exactly: Compatibility check passed. Do not use tools.” No page/file was attached. The reply was exactly “Compatibility check passed.”; no tool/activity or approval/host-permission prompt appeared. Sidebar and worker consoles each showed **0 messages**. Sidebar Issues retained the previously documented missing form-field id/name and blocked-eval reports; CSP was unchanged. Closed both inspectors and left the test result visible. The session independently confirmed GPT-6.1-Sol and zero function calls. A real Linux desktop and legacy-host Chrome session were unavailable; their manual checklist remains: update/reinstall the companion, reopen the browser, verify plain and page-attached replies, then verify a current-host file attachment, Stop/retry and both consoles.
+
 **workspace routing discovery timed out:** Codex is checking the server routing for your ChatGPT account/workspace. CLI 0.162.1 limits that discovery to 15 seconds. Browser Control shares simultaneous account checks and retries this specific transient failure once. If it persists, the sidebar keeps the companion marked connected and offers **Retry connection** with network/VPN/proxy guidance. It does not clear sign-in, reinstall the companion, bypass workspace routing, or resend any chat/browser action. Rebuild and reload the unpacked extension to apply this recovery change. `npm run test:installed-host` verifies the real installed companion and prints only whether a ChatGPT account is present, without account identifiers or credentials.
 
 Connection-recovery manual checklist: reopen the signed-in sidebar; confirm a transient timeout can reach chat; check a persistent timeout offers workspace guidance and Retry without reinstall/sign-in prompts; select Retry and verify Connecting disables repeats; disconnect while a check is pending and confirm a late result cannot restore chat; inspect both extension consoles. Browser control was unavailable on 2026-10-17, so these manual UI scenarios remain pending. Regression tests use injected native replies and component events; they do not reproduce a live ChatGPT routing outage.
 
 Connection-recovery local validation on 2026-10-17 (macOS 27.0.1, Node 20.20.1, Codex CLI 0.162.1, base `7f55e75` plus connection fixes): 230 automated tests passed with one Windows-only skip; typecheck, lint, bridge smoke, release build, and extracted-release smoke passed. The real installed-host smoke passed and confirmed an existing ChatGPT sign-in without printing account identifiers. Five targeted checks failed against the original code for the expected recovery/concurrency/UI defects, then passed after repair. GitHub's checked `main` run at `b030c5f` passed on all three operating systems; these local changes need a push before GitHub can run them.
 
-**Native host not found:** from any folder, run `git clone --depth 1 -b feat/desktop-companion https://github.com/07rjain/browser-control.git "$HOME/browser-control" || git -C "$HOME/browser-control" pull --ff-only && node "$HOME/browser-control/scripts/install-native-host.mjs"`. Node, Codex, and the extension can be installed in any order. Then choose **Retry connection** in the side panel.
+**Native host not found:** from any folder, run `git clone --depth 1 --branch main https://github.com/07rjain/browser-control.git "$HOME/browser-control" || git -C "$HOME/browser-control" pull --ff-only origin main && node "$HOME/browser-control/scripts/install-native-host.mjs"`. Node, Codex, and the extension can be installed in any order. Then choose **Retry connection** in the side panel.
 
 **Codex not found or Sign in with ChatGPT does nothing on Windows:** pull this branch and run the installer again so the companion is recopied. The host looks for `codex.exe` under `%LOCALAPPDATA%\Programs\OpenAI\Codex\bin`, `%USERPROFILE%\.codex\packages\standalone\current`, and WinGet Links, and it starts an npm `codex.cmd` shim through Node instead of launching the `.cmd` file. Set `CODEX_BIN` only when Codex lives somewhere else. After ChatGPT approval, Windows may prompt for a local listener on `::1`; allow it so the sign-in callback can reach Codex on `127.0.0.1`.
 

@@ -193,13 +193,14 @@ describe("sidebar interactions", () => {
     expect(requests.some((request) => ["AUTH_LOGIN", "AUTH_LOGOUT", "DELETE_ALL_LOCAL_DATA", "CHAT_SEND"].includes(String(request.type)))).toBe(false);
   });
 
-  it("ignores a late account result after the companion disconnects", async () => {
+  it("keeps the disconnect reason and ignores a late account result", async () => {
     await ready();
     let finish: (value: unknown) => void = () => {};
     readAccount = () => new Promise((resolve) => { finish = resolve; });
     await act(async () => emit("auth.updated", {}));
-    await act(async () => emit("bridge.status", { connected: false }));
+    await act(async () => emit("bridge.status", { connected: false, error: "Native host has exited." }));
     await screen.findByRole("button", { name: "Retry connection" });
+    expect(screen.getByRole("alert").textContent).toContain("Native host has exited.");
     await act(async () => finish({ account: { type: "chatgpt", email: null, planType: "test" } }));
     expect(screen.getByRole("button", { name: "Retry connection" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Attach the current page" })).toBeNull();

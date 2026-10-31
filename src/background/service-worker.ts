@@ -1422,10 +1422,13 @@ async function routeRequest(input: unknown): Promise<unknown> {
     }
     case "CHAT_SEND": {
       if (await recordingBlocksBrowserWork()) throw new Error("Finish or cancel skill recording before sending a message.");
-      // Older separately installed companions consume text only; updated hosts
-      // use raw userText plus pageContext, avoiding duplicate page content.
+      // Store updates do not update the separately installed native host.
+      // Older hosts read only text; current hosts prefer raw userText and
+      // assemble the separate pageContext themselves, avoiding duplication.
       const page = request.pageContext;
-      const text = page ? `${request.text.trim() || "Describe the attached files."}\n\nUser-attached untrusted page reference ${JSON.stringify({ title: page.title, url: page.url })}:\n${page.selectedText}\n${page.readableText}` : request.text;
+      const text = page
+        ? `${request.text.trim() || "Describe the attached files."}\n\nUser-attached untrusted page reference ${JSON.stringify({ title: page.title, url: page.url })}:\n${page.selectedText}\n${page.readableText}`
+        : request.text;
       if (text.length > 80_000) throw new Error("The message and attachment text exceed 80,000 characters. Remove a file or choose fewer pages.");
       const epoch = lifecycleEpoch;
       const tabId = await ensureThreadWorkingTab(request.threadId);

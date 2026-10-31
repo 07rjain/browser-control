@@ -23,7 +23,7 @@ import {
 } from "./host-paths.mjs";
 import { codexInvocation } from "../bridge/codex-launch.mjs";
 
-const companionVersion = "0.3.6";
+const companionVersion = "0.3.7";
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const layout = companionLayout(process.platform, homedir(), process.env, companionVersion);
 const installedHostScript = join(layout.runtimeDir, "native-host.mjs");
