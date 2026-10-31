@@ -12,7 +12,8 @@ export function spawnProbeCodex(codexBinary, home, args = APP_SERVER_ARGS) {
 }
 
 export async function stopProbeProcess(child) {
-  if (child.exitCode !== null || child.signalCode !== null) return;
+  const streamsClosed = child.stdio.filter(Boolean).every((stream) => stream.closed);
+  if (streamsClosed && (child.exitCode !== null || child.signalCode !== null || !child.pid)) return;
   await new Promise((resolve, reject) => {
     const finish = (error) => {
       clearTimeout(force);
@@ -33,6 +34,6 @@ export async function stopProbeProcess(child) {
     child.once("error", finish);
     // Windows SIGTERM kills Node immediately, bypassing native-host cleanup.
     // EOF lets the host stop its Codex process before releasing its files.
-    child.stdin.end();
+    child.stdin?.end();
   });
 }

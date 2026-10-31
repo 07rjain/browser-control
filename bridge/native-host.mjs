@@ -450,7 +450,7 @@ async function ensureAppServer() {
     lastAppServerError = `Unable to start Codex (${invocation.command}): ${error.message}`;
     sendEvent("bridge.error", { message: lastAppServerError });
   });
-  server.on("exit", (code, signal) => {
+  server.on("close", (code, signal) => {
     if (appServer !== server) return;
     initialized = null;
     appServer = null;
@@ -501,7 +501,7 @@ async function stopAppServer() {
     const failureTimeout = setTimeout(() => {
       rejectStop(new Error("Codex App Server did not stop before local data deletion."));
     }, 6_000);
-    runningServer.once("exit", () => {
+    runningServer.once("close", () => {
       clearTimeout(forceTimeout);
       clearTimeout(failureTimeout);
       resolveStop(undefined);

@@ -153,6 +153,7 @@ try {
     if (error.message === LEGACY_THREAD_ERROR) throw new Error("chat.resume refused a restricted thread.");
   });
   process.stdout.write("Native bridge smoke test passed (isolated, signed-out account).\n");
+  await stopProbeProcess(host);
   process.stdout.write(`Main chat prompt probe: ${JSON.stringify(await probeChatSettings(codexBinary))}\n`);
   for (const model of ["gpt-6-luna", "gpt-6.1-sol", "gpt-6-astra", "probe-unknown-model"]) await probeCodexReviewerTools(codexBinary, model);
   await probeReviewerConcurrency(codexBinary);

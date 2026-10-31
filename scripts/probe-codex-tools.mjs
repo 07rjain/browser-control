@@ -52,12 +52,14 @@ function startAppServer(codexBinary, home, args) {
   const pending = new Map();
   const turnWaiters = [];
   let nextId = 1;
+  let stderr = "";
+  child.stderr.on("data", (chunk) => { stderr = (stderr + chunk).slice(-4000); });
   child.stdout.on("data", (chunk) => {
     for (const message of decoder.push(chunk)) {
       if (message.id !== undefined && pending.has(message.id)) {
         pending.get(message.id)(message);
         pending.delete(message.id);
-      } else if (message.method === "turn/completed" || message.method === "error") {
+      } else if (message.method === "turn/completed") {
         turnWaiters.shift()?.();
       }
     }
@@ -76,13 +78,16 @@ function startAppServer(codexBinary, home, args) {
     child.stdin.write(`${JSON.stringify({ method, id, params })}\n`);
   });
   const notify = (method, params) => child.stdin.write(`${JSON.stringify({ method, params })}\n`);
-  const turnFinished = () => new Promise((resolveTurn) => {
-    const timeout = setTimeout(resolveTurn, 15_000);
-    turnWaiters.push(() => {
-      clearTimeout(timeout);
-      resolveTurn();
+  const turnFinished = () => {
+    let waiter, timer;
+    const cancel = () => { clearTimeout(timer); const index = turnWaiters.indexOf(waiter); if (index >= 0) turnWaiters.splice(index, 1); };
+    const promise = new Promise((resolveTurn, reject) => {
+      waiter = () => { cancel(); resolveTurn(); };
+      timer = setTimeout(() => { cancel(); reject(new Error(`Tool probe turn did not complete. ${stderr}`)); }, 15_000);
+      turnWaiters.push(waiter);
     });
-  });
+    return { promise, cancel };
+  };
   return { child, request, notify, turnFinished };
 }
 
@@ -131,6 +136,8 @@ async function capturedTools(codexBinary, model, { resumeUnrestricted, imageInpu
       }];
       const base = {
         cwd: workspace,
+        modelProvider: "probe",
+        allowProviderModelFallback: false,
         runtimeWorkspaceRoots: [workspace],
         approvalPolicy: "never",
         sandbox: "read-only",
@@ -140,13 +147,16 @@ async function capturedTools(codexBinary, model, { resumeUnrestricted, imageInpu
       const restricted = { ...base, ...CODEX_THREAD_RESTRICTIONS };
       const runTurn = async (server, threadId) => {
         const finished = server.turnFinished();
-        await server.request("turn/start", {
+        void finished.promise.catch(() => undefined);
+        try {
+          await server.request("turn/start", {
           threadId,
           input: [{ type: "text", text: "probe", text_elements: [] }, ...(imageInput ? [{ type: "localImage", path: imagePath }] : [])],
           approvalPolicy: "never",
           ...(reviewer ? { outputSchema: { type: "object", properties: { decision: { type: "string", enum: ["ask_user"] } }, required: ["decision"], additionalProperties: false }, effort: "low" } : {}),
         });
-        await finished;
+          await finished.promise;
+        } finally { finished.cancel(); }
       };
       let threadId;
       let server;
@@ -173,7 +183,7 @@ async function capturedTools(codexBinary, model, { resumeUnrestricted, imageInpu
       return [...new Set(bodies.flatMap(toolNames))];
     } finally {
       await Promise.all(servers.map(({ child }) => stopProbeProcess(child)));
-      rmSync(home, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
+      rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   });
 }

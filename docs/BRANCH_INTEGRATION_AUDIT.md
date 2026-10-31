@@ -51,3 +51,11 @@ The actual isolated Chromium sidebar check passed missing-host guidance, Attach 
 CI retains the full Ubuntu/Windows/macOS checks and Chromium sidebar test, adds Node 20/24 memory runtime checks on all three OSes, and adds 0.164.0/0.165.0 reviewer probes on all three OSes. The final main workflow must pass before claiming those remote results. Native signed-in Linux/Windows sidebar memory and reviewer UI scenarios remain separate manual gates.
 
 A GitHub push does not update the Chrome Web Store build or a running native-host process. Refresh the companion and reload the matching unpacked extension to test source changes; Store publication is a separate release action. No live account chat was sent and no Store publication was performed for this audit.
+
+## Windows follow-up from the automatic main rerun
+
+The first integration run passed all 15 jobs. The automatic main rerun then passed 14 jobs, including all memory/reviewer matrices, but Windows failed native-bridge cleanup with `EPERM` on a temporary `codex-tool-probe-*` directory. Unit tests, the memory protocol and reviewer concurrency had passed before cleanup failed. This was investigated rather than hidden with an unconditional CI retry.
+
+A real-process regression reproduced the shutdown defect: an exited CLI wrapper can leave inherited streams open through a descendant. The probe helper returned early on `exitCode`; the regression failed before the repair and passed after it. Both the helper and native App Server shutdown now wait for stream closure before releasing profile files. The tool probe drains bounded stderr, waits for actual turn completion rather than an intermediate error/timeout, binds its custom localhost provider explicitly with fallback disabled, and allows bounded temporary-directory cleanup retries. The initial bridge-only host is closed before subsequent isolated probes start. These changes do not alter browser permissions, reviewer decisions, or authentication.
+
+The follow-up has its own commit and main CI run. The full local suite now has 256 passing tests plus the Windows-only skip on macOS. The final GitHub main run is the source for completed Windows/Linux/macOS results.
