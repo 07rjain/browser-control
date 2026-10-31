@@ -33,7 +33,7 @@ beforeEach(() => {
         let data: unknown = {};
         switch (request.type) {
           case "ACCOUNT_READ": data = await readAccount(); break;
-          case "AUTO_REVIEW_READ": data = { version: 2, available: reviewerAvailable, configurableModel: true, editableSystemPrompt: true }; break;
+          case "AUTO_REVIEW_READ": data = { version: 2, available: reviewerAvailable, configurableModel: true, editableSystemPrompt: true, ...(reviewerAvailable ? {} : { reason: "Auto review is unavailable for Codex CLI 0.166.0. Use Ask every time." }) }; break;
           case "CHAT_SETTINGS_READ": data = { version: 1, systemPrompt: chatPrompt }; break;
           case "CHAT_SETTINGS_WRITE": {
             if (chatSettingsError) return { ok: false, error: chatSettingsError };
@@ -334,13 +334,13 @@ describe("sidebar interactions", () => {
     expect(stored.codexSidebarAutoReview).toMatchObject({ systemPrompt: DEFAULT_REVIEW_SYSTEM_PROMPT });
   });
 
-  it("disables new Auto review selection for an unsupported companion", async () => {
+  it("keeps Auto review visible but disabled and shows the companion's version reason", async () => {
     reviewerAvailable = false;
     await ready(); fireEvent.click(screen.getByRole("button", { name: "Open settings" }));
     fireEvent.click(screen.getByRole("tab", { name: "Agent" }));
     const option = screen.getByRole("option", { name: "Auto review" }) as HTMLOptionElement;
     expect(option.disabled).toBe(true);
-    expect(screen.getByText(/Auto review requires the updated companion/)).toBeTruthy();
+    expect(await screen.findByText(/Auto review is unavailable for Codex CLI 0\.166\.0/)).toBeTruthy();
   });
 
   it("updates the same activity row through review and preserves approval attribution", async () => {

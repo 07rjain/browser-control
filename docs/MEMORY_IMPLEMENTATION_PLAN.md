@@ -2,7 +2,7 @@
 
 Status: first confirmed-memory release implemented locally on `feat/local-memory` after user approval. Milestones 1–2 have local automated coverage; manual Chrome and native Linux/Windows validation remain outstanding. Milestone 3 (automatic learning) is not implemented. Memory remains off until enabled by the user.
 
-Current implementation notes: records have text-based keyword search; optional aliases are deferred. The single store also bounds captured chat modes to 256 and review proposals to 20 with a 10-minute expiry. Store identity plus revision provide invalidation. The filesystem mutex fails safely on uncertain ownership; a lock left by a crashed host needs the documented manual recovery after all companions stop. Node 20/24 runtime jobs are added to CI but are not evidence of a passing remote run before push. See [Memory testing](MEMORY_TESTING.md) for loading and actual validation status.
+Current implementation notes: records have text-based keyword search; optional aliases are deferred. The single store also bounds captured chat modes to 256 and review proposals to 20 with a 10-minute expiry. Store identity plus revision provide invalidation. The filesystem mutex fails safely on uncertain ownership; a lock left by a crashed host needs the documented manual recovery after all companions stop. Node 20/24 runtime jobs are added to CI; consult the integrated main run for actual remote results. See [Memory testing](MEMORY_TESTING.md) for loading and actual validation status.
 
 ## Goal and recommended scope
 

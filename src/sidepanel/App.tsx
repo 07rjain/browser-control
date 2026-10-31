@@ -352,6 +352,7 @@ export default function App() {
   const [reviewerSettingsNotice, setReviewerSettingsNotice] = useState<string | null>(null);
   const [reviewerSettingsSaving, setReviewerSettingsSaving] = useState(false);
   const [reviewerAvailable, setReviewerAvailable] = useState(false);
+  const [reviewerUnavailableReason, setReviewerUnavailableReason] = useState("Checking the companion for Auto review support…");
   const permissionMode = autoReview.enabled && browserPermissionMode === "ask" ? "auto" : browserPermissionMode;
   const [fullSiteAccessGranted, setFullSiteAccessGranted] = useState(false);
   const [browserTaskActionLimit, setBrowserTaskActionLimit] = useState(DEFAULT_BROWSER_TASK_ACTION_LIMIT);
@@ -542,7 +543,8 @@ export default function App() {
     void sendRequest({ type: "AUTO_REVIEW_READ" }).then((result) => {
       const capabilities = reviewCapabilitiesSchema.safeParse(result);
       setReviewerAvailable(capabilities.success && capabilities.data.available);
-    }).catch(() => setReviewerAvailable(false));
+      setReviewerUnavailableReason(capabilities.success ? capabilities.data.reason ?? "Update the companion to use Auto review with this Codex version." : "The companion returned unsupported Auto review capabilities. Update it and retry connection.");
+    }).catch(() => { setReviewerAvailable(false); setReviewerUnavailableReason("Unable to check Auto review support. Update or reconnect the companion and reopen Browser Control."); });
     void sendRequest<{ models: ModelOption[] }>({ type: "MODELS_READ" })
       .then((result) => {
         setModels(result.models);
@@ -1809,7 +1811,7 @@ export default function App() {
                     : "Pauses before form submission, consequential controls, Enter submissions, and tab closing."}
                 {" "}Applies to the next browser task.
               </p>
-              {!reviewerAvailable && <p className="menu-hint">Auto review requires the updated companion and verified Codex CLI 0.162.1.</p>}
+              {!reviewerAvailable && <p className="menu-hint">{reviewerUnavailableReason}</p>}
               {browserPermissionMode === "full" && !fullSiteAccessGranted && (
                 <button className="settings-grant-button" disabled={streaming} onClick={() => void requestFullSiteAccess()}>
                   Enable full browser access

@@ -30,7 +30,7 @@ export async function probeReviewerConcurrency(codexBinary = "codex") {
     });
   });
   await new Promise((resolve, reject) => { provider.once("error", reject); provider.listen(0, "127.0.0.1", resolve); });
-  writeFileSync(join(home, "config.toml"), `model = "gpt-6.1-sol"\nmodel_provider = "probe"\n[model_providers.probe]\nname = "probe"\nbase_url = "http://127.0.0.1:${provider.address().port}/v1"\nwire_api = "responses"\nrequires_openai_auth = false\nrequest_max_retries = 0\nstream_max_retries = 0\n`);
+  writeFileSync(join(home, "config.toml"), `model = "gpt-6.1-sol"\nmodel_provider = "probe"\n[model_providers.probe]\nname = "probe"\nbase_url = "http://127.0.0.1:${provider.address().port}/v1"\nwire_api = "responses"\nsupports_websockets = false\nrequires_openai_auth = false\nrequest_max_retries = 0\nstream_max_retries = 0\n`);
   const child = spawnProbeCodex(codexBinary, home);
   const pending = new Map(); const decoder = new JsonLineDecoder(); let next = 1;
   let parentTool; let resolveTool;

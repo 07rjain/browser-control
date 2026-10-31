@@ -59,9 +59,12 @@ try {
   const status = await request("bridge.status");
   const account = await request("account.read");
   const catalog = await request("models.list");
+  const review = await request("approval.capabilities");
+  if (typeof review.available !== "boolean") throw new Error("Installed host returned invalid Auto review capabilities.");
   if (status.connected !== true) throw new Error("Installed host did not connect.");
   if (!Array.isArray(catalog.models)) throw new Error("Installed host returned an invalid model catalog.");
   process.stdout.write("Installed native host passed a Chrome-like environment smoke test.\n");
+  process.stdout.write(`Auto review: ${review.available ? "available" : review.reason ?? "unavailable"}.\n`);
   process.stdout.write(`Account state: ${account.account?.type === "chatgpt" ? "signed in with ChatGPT" : "no ChatGPT account"}.\n`);
 } finally {
   await stopProbeProcess(host);

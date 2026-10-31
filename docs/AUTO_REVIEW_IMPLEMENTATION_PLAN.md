@@ -1,6 +1,6 @@
 # Auto reviewer implementation plan
 
-Status: initial implementation added locally on 2026-10-16; automated and Chrome validation are recorded in README.md.
+Status: implemented; the 2026-10-31 branch audit confirms the feature was already merged. The exact 0.162.1 gate is now expanded to verified CLI 0.162.1, 0.164.0, and 0.165.0 after isolated real-protocol checks. Unknown versions retain human confirmation, with the detected version and reason shown in Settings. Automated and Chrome validation are recorded in README.md.
 
 Add **Auto review** beside **Ask every time** and **Full access**. Use `gpt-6-luna` by default to approve eligible actions that match the user's request, and send risky, unclear, or failed reviews to the existing user approval card. The main chat model remains independent. This reviewer covers the extension's allowlisted `tabs.*` and `page.*` actions; shell commands, arbitrary JavaScript, connectors, and additional browser tools remain outside scope.
 

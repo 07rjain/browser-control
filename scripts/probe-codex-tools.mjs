@@ -100,6 +100,7 @@ async function capturedTools(codexBinary, model, { resumeUnrestricted, imageInpu
       `name = "probe"`,
       `base_url = "http://127.0.0.1:${port}/v1"`,
       `wire_api = "responses"`,
+      `supports_websockets = false`,
       `requires_openai_auth = false`,
       `request_max_retries = 0`,
       `stream_max_retries = 0`,

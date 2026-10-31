@@ -114,8 +114,8 @@ Local Codex companion -----> Codex App Server / ChatGPT authentication
 - Node.js 20+
 - Codex CLI `0.148.0` or a compatible release available as `codex` (on Windows, `codex.exe` or the npm `codex.cmd` shim)
 
-Use Node.js 24 for development builds and CI. Auto review requires the verified
-Codex CLI **0.162.1**. See the [desktop compatibility review](docs/DESKTOP_COMPATIBILITY.md)
+Use Node.js 24 for development builds and CI. Auto review supports the verified
+Codex CLI versions **0.162.1, 0.164.0, and 0.165.0**. See the [desktop compatibility review](docs/DESKTOP_COMPATIBILITY.md)
 for the Linux/Windows checks, portability fixes, and remaining desktop validation.
 
 ## Local memory (development build)
@@ -390,7 +390,9 @@ Main prompt validation, 2026-10-16: typecheck, lint, all **211 active tests** (o
 
 ### Auto review
 
-Settings → Agent → Agent permission → **Auto review** enables an independent reviewer, defaulting to `gpt-6-luna`. It uses the existing Codex sign-in and additional model usage, while the composer keeps its own selected model. CLI **0.162.1** and the updated companion are required; an unavailable model, slow response, invalid result, exhausted budget or incomplete evidence falls back to your normal confirmation card. Open **Auto review settings** to select any model in your Codex model list, regardless of composer model visibility. An unavailable model or unsupported structured result asks you; the companion never silently substitutes another model.
+Auto review is under **Settings → Agent → Agent permission**. It was not removed from main: the original exact `0.162.1` CLI gate disabled it after Codex upgrades. The companion now accepts verified `0.162.1`, `0.164.0`, and `0.165.0`, and returns the detected version/reason for unsupported builds. Refresh the companion and reload the extension to use the fix. Unknown versions remain on human confirmation until their tool isolation/concurrency checks pass; no inference runs merely to check availability. See [branch integration audit](docs/BRANCH_INTEGRATION_AUDIT.md).
+
+Settings → Agent → Agent permission → **Auto review** enables an independent reviewer, defaulting to `gpt-6-luna`. It uses the existing Codex sign-in and additional model usage, while the composer keeps its own selected model. An updated companion and verified CLI **0.162.1, 0.164.0, or 0.165.0** are required; an unavailable model, slow response, invalid result, exhausted budget or incomplete evidence falls back to your normal confirmation card. Open **Auto review settings** to select any model in your Codex model list, regardless of composer model visibility. An unavailable model or unsupported structured result asks you; the companion never silently substitutes another model.
 
 The **Reviewer system prompt** editor shows the exact saved system prompt used for review. Edit it and choose **Save prompt**, or **Reset prompt to default** to restore the built-in prompt while keeping the chosen model. The limit is 6,000 characters, in addition to the 8,000-character action-evidence budget. Empty/invalid prompts cannot replace the saved prompt. **Required response rules** shows the fixed structured-response instructions. Code-enforced permissions, hard refusals, eligibility, exact-state checks and human escalation limits remain in force. Model/prompt changes apply to the next task; switching permission modes preserves these preferences. Unsaved prompt edits remain in the editor when changing models.
 

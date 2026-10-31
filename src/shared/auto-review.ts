@@ -25,7 +25,7 @@ export function readAutoReviewSettings(value: unknown): AutoReviewSettings {
   return legacy.success ? { ...DEFAULT_AUTO_REVIEW, enabled: legacy.data.enabled, model: legacy.data.model } : { ...DEFAULT_AUTO_REVIEW };
 }
 export const reviewCapabilitiesSchema = z.object({
-  version: z.literal(2), available: z.boolean(), configurableModel: z.literal(true), editableSystemPrompt: z.literal(true), reason: z.string().optional(),
+  version: z.literal(2), available: z.boolean(), configurableModel: z.literal(true), editableSystemPrompt: z.literal(true), reason: z.string().optional(), codexVersion: z.string().max(40).optional(),
 });
 export const REVIEW_REASON_CODES = ["requested_benign_search", "requested_preference", "requested_draft", "requested_private_record", "requires_human", "unclear_intent", "missing_context", "unsafe", "unavailable", "timeout", "canceled", "invalid_result", "busy", "budget", "recovered"] as const;
 export const reviewVerdictSchema = z.object({

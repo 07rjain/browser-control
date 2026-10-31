@@ -14,6 +14,13 @@ export const REVIEW_OUTPUT_SCHEMA = { type: "object", properties: {
   reasonCode: { type: "string", enum: reasons }, reason: { type: "string", minLength: 1, maxLength: 240 },
 }, required: ["decision", "risk", "matchesUserRequest", "missingContext", "reasonCode", "reason"], additionalProperties: false };
 
+export function reviewerCapabilities(userAgent) {
+  const codexVersion = typeof userAgent === "string" ? userAgent.match(/\/(\d+\.\d+\.\d+)(?=\s|$|\()/)?.[1] ?? "unknown" : "unknown";
+  const available = reviewerConfig.verifiedCodexVersions.includes(codexVersion);
+  return { version: 2, available, configurableModel: true, editableSystemPrompt: true, codexVersion,
+    ...(available ? {} : { reason: `Auto review is unavailable for Codex CLI ${codexVersion}. Verified versions: ${reviewerConfig.verifiedCodexVersions.join(", ")}. Use Ask every time until this version passes the isolated reviewer checks.` }) };
+}
+
 export function fallback(reasonCode, reason) { return { decision: "ask_user", risk: "unknown", matchesUserRequest: false, missingContext: true, reasonCode, reason }; }
 export function parseReviewVerdict(text) {
   if (typeof text !== "string" || Buffer.byteLength(text) > 2048) throw new Error("Oversized reviewer result.");

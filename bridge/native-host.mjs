@@ -9,7 +9,7 @@ import { localhostCallbackPort, startIpv4LoginProxy } from "./login-proxy.mjs";
 import { createRestrictedThreadRegistry } from "./restricted-threads.mjs";
 import { createUploadStore } from "./uploads.mjs";
 import { createChatInputService } from "./chat-input.mjs";
-import { createApprovalReviewer } from "./approval-reviewer.mjs";
+import { createApprovalReviewer, reviewerCapabilities } from "./approval-reviewer.mjs";
 import { createMemoryStore, MEMORY_CONFIG } from "./memory.mjs";
 import { createChatSettingsStore } from "./chat-settings.mjs";
 import {
@@ -724,12 +724,12 @@ async function handleRequest(message) {
   switch (message.method) {
     case "approval.capabilities": {
       const info = await ensureAppServer();
-      const available = /\/0\.162\.1\b/.test(info?.userAgent ?? "");
-      return { version: 2, available, configurableModel: true, editableSystemPrompt: true, ...(available ? {} : { reason: "Automatic review requires the verified Codex CLI 0.162.1. Use Ask every time with other versions." }) };
+      return reviewerCapabilities(info?.userAgent);
     }
     case "approval.reviewConfigured":
     case "approval.review": {
-      if (!/\/0\.162\.1\b/.test((await ensureAppServer())?.userAgent ?? "")) throw new Error("Automatic review is unavailable with this Codex version.");
+      const capability = reviewerCapabilities((await ensureAppServer())?.userAgent);
+      if (!capability.available) throw new Error(capability.reason);
       const params = message.params ?? {};
       if (message.method === "approval.reviewConfigured" && (params.configurationVersion !== 2 || typeof params.systemPrompt !== "string")) throw new Error("The reviewer configuration is missing or unsupported.");
       restrictedThreads.assertRestricted(params.parentThreadId);

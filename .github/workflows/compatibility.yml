@@ -56,3 +56,23 @@ jobs:
           node-version: ${{ matrix.node }}
           package-manager-cache: false
       - run: node scripts/smoke-memory.mjs
+
+  reviewer-compatibility:
+    name: Reviewer / ${{ matrix.os }} / Codex ${{ matrix.codex }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        codex: [0.164.0, 0.165.0]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - run: npm install --global @openai/codex@${{ matrix.codex }}
+      - run: node scripts/probe-auto-review.mjs
