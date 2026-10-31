@@ -44,8 +44,9 @@ export function createConversationRecord(
   toolStatuses: ToolStatus[],
   updatedAt = Date.now(),
   memoryFree = false,
+  incognito = false,
 ): ConversationRecord {
-  const retainedMessages = messages.slice(-100).map((message) => ({
+  const retainedMessages = (incognito ? [] : messages).slice(-100).map((message) => ({
     ...message,
     text: message.text.slice(0, 100_000),
     streaming: false,

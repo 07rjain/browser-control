@@ -1,4 +1,3 @@
-import type { MemoryProposal } from "../shared/memory";
 import type { AttachmentSummary } from "../shared/attachments";
 import type { SkillRecordingOffer } from "../shared/skill-offer";
 
@@ -10,7 +9,6 @@ export interface ChatMessage {
   failed?: boolean;
   recordingOffer?: SkillRecordingOffer;
   attachments?: AttachmentSummary[];
-  memoryProposals?: MemoryProposal[];
 }
 
 export function settleCanceledMessages(messages: ChatMessage[]): ChatMessage[] {

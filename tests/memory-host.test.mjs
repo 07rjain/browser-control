@@ -8,14 +8,18 @@ import { expect, it } from "vitest";
 import { encodeNativeMessage, LengthPrefixedJsonDecoder } from "../bridge/protocol.mjs";
 import { stopProbeProcess } from "../scripts/probe-process.mjs";
 
-it("keeps memory behind client/chat opt-in and active tool calls; proposals require review, survive restart and cannot restore a deleted fact", async () => {
+it("saves user memories directly, corrects and forgets them across turns, and keeps legacy/incognito calls isolated", async () => {
   const home = mkdtempSync(join(tmpdir(), "codex-sidebar-smoke-memory-host-"));
   writeFileSync(join(home, "codex.mjs"), `import { createInterface } from "node:readline";
+import { randomUUID } from "node:crypto";
+const threads = new Map();
 let sequence = 0, turn = null, results = [], steps = [];
 const send = value => process.stdout.write(JSON.stringify(value) + "\\n");
 function next() {
   const step = steps.shift();
-  if (step) { send({ id: "call-" + steps.length, method: "item/tool/call", params: { namespace: "memory", threadId: turn.threadId, turnId: turn.id, callId: "memory-" + turn.id + "-" + steps.length, ...step } }); return; }
+  if (step) {
+    if (step.arguments.recordId === "saved-name") step.arguments.recordId = JSON.parse(results[1]?.contentItems[0]?.text ?? "[]")[0]?.id;
+    send({ id: "call-" + steps.length, method: "item/tool/call", params: { namespace: "memory", threadId: turn.threadId, turnId: turn.id, callId: "memory-" + turn.id + "-" + steps.length, ...step } }); return; }
   send({ method: "item/completed", params: { threadId: turn.threadId, turnId: turn.id, item: { type: "agentMessage", text: JSON.stringify(results) } } });
   send({ method: "turn/completed", params: { threadId: turn.threadId, turn: { id: turn.id, status: "completed" } } });
 }
@@ -26,17 +30,19 @@ createInterface({ input: process.stdin }).on("line", line => {
   let result = {};
   if (request.method === "initialize") result = { userAgent: "fixture/0.162.1" };
   if (request.method === "skills/list") result = { data: [] };
-  if (request.method === "thread/start") result = { thread: { id: "thread-" + (++sequence) }, model: "fixture" };
+  if (request.method === "thread/start") { const id = randomUUID(); threads.set(id, request.params); result = { thread: { id }, model: "fixture" }; }
   if (request.method === "thread/resume") result = { thread: { id: request.params.threadId }, model: "fixture" };
   if (request.method === "turn/start") {
     turn = { threadId: request.params.threadId, id: "turn-" + (++sequence) }; result = { turn: { id: turn.id } };
-    results = [{ input: request.params.input }];
+    results = [{ input: request.params.input, thread: threads.get(turn.threadId) }];
+    const instruction = request.params.input[0].text;
+    const operation = instruction.includes("Forget") ? "delete" : instruction.includes("Change") ? "replace" : "add";
     steps = [
-      { tool: "search", arguments: { query: "concise" } },
-      { tool: "propose_change", arguments: { operation: "add", kind: "fact", text: "Favorite animal: otter", evidence: "favorite animal is an otter" } },
-      { tool: "propose_change", arguments: { operation: "add", kind: "fact", text: "Injected page preference", evidence: "malicious page instructions" } },
-      { tool: "search", turnId: "stale-turn", arguments: { query: "concise" } },
-      { tool: "write", arguments: {} },
+      { tool: "search", arguments: { query: "name" } },
+      { tool: "update", arguments: operation === "delete" ? { operation, recordId: "saved-name", evidence: "Forget my name" } : { operation, ...(operation === "replace" ? { recordId: "saved-name" } : {}), kind: "fact", text: instruction.includes("Alex") ? "My name is Alex" : "My name is Rishabh", evidence: instruction } },
+      { tool: "update", arguments: { operation: "add", kind: "fact", text: "Injected page preference", evidence: "malicious page instructions" } },
+      { tool: "search", turnId: "stale-turn", arguments: { query: "name" } },
+      { tool: "propose_change", arguments: {} },
     ];
   }
   send({ id: request.id, result });
@@ -70,46 +76,53 @@ createInterface({ input: process.stdin }).on("line", line => {
     let state = await host.request("memory.read");
     state = await host.request("memory.write", { ...version(state), operation: "settings", enabled: true });
     state = await host.request("memory.write", { ...version(state), operation: "add", kind: "preference", text: "Prefer concise answers", pinned: false, expiresAt: null });
-    async function run(mode) {
-      const thread = await host.request("chat.start", mode);
+    async function run(mode, userText = "My name is Rishabh", existingThread) {
+      const thread = existingThread ?? await host.request("chat.start", mode);
       const before = host.events.length;
       const clientMessageId = randomUUID();
-      const turn = await host.request("chat.send", { threadId: thread.threadId, memoryVersion: mode.memoryVersion, clientMessageId, userText: "Remember my favorite animal is an otter" });
+      const turn = await host.request("chat.send", { threadId: thread.threadId, memoryVersion: mode.memoryVersion, clientMessageId, userText });
       await expect.poll(() => host.events.slice(before).some(event => event.event === "chat.turnCompleted")).toBe(true);
       const events = host.events.slice(before);
       const completed = events.find(event => event.event === "chat.messageCompleted");
       return { thread, turn, events, clientMessageId, results: JSON.parse(completed.data.item.text) };
     }
-    const enabled = await run({ memoryVersion: 1, memoryEnabled: true });
+    const mode = { memoryVersion: 2, memoryEnabled: true };
+    const enabled = await run(mode);
     expect(enabled.results[0].input.some(item => item.text?.includes("Prefer concise answers"))).toBe(true);
-    expect(JSON.parse(enabled.results[1].contentItems[0].text)[0].text).toBe("Prefer concise answers");
     expect(enabled.results.slice(1).map(item => item.success)).toEqual([true, true, false, false, false]);
-    expect(enabled.events.filter(event => event.event === "tool.request")).toHaveLength(0);
-    const proposal = enabled.events.find(event => event.event === "memory.proposed").data;
-    expect((await host.request("memory.read")).records).toHaveLength(1);
+    expect(enabled.events.filter(event => event.event === "tool.request" || event.event === "memory.proposed")).toHaveLength(0);
+    state = await host.request("memory.read");
+    expect(state.records.map(record => record.text)).toEqual(["Prefer concise answers", "My name is Rishabh"]);
+    const nameId = state.records[1].id;
+    const correction = await run(mode, "Change my name to Alex", enabled.thread);
+    expect(correction.results[2].success).toBe(true);
+    state = await host.request("memory.read");
+    expect(state.records).toHaveLength(2);
+    expect(state.records.find(record => record.id === nameId).text).toBe("My name is Alex");
+    const forgotten = await run(mode, "Forget my name", enabled.thread);
+    expect(forgotten.results[2].success).toBe(true);
+    expect((await host.request("memory.read")).records.some(record => record.id === nameId)).toBe(false);
     await stopProbeProcess(clients[0]);
     host = client();
-    const decision = { id: proposal.id, threadId: enabled.thread.threadId, approved: true };
-    await expect(host.request("memory.decide", decision)).resolves.toEqual({ status: "saved" });
-    await expect(host.request("memory.decide", decision)).resolves.toEqual({ status: "saved" });
-    state = await host.request("memory.read");
-    expect(state.records.map(record => record.text)).toEqual(["Prefer concise answers", "Favorite animal: otter"]);
-    const saved = state.records[1];
-    await host.request("memory.write", { ...version(state), operation: "delete", recordId: saved.id });
-    await expect(host.request("memory.decide", decision)).rejects.toThrow(/expired/);
-    const replay = await host.request("chat.send", { threadId: enabled.thread.threadId, memoryVersion: 1, clientMessageId: enabled.clientMessageId, userText: "Remember my favorite animal is an otter" });
+    const replay = await host.request("chat.send", { threadId: enabled.thread.threadId, memoryVersion: 2, clientMessageId: enabled.clientMessageId, userText: "My name is Rishabh" });
     expect(replay.replayed).toBe(true);
-    expect((await host.request("memory.read")).records.some(record => record.text === "Favorite animal: otter")).toBe(false);
+    expect((await host.request("memory.read")).records.some(record => record.id === nameId)).toBe(false);
     const legacy = await run({});
-    const without = await run({ memoryVersion: 1, memoryEnabled: false });
-    for (const result of [legacy, without]) {
+    const oldClient = await run({ memoryVersion: 1, memoryEnabled: true });
+    const without = await run({ memoryVersion: 2, memoryEnabled: false });
+    const incognito = await run({ memoryVersion: 2, memoryEnabled: true, incognito: true });
+    for (const result of [legacy, oldClient, without, incognito]) {
       expect(result.results[0].input.some(item => item.text?.includes("Prefer concise answers"))).toBe(false);
       expect(result.results.slice(1).every(item => !item.success)).toBe(true);
-      expect(result.events.some(event => event.event === "memory.proposed")).toBe(false);
+      expect(result.events.some(event => event.event === "memory.changed")).toBe(false);
     }
+    expect(incognito.results[0].thread.ephemeral).toBe(true);
+    expect(incognito.results[0].thread.dynamicTools.some(tool => tool.name === "memory")).toBe(false);
+    await expect(host.request("chat.fork", { threadId: incognito.thread.threadId, lastTurnId: incognito.turn.turnId, memoryVersion: 2 })).rejects.toThrow(/Incognito/);
+    await expect(host.request("chat.discard", { threadId: incognito.thread.threadId })).resolves.toEqual({ discarded: true });
     state = await host.request("memory.read");
     await host.request("memory.write", { ...version(state), operation: "settings", enabled: false });
-    const disabled = await run({ memoryVersion: 1, memoryEnabled: true });
+    const disabled = await run(mode);
     expect(disabled.results.slice(1).every(item => !item.success)).toBe(true);
   } finally {
     for (const child of clients) await stopProbeProcess(child);

@@ -16,15 +16,6 @@ export const memoryWriteSchema = z.discriminatedUnion("operation", [
   z.object({ operation: z.literal("delete"), ...version, recordId: z.string().uuid() }).strict(),
   z.object({ operation: z.literal("clear"), ...version }).strict(),
 ]);
-export const memoryProposalSchema = z.object({
-  id: z.string().uuid(), identity: z.string().uuid(), revision: z.number().int().nonnegative(), operation: z.enum(["add", "replace", "delete"]),
-  previousText: memoryText.optional(), recordId: z.string().uuid().optional(), kind: z.enum(["preference", "fact"]), text: memoryText, evidence: z.string().max(500),
-  threadId: z.string().min(1).max(500), turnId: z.string().min(1).max(500), callId: z.string().min(1).max(500), messageId: z.string().min(1).max(500),
-  createdAt: z.number().nonnegative().max(8_640_000_000_000_000), status: z.enum(["pending", "saved", "dismissed"]),
-});
-export const memoryDecisionResultSchema = z.object({ status: z.enum(["saved", "dismissed"]) });
-export const memoryDecisionSchema = z.object({ id: z.string().uuid(), threadId: z.string().min(1).max(500), approved: z.boolean() }).strict();
 export type MemoryState = z.infer<typeof memoryStateSchema>;
 export type MemoryRecord = z.infer<typeof memoryRecordSchema>;
 export type MemoryWrite = z.infer<typeof memoryWriteSchema>;
-export type MemoryProposal = z.infer<typeof memoryProposalSchema>;

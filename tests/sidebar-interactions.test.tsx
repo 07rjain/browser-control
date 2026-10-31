@@ -41,7 +41,7 @@ beforeEach(() => {
             data = { version: 1, systemPrompt: chatPrompt }; break;
           }
           case "MODELS_READ": data = { models: [{ id: "alpha", name: "Alpha", isDefault: true }, { id: "beta", name: "Beta", isDefault: false }] }; break;
-          case "MEMORY_DECIDE": data = { status: (request.decision as { approved: boolean }).approved ? "saved" : "dismissed" }; break;
+          case "MEMORY_READ": data = { version: 1, identity: null, revision: 0, enabled: false, records: [] }; break;
           case "RECORDING_READ": data = { status: "idle" }; break;
           case "RECORDING_START": data = { status: "recording", name: "Taught skill", description: request.description, notes: "", notice: "", steps: [], pendingOrigin: "", pendingOriginPattern: "", preview: "", previewError: "", truncated: false }; break;
           case "CHAT_START": case "CHAT_RESUME": data = { threadId: "thread-teach", model: "alpha" }; break;
@@ -460,25 +460,27 @@ describe("sidebar interactions", () => {
 });
 
 
-it("shows a model-owned memory card only after the answer finishes and waits for the host acknowledgement before showing saved", async () => {
+it("keeps incognito chat out of saved conversation payloads and history while preserving regular chats", async () => {
+  stored.codexSidebarState = { threadId: "regular-thread", currentConversationId: "regular-chat", messages: [{ id: "regular-user", role: "user", text: "Saved regular conversation" }], theme: "system", selectedModel: "" };
   await ready();
-  fireEvent.change(screen.getByRole("textbox", { name: "Message Browser Control" }), { target: { value: "Remember my favorite animal is an otter" } });
+  fireEvent.click(screen.getByRole("button", { name: "Start incognito chat" }));
+  expect(screen.getByRole("button", { name: "Start incognito chat" }).getAttribute("aria-pressed")).toBe("true");
+  fireEvent.change(screen.getByRole("textbox", { name: "Message Browser Control" }), { target: { value: "Temporary private question" } });
   await act(async () => fireEvent.click(screen.getByRole("button", { name: "Send message" })));
-  const proposal = {
-    id: "11111111-1111-4111-8111-111111111111", identity: "22222222-2222-4222-8222-222222222222", revision: 1,
-    operation: "add", kind: "fact", text: "Favorite animal: otter", evidence: "favorite animal is an otter",
-    threadId: "thread-teach", turnId: "turn-teach", callId: "memory-call", messageId: "user-source", createdAt: Date.now(), status: "pending",
-  };
-  act(() => {
-    emit("chat.delta", { turnId: "turn-teach", delta: "Review the memory below. Nothing has been saved yet." });
-    emit("memory.proposed", proposal);
+  expect(requests.find(request => request.type === "CHAT_START")).toMatchObject({ incognito: true, memoryEnabled: false, memoryVersion: 2 });
+  act(() => { emit("chat.delta", { turnId: "turn-teach", delta: "Temporary private answer" }); emit("chat.turnCompleted", { turn: { id: "turn-teach", status: "completed" } }); });
+  expect(screen.getByText("Temporary private answer")).toBeTruthy();
+  expect((screen.getByRole("button", { name: /Fork/ }) as HTMLButtonElement).disabled).toBe(true);
+  await vi.waitFor(() => {
+    const saves = requests.filter(request => request.type === "CONVERSATION_SAVE");
+    expect(saves.length).toBeGreaterThan(0);
+    expect(JSON.stringify(saves)).not.toContain("Temporary private");
+    expect(saves.at(-1)?.snapshot).toMatchObject({ threadId: null, messages: [], conversationHistory: [expect.objectContaining({ title: "Saved regular conversation" })] });
   });
-  expect(screen.queryByRole("button", { name: "Save memory" })).toBeNull();
-  act(() => emit("chat.turnCompleted", { turn: { id: "turn-teach", status: "completed" } }));
-  const save = screen.getByRole("button", { name: "Save memory" });
-  expect(save.compareDocumentPosition(screen.getByRole("button", { name: /Copy/ })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  expect(requests.filter(request => request.type === "MEMORY_DECIDE")).toHaveLength(0);
-  await act(async () => fireEvent.click(save));
-  expect(requests.find(request => request.type === "MEMORY_DECIDE")).toMatchObject({ decision: { id: proposal.id, threadId: "thread-teach", approved: true } });
-  expect(screen.getByText("Memory change saved.")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Open conversation history" }));
+  expect(within(screen.getByRole("region", { name: "Conversation history" })).getByText("Saved regular conversation")).toBeTruthy();
+  expect(within(screen.getByRole("region", { name: "Conversation history" })).queryByText("Temporary private question")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Start a new chat" }));
+  await vi.waitFor(() => expect(requests.some(request => request.type === "CHAT_DISCARD" && request.threadId === "thread-teach")).toBe(true));
+  expect(screen.getByRole("button", { name: "Start incognito chat" }).getAttribute("aria-pressed")).toBe("false");
 });

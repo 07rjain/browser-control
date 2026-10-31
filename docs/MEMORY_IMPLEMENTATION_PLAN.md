@@ -1,3 +1,5 @@
+> **Current scope update:** The user has approved automatic main-model memory updates and incognito chat. The earlier review-card/expiry design below is historical and superseded by the Local memory section of `PRD.md`. Current behavior uses `memory.search` + `memory.update`, exact current-user evidence, version-2 client opt-in, no expiry, one inline Settings list with automatic reload, and an ephemeral incognito chat outside saved memory/history. No background learner or cloud sync is introduced. See `docs/MEMORY_TESTING.md` for current acceptance checks.
+
 # Local memory implementation plan
 
 Status: first confirmed-memory release implemented locally on `feat/local-memory` after user approval. Milestones 1–2 have local automated coverage; manual Chrome and native Linux/Windows validation remain outstanding. Milestone 3 (automatic learning) is not implemented. Memory remains off until enabled by the user.

@@ -1,6 +1,6 @@
 /* global chrome */
 import assert from "node:assert/strict";
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -105,17 +105,30 @@ try {
   // Only the account transport is synthetic from here on. Page capture,
   // permissions, extension messages, and the packaged UI remain real.
   await worker.evaluate(() => {
+    let memory = { version: 1, identity: "11111111-1111-4111-8111-111111111111", revision: 1, enabled: true, records: [{ id: "22222222-2222-4222-8222-222222222222", kind: "fact", text: "My test name is Rishabh", pinned: false, createdAt: 1, updatedAt: 1, expiresAt: null, source: { type: "manual" } }] };
     chrome.runtime.connectNative = () => {
       const listeners = [];
+      globalThis.changeFixtureMemory = (text) => {
+        memory = { ...memory, revision: memory.revision + 1, records: [{ ...memory.records[0], text }] };
+        listeners.forEach(listener => listener({ type: "event", event: "memory.changed", data: {} }));
+      };
       return {
         onMessage: { addListener: (listener) => listeners.push(listener) },
         onDisconnect: { addListener: () => {} },
-        postMessage: ({ id, method }) => {
+        postMessage: ({ id, method, params }) => {
+          if (method === "memory.write") {
+            if (params.operation === "replace") memory = { ...memory, revision: memory.revision + 1, records: memory.records.map(record => record.id === params.recordId ? { ...record, ...params, updatedAt: Date.now() } : record) };
+            if (params.operation === "settings") memory = { ...memory, enabled: params.enabled, revision: memory.revision + 1 };
+          }
           const replies = {
             "bridge.status": { connected: true, version: "fixture" },
             "account.read": { account: { type: "chatgpt", email: null, planType: "test" }, requiresOpenaiAuth: true },
             "models.list": { models: [{ id: "fixture", name: "Synthetic test model", description: "Local browser fixture", isDefault: true }] },
             "skills.list": { skills: [] },
+            "chat.settingsRead": { version: 1, systemPrompt: "Synthetic browser test instructions" },
+            "memory.capabilities": { version: 1, automaticChanges: 2, incognito: true },
+            "memory.read": memory,
+            "memory.write": memory,
             "approval.capabilities": { version: 2, available: false, configurableModel: true, editableSystemPrompt: true },
           };
           if (method === "chat.send") throw new Error("This browser check must never send a chat.");
@@ -149,6 +162,31 @@ try {
     await waitFor("!document.querySelector('.attachment-card') && Boolean(document.querySelector('[aria-label=\"Attach the current page\"]'))", "Detach did not restore Attach page.");
   }
   console.log("PASS: Attach → Detach → Attach → Remove captures real page text.");
+  await click('[aria-label="Open settings"]');
+  assert.equal(await evaluate("document.querySelector('[role=tabpanel]:not([hidden]) input').type"), "checkbox", "General controls must precede appearance");
+  await click('[role="tab"][id$="-models-tab"]');
+  assert.equal(await evaluate("document.querySelector('[role=tabpanel]:not([hidden]) input, [role=tabpanel]:not([hidden]) select').type"), "checkbox", "Model visibility toggles must come first");
+  await click('[role="tab"][id$="-memory-tab"]');
+  await waitFor("document.querySelector('.memory-list textarea')?.value === 'My test name is Rishabh'", "Saved memory did not load automatically.");
+  assert.equal(await evaluate("[...document.querySelectorAll('.memory-settings button')].some(button => /Refresh memory|Start a chat without memory|^Edit$/.test(button.textContent))"), false);
+  assert.equal(await evaluate("Boolean(document.querySelector('.memory-settings input[type=datetime-local]'))"), false);
+  await evaluate(`(() => { const field = document.querySelector('.memory-list textarea'); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(field, 'My test name is Alex'); field.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await evaluate("document.querySelector('.memory-list form').requestSubmit()");
+  await waitFor("document.querySelector('.memory-settings [role=status]')?.textContent.includes('Memory saved')", "Inline memory save did not finish.");
+  await worker.evaluate(() => globalThis.changeFixtureMemory("My test name is Morgan"));
+  await waitFor("document.querySelector('.memory-list textarea')?.value === 'My test name is Morgan'", "Native memory change did not reload the list.");
+  const screenshotIndex = process.argv.indexOf("--screenshots-dir");
+  if (screenshotIndex >= 0) {
+    const directory = resolve(process.argv[screenshotIndex + 1]); mkdirSync(directory, { recursive: true });
+    const screenshot = await send("Page.captureScreenshot", { format: "png" });
+    writeFileSync(join(directory, "memory-settings.png"), Buffer.from(screenshot.data, "base64"));
+  }
+  await click('[aria-label="Close settings"]');
+  await click('[aria-label="Start incognito chat"]');
+  await waitFor("Boolean(document.querySelector('.incognito-banner')) && document.querySelector('[aria-label=\"Start incognito chat\"]').getAttribute('aria-pressed') === 'true'", "Incognito entry did not show its visible state.");
+  await click('[aria-label="Start a new chat"]');
+  await waitFor("!document.querySelector('.incognito-banner')", "Leaving incognito did not restore regular chat.");
+  console.log("PASS: Settings controls first, inline memory edit/automatic reload, no expiry/refresh/card controls, and incognito entry/exit. Synthetic companion only; no chat send.");
   await fixture.goto("chrome://version");
   await click('[aria-label="Attach the current page"]');
   await waitFor("Boolean(document.querySelector('[role=\"alert\"]'))", "Protected page failure was silent.");

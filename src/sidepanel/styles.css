@@ -491,11 +491,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .sent-file button { justify-self: start; }
 
 .memory-list { list-style: none; padding: 0; margin: 8px; }
-.memory-list li, .memory-proposal { padding: 12px; border: 1px solid var(--border); border-radius: 12px; margin: 10px 0; overflow-wrap: anywhere; }
-.memory-list p, .memory-proposal p { margin: 6px 0; white-space: pre-wrap; }
-.memory-list small, .memory-proposal small { display: block; color: var(--muted); }
-.memory-proposal button { padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; color: var(--text); background: var(--soft); cursor: pointer; }
-.memory-proposals { margin: 14px 0 6px; }
+.memory-list li { padding: 12px; border: 1px solid var(--border); border-radius: 12px; margin: 10px 0; overflow-wrap: anywhere; }
+.memory-list p { margin: 6px 0; white-space: pre-wrap; }
+.memory-list small { display: block; color: var(--muted); }
 .settings-tabs { overflow-x: auto; }
 .settings-tabs button { flex-shrink: 0; }
 
@@ -503,5 +501,18 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .memory-settings .toggle-label { display: flex; align-items: center; gap: 8px; }
 .memory-settings .toggle-label input[type="checkbox"] { width: auto; margin: 0; padding: 0; accent-color: var(--accent); }
 .memory-settings button { color: var(--text); }
-.memory-settings button:disabled, .memory-proposal button:disabled { opacity: .5; cursor: default; }
+.memory-settings button:disabled { opacity: .5; cursor: default; }
 .memory-list details { font-size: 11px; margin: 8px 0; }
+
+.incognito-active { color: var(--accent); background: var(--soft); }
+.incognito-banner { display: grid; gap: 4px; padding: 12px 14px; margin: 4px 0 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--soft); font-size: 12px; }
+.incognito-banner span { color: var(--muted); line-height: 1.5; }
+.memory-list-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 20px 8px 10px; }
+.memory-list-heading .settings-subheading { margin: 0; padding: 0; border: 0; }
+.memory-list-heading small { color: var(--muted); font-size: 11px; font-weight: 400; white-space: nowrap; }
+.memory-entry-options, .memory-entry-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.memory-entry-options > label { flex: 1 1 120px; margin: 8px 0; }
+.memory-entry-actions { margin: 8px 0; }
+.menu-card .memory-settings button { width: auto; text-align: center; padding: 7px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--soft); cursor: pointer; font: inherit; font-size: 12px; }
+.memory-list form > label { display: block; margin: 0; }
+@media (max-width: 380px) { .header-actions { gap: 0; } .header-actions .icon-button { width: 30px; } .app-header { padding-inline: 10px; } }

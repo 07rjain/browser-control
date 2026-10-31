@@ -48,7 +48,10 @@ try {
   });
   // No account or model request: exercise the extracted companion, its import
   // graph, prompt persistence and binary native-message transfer directly.
-  assert.equal((await request("memory.capabilities")).version, 1);
+  const memoryCapabilities = await request("memory.capabilities");
+  assert.equal(memoryCapabilities.version, 1);
+  assert.equal(memoryCapabilities.automaticChanges, 2);
+  assert.equal(memoryCapabilities.incognito, true);
   let memory = await request("memory.read");
   memory = await request("memory.write", { operation: "settings", identity: memory.identity, revision: memory.revision, enabled: true });
   memory = await request("memory.write", { operation: "add", identity: memory.identity, revision: memory.revision, kind: "preference", text: "Package memory: café\r\n🦦", pinned: false, expiresAt: null });

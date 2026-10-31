@@ -29,8 +29,7 @@ import { uploadPreparedFiles, type AttachmentTransport } from "./attachments/tra
 import { FileCards, SentFiles } from "./attachments/FileCards";
 import ChatPromptSettings from "./ChatPromptSettings";
 import MemorySettings from "./MemorySettings";
-import MemoryProposalCards from "./MemoryProposalCards";
-import { memoryProposalSchema, type MemoryProposal, type MemoryWrite } from "../shared/memory";
+import { type MemoryWrite } from "../shared/memory";
 import SettingsPanel from "./SettingsPanel";
 import { COMPLETION_NOTICE_DURATION_MS, freshCompletionNotice, type CompletionNotice } from "../shared/completion-notice";
 import { greetingFor, selectedModelLabel, setupSteps, STARTER_TASKS, type AuthState, type StarterTask } from "./welcome";
@@ -324,6 +323,8 @@ export default function App() {
   const [account, setAccount] = useState<Account | null>(null);
   const [login, setLogin] = useState<LoginDetails | null>(null);
   const [memoryFree, setMemoryFree] = useState(false);
+  const [incognito, setIncognito] = useState(false);
+  const [memoryRevision, setMemoryRevision] = useState(0);
   const [threadId, setThreadId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
@@ -402,6 +403,18 @@ export default function App() {
 
   const streaming = activeTurnId !== null || isSending;
   const recordingActive = recording.status !== "idle";
+
+  useEffect(() => {
+    if (!incognito || !threadId) return;
+    const discard = () => {
+      void chrome.runtime.sendMessage({ type: "BROWSER_TASK_CANCEL", requestId: crypto.randomUUID(), threadId })
+        .catch(() => undefined)
+        .then(() => chrome.runtime.sendMessage({ type: "CHAT_DISCARD", requestId: crypto.randomUUID(), threadId }))
+        .catch(() => undefined);
+    };
+    window.addEventListener("pagehide", discard);
+    return () => { window.removeEventListener("pagehide", discard); discard(); };
+  }, [incognito, threadId]);
 
   useEffect(() => {
     const retainedUrls = new Set(attachedFiles.flatMap((file) => file.pages.map((page) => page.previewUrl)));
@@ -581,12 +594,13 @@ export default function App() {
       toolStatuses,
       Date.now(),
       memoryFree,
+      incognito,
     );
     const retainedHistory = upsertConversation(conversationHistory, currentConversation);
     const snapshot: ConversationSnapshot = {
       savedAt: Date.now(),
-      memoryFree,
-      threadId,
+      memoryFree: incognito ? false : memoryFree,
+      threadId: incognito ? null : threadId,
       currentConversationId,
       messages: currentConversation.messages,
       theme,
@@ -611,7 +625,7 @@ export default function App() {
       conversationSaveTimer.current = null;
       deliverConversationSnapshot(snapshot, epoch);
     }, CONVERSATION_SAVE_DELAY_MS);
-  }, [completionSoundEnabled, conversationHistory, currentConversationId, deliverConversationSnapshot, hydrated, messages, selectedModel, theme, threadId, toolStatuses, memoryFree]);
+  }, [completionSoundEnabled, conversationHistory, currentConversationId, deliverConversationSnapshot, hydrated, messages, selectedModel, theme, threadId, toolStatuses, memoryFree, incognito]);
 
   useEffect(() => {
     const flushConversationSnapshot = () => {
@@ -714,16 +728,9 @@ export default function App() {
           if (data.threadId === inFlightPayloadRef.current?.threadId && typeof data.message === "string") showCompletionNotice(data.message);
           break;
         }
-        case "memory.proposed": {
-          const parsed = memoryProposalSchema.safeParse(message.data);
-          if (!parsed.success || stopRequestedRef.current) break;
-          const proposal = parsed.data;
-          if (inFlightPayloadRef.current?.threadId !== proposal.threadId || (activeTurnIdentityRef.current && activeTurnIdentityRef.current !== proposal.turnId)) break;
-          activeTurnIdentityRef.current = proposal.turnId;
-          setMessages((current) => current.map((item) => item.role === "assistant" && (item.id === proposal.turnId || item.streaming)
-            ? { ...item, id: proposal.turnId, memoryProposals: [...(item.memoryProposals ?? []).filter((existing) => existing.id !== proposal.id), proposal].slice(-20) } : item));
+        case "memory.changed":
+          setMemoryRevision((revision) => revision + 1);
           break;
-        }
         case "skill.recordingOffered": {
           const parsed = skillRecordingOfferEventSchema.safeParse(message.data);
           if (!parsed.success || stopRequestedRef.current) break;
@@ -1133,7 +1140,7 @@ export default function App() {
     let replacedLegacy = false;
     if (threadId) {
       try {
-        const resumed = await sendRequest<{ threadId: string }>({ type: "CHAT_RESUME", threadId, memoryVersion: 1, model: selectedModel || undefined });
+        const resumed = await sendRequest<{ threadId: string }>({ type: "CHAT_RESUME", threadId, memoryVersion: 2, model: selectedModel || undefined });
         threadReadyRef.current = true;
         return { threadId: resumed.threadId, replacedLegacy: false };
       } catch (cause) {
@@ -1141,7 +1148,7 @@ export default function App() {
         replacedLegacy = cause instanceof Error && isLegacyThreadError(cause.message);
       }
     }
-    const created = await sendRequest<{ threadId: string }>({ type: "CHAT_START", memoryVersion: 1, memoryEnabled: !memoryFree, model: selectedModel || undefined });
+    const created = await sendRequest<{ threadId: string }>({ type: "CHAT_START", memoryVersion: 2, memoryEnabled: !memoryFree, incognito, model: selectedModel || undefined });
     setThreadId(created.threadId);
     threadReadyRef.current = true;
     return { threadId: created.threadId, replacedLegacy };
@@ -1183,7 +1190,7 @@ export default function App() {
       if (replacedLegacy) {
         setConversationHistory((current) => upsertConversation(
           current,
-          createConversationRecord(currentConversationId, threadId, settleCanceledMessages(messages), toolStatuses, undefined, memoryFree),
+          createConversationRecord(currentConversationId, threadId, settleCanceledMessages(messages), toolStatuses, undefined, memoryFree, incognito),
         ));
         setCurrentConversationId(crypto.randomUUID());
         setMessages([
@@ -1203,7 +1210,7 @@ export default function App() {
       setFileProgress(null);
       const result = await sendRequest<{ turnId: string; attachments?: AttachmentSummary[]; replayed?: boolean }>({
         type: "CHAT_SEND",
-        memoryVersion: 1,
+        memoryVersion: 2,
         threadId: activeThreadId,
         text: payload.userText,
         pageContext: payload.pageContext,
@@ -1300,7 +1307,7 @@ export default function App() {
   };
 
   const forkConversation = async (message: ChatMessage) => {
-    if (!threadId || streaming || message.streaming || message.failed) return;
+    if (!threadId || incognito || streaming || message.streaming || message.failed) return;
     const messageIndex = messages.findIndex((item) => item.id === message.id);
     if (messageIndex < 0) return;
     setForkingMessageId(message.id);
@@ -1308,14 +1315,14 @@ export default function App() {
     try {
       const result = await sendRequest<{ threadId: string }>({
         type: "CHAT_FORK",
-        memoryVersion: 1,
+        memoryVersion: 2,
         threadId,
         lastTurnId: message.id,
       });
       const forkedMessages = messages.slice(0, messageIndex + 1).map((item) => ({ ...item, streaming: false }));
       const forkedMessageIds = new Set(forkedMessages.map((item) => item.id));
       const forkedStatuses = toolStatuses.filter((status) => status.turnId && forkedMessageIds.has(status.turnId));
-      const original = createConversationRecord(currentConversationId, threadId, messages, toolStatuses, undefined, memoryFree);
+      const original = createConversationRecord(currentConversationId, threadId, messages, toolStatuses, undefined, memoryFree, incognito);
       setConversationHistory((current) => upsertConversation(current, original));
       setCurrentConversationId(crypto.randomUUID());
       setThreadId(result.threadId);
@@ -1343,7 +1350,7 @@ export default function App() {
     setIsSending(false);
     setError(null);
     setMessages((current) => settleCanceledMessages(current.map((message) => message.streaming || message.id === activeTurnId
-      ? { ...message, recordingOffer: undefined, memoryProposals: undefined }
+      ? { ...message, recordingOffer: undefined }
       : message)));
     setToolApproval(null);
     setToolPermission(null);
@@ -1372,13 +1379,14 @@ export default function App() {
     }
   };
 
-  const newChat = () => {
-    setMemoryFree(false);
+  const newChat = (incognitoChat = false) => {
+    setMemoryFree(incognitoChat);
+    setIncognito(incognitoChat);
     preparationRef.current?.abort();
     if (streaming) void stop();
     setConversationHistory((current) => upsertConversation(
       current,
-      createConversationRecord(currentConversationId, threadId, settleCanceledMessages(messages), toolStatuses, undefined, memoryFree),
+      createConversationRecord(currentConversationId, threadId, settleCanceledMessages(messages), toolStatuses, undefined, memoryFree, incognito),
     ));
     setCompletionNotice(null);
     void sendRequest({ type: "COMPLETION_NOTICE_DISMISS" }).catch(() => undefined);
@@ -1401,10 +1409,11 @@ export default function App() {
     if (streaming) return;
     setConversationHistory((current) => upsertConversation(
       current,
-      createConversationRecord(currentConversationId, threadId, messages, toolStatuses, undefined, memoryFree),
+      createConversationRecord(currentConversationId, threadId, messages, toolStatuses, undefined, memoryFree, incognito),
     ));
     setCurrentConversationId(conversation.id);
     setMemoryFree(conversation.memoryFree === true);
+    setIncognito(false);
     setThreadId(conversation.threadId);
     threadReadyRef.current = false;
     setMessages(conversation.messages.map((message) => ({ ...message, streaming: false })));
@@ -1453,6 +1462,7 @@ export default function App() {
 
   const resetBrowserState = () => {
     setMemoryFree(false);
+    setIncognito(false);
     setVisibleModelIds(null);
     conversationPersistSuspended.current = false;
     setThreadId(null);
@@ -1512,10 +1522,6 @@ export default function App() {
     }
   };
 
-  const decideMemory = async (proposal: MemoryProposal, approved: boolean) => {
-    const result = await sendRequest<{ status: "saved" | "dismissed" }>({ type: "MEMORY_DECIDE", decision: { id: proposal.id, threadId: proposal.threadId, approved } });
-    setMessages((current) => current.map((item) => ({ ...item, memoryProposals: item.memoryProposals?.map((value) => value.id === proposal.id ? { ...value, status: result.status } : value) })));
-  };
   const memoryRequest = useCallback((operation: "read" | "write", change?: MemoryWrite): Promise<unknown> => sendRequest(operation === "read" ? { type: "MEMORY_READ" } : { type: "MEMORY_WRITE", change }), []);
 
   const decideTool = async (approved: boolean) => {
@@ -1574,8 +1580,8 @@ export default function App() {
   const activitiesByTurn = useMemo(() => groupToolStatuses(toolStatuses), [toolStatuses]);
   const visibleConversationHistory = useMemo(() => upsertConversation(
     conversationHistory,
-    createConversationRecord(currentConversationId, threadId, messages, toolStatuses, undefined, memoryFree),
-  ), [conversationHistory, currentConversationId, messages, threadId, toolStatuses, memoryFree]);
+    createConversationRecord(currentConversationId, threadId, messages, toolStatuses, undefined, memoryFree, incognito),
+  ), [conversationHistory, currentConversationId, messages, threadId, toolStatuses, memoryFree, incognito]);
 
   if (authState !== "ready") {
     return (
@@ -1700,8 +1706,11 @@ export default function App() {
               <path d="M12 12.4l2.2 1.3" />
             </svg>
           </button>
-          <button className="icon-button" aria-label="Start a new chat" data-tooltip="Start a new conversation. This one stays in history." onClick={newChat}>
+          <button className="icon-button" aria-label="Start a new chat" data-tooltip={incognito ? "Leave incognito and start a regular chat" : "Start a new conversation. This one stays in history."} onClick={() => newChat()}>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5.5v13M5.5 12h13" /></svg>
+          </button>
+          <button type="button" className={`icon-button${incognito ? " incognito-active" : ""}`} aria-label="Start incognito chat" aria-pressed={incognito} data-tooltip="No saved memory or conversation history. Provider and attachment retention still apply." disabled={streaming || recordingActive} onClick={() => newChat(true)}>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10h16M6 10l2-6h8l2 6M10 16h4" /><circle cx="6.5" cy="16" r="3.5" /><circle cx="17.5" cy="16" r="3.5" /></svg>
           </button>
           <button className="icon-button" aria-label="Open settings" aria-expanded={menuOpen} data-tooltip="Theme, model, permissions, and saved skills" onClick={() => {
             setMenuOpen(!menuOpen);
@@ -1740,14 +1749,6 @@ export default function App() {
           <SettingsPanel onClose={() => setMenuOpen(false)} sections={{
             general: <>
               <h3 className="settings-section-title">Appearance and sound</h3>
-              <label>
-                Theme
-                <select value={theme} onChange={(event) => setTheme(event.target.value as Theme)}>
-                  <option value="system">System</option>
-                  <option value="light">Light</option>
-                  <option value="dark">Dark</option>
-                </select>
-              </label>
               <label className="toggle-row">
                 <span>Task completion sound<small>Play a quiet tone after browser work finishes.</small></span>
                 <input
@@ -1760,19 +1761,17 @@ export default function App() {
                   }}
                 />
               </label>
+              <label>
+                Theme
+                <select value={theme} onChange={(event) => setTheme(event.target.value as Theme)}>
+                  <option value="system">System</option>
+                  <option value="light">Light</option>
+                  <option value="dark">Dark</option>
+                </select>
+              </label>
             </>,
             models: <>
               <h3 className="settings-section-title">Chat models</h3>
-              <label>
-                Model
-                <select value={selectedModel} onChange={(event) => selectModel(event.target.value)}>
-                  <option value="">Codex default</option>
-                  {models.map((model) => (
-                    <option key={model.id} value={model.id}>{model.name}{model.isDefault ? " · Default" : ""}</option>
-                  ))}
-                </select>
-              </label>
-              <p className="menu-hint">Model changes apply to your next message.</p>
               <fieldset className="model-visibility">
                 <legend>Models in composer</legend>
                 <p className="menu-hint">Choose the models shown in your message box. Keep at least one selected.</p>
@@ -1786,6 +1785,16 @@ export default function App() {
                   })}
                 </div>
               </fieldset>
+              <label>
+                Model
+                <select value={selectedModel} onChange={(event) => selectModel(event.target.value)}>
+                  <option value="">Codex default</option>
+                  {models.map((model) => (
+                    <option key={model.id} value={model.id}>{model.name}{model.isDefault ? " · Default" : ""}</option>
+                  ))}
+                </select>
+              </label>
+              <p className="menu-hint">Model changes apply to your next message.</p>
             </>,
             agent: <>
               <h3 className="settings-section-title">Browser agent</h3>
@@ -1872,7 +1881,7 @@ export default function App() {
               <p className="menu-hint">Uses your existing Codex sign-in and adds model usage. Reviews receive your request and the proposed action context. Your chat model stays the same. Stop cancels a pending review.</p>
             </details>
             </>,
-            memory: <MemorySettings request={memoryRequest} disabled={streaming || recordingActive} onNewChatWithoutMemory={() => { newChat(); setMemoryFree(true); setMenuOpen(false); }} />,
+            memory: <MemorySettings request={memoryRequest} refreshKey={memoryRevision} disabled={streaming || recordingActive} />,
             skills: <>
               <h3 className="settings-section-title">Taught skills</h3>
             <div className="skill-settings">
@@ -1886,21 +1895,8 @@ export default function App() {
                     <li key={`${skill.name}-${index}`} className="skill-row">
                       <header>
                         <strong>{skill.name}</strong>
-                        <button
-                          type="button"
-                          className="skill-delete"
-                          aria-label={`Delete ${skill.name}`}
-                          onClick={() => {
-                            if (!window.confirm(`Delete the skill “${skill.name}”? This removes it from this computer.`)) return;
-                            void sendRequest({ type: "SKILLS_DELETE", name: skill.name })
-                              .then(() => refreshSkills())
-                              .catch((cause: unknown) => setSkillsError(cause instanceof Error ? cause.message : "Unable to delete that skill."));
-                          }}
-                        >
-                          Delete
-                        </button>
+
                       </header>
-                      <p>{skill.description}</p>
                       <label className="toggle-row">
                         <span>Available to the agent</span>
                         <input
@@ -1915,6 +1911,20 @@ export default function App() {
                           }}
                         />
                       </label>
+                      <p>{skill.description}</p>
+                        <button
+                          type="button"
+                          className="skill-delete"
+                          aria-label={`Delete ${skill.name}`}
+                          onClick={() => {
+                            if (!window.confirm(`Delete the skill “${skill.name}”? This removes it from this computer.`)) return;
+                            void sendRequest({ type: "SKILLS_DELETE", name: skill.name })
+                              .then(() => refreshSkills())
+                              .catch((cause: unknown) => setSkillsError(cause instanceof Error ? cause.message : "Unable to delete that skill."));
+                          }}
+                        >
+                          Delete
+                        </button>
                     </li>
                   ))}
                 </ul>
@@ -1941,6 +1951,7 @@ export default function App() {
       </header>
 
       <div className="transcript" ref={transcriptRef} aria-live="polite">
+        {incognito && <div className="incognito-banner" role="status"><strong>Incognito chat</strong><span>No saved memory or conversation history. Provider and attachment retention still apply.</span></div>}
         {messages.length === 0 ? (
           <section className="empty-state">
             <OrbMark />
@@ -1968,15 +1979,14 @@ export default function App() {
             <p className="home-status rise">
               <span>{permissionMode === "auto" ? "Auto review" : browserPermissionMode === "full" ? "Full access" : "Ask every time"}</span>
               {enabledSkillCount > 0 && <span>{enabledSkillCount === 1 ? "1 taught skill" : `${enabledSkillCount} taught skills`}</span>}
-              <span>{memoryFree ? "Chat without memory" : "Stop any time"}</span>
+              <span>{memoryFree ? (incognito ? "Incognito chat" : "Chat without memory") : "Stop any time"}</span>
             </p>
           </section>
         ) : (
           messages.map((message) => {
             const offer = skillRecordingOfferSchema.safeParse(message.recordingOffer);
             const showRecordingOffer = message.role === "assistant" && offer.success && ["offered", "opened"].includes(offer.data.state) && !message.streaming && activeTurnId !== message.id;
-            const memoryProposals = Array.isArray(message.memoryProposals) ? message.memoryProposals.flatMap((value) => { const parsed = memoryProposalSchema.safeParse(value); return parsed.success && parsed.data.threadId === threadId ? [parsed.data] : []; }) : [];
-            const showMemoryProposals = Boolean(message.role === "assistant" && memoryProposals.length && !message.streaming && activeTurnId !== message.id && !message.failed);
+
             const showResponseActions = message.role === "assistant" && Boolean(message.text) && !message.streaming && !message.failed;
             const activity = message.role === "assistant"
               ? activitiesByTurn.get(message.id) ?? (message.streaming && activeTurnId ? activitiesByTurn.get(activeTurnId) : undefined)
@@ -1990,7 +2000,7 @@ export default function App() {
                     complete={!message.streaming && activeTurnId !== message.id}
                   />
                 )}
-                {(message.role === "user" || message.text || message.streaming || showRecordingOffer || showMemoryProposals) && <article className={`message message-${message.role} ${message.failed ? "message-failed" : ""}`}>
+                {(message.role === "user" || message.text || message.streaming || showRecordingOffer) && <article className={`message message-${message.role} ${message.failed ? "message-failed" : ""}`}>
                   <span className="message-role">{message.role === "user" ? "You" : "Browser Control"}</span>
                   {message.role === "assistant" ? (
                     message.text ? (
@@ -2002,7 +2012,7 @@ export default function App() {
                     <p>{message.text}</p>
                   )}
                   {message.role === "user" && message.attachments?.length ? <SentFiles files={message.attachments} threadId={threadId} transport={attachmentTransport} /> : null}
-                  {showMemoryProposals && <MemoryProposalCards proposals={memoryProposals} disabled={streaming || recordingActive} decide={decideMemory} />}
+
                   {showRecordingOffer && (
                     <div className="message-actions recording-offer-actions" role="group" aria-label="Skill recording">
                       <button type="button" className="record-skill-action" disabled={streaming || recordingActive} data-tooltip={offer.data.reason} aria-description={offer.data.reason} onClick={() => openOfferedRecording(message)}>
@@ -2022,7 +2032,7 @@ export default function App() {
                       <button
                         type="button"
                         onClick={() => void forkConversation(message)}
-                        disabled={!threadId || Boolean(forkingMessageId) || streaming}
+                        disabled={incognito || !threadId || Boolean(forkingMessageId) || streaming}
                         data-tooltip="Start a new conversation from this response"
                       >
                         <span aria-hidden="true">⑂</span> {forkingMessageId === message.id ? "Forking…" : "Fork"}

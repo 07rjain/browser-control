@@ -27,6 +27,28 @@ function storageArea(data: Record<string, unknown>) {
 describe("service-worker browser orchestration", () => {
   beforeEach(() => vi.resetModules());
 
+  it("refuses incognito on an older companion before it can create a persistent thread", async () => {
+    let receive: (message: unknown) => void = () => {};
+    const created: unknown[] = [];
+    const port = {
+      onMessage: { addListener: (listener: typeof receive) => { receive = listener; } },
+      onDisconnect: { addListener: vi.fn() },
+      postMessage: (message: NativeRequest) => {
+        if (message.method === "chat.start") created.push(message.params);
+        const data = message.method === "memory.capabilities" ? { version: 1 } : { threadId: "persistent-old-host-thread", model: "fixture" };
+        queueMicrotask(() => receive({ type: "response", id: message.id, ok: true, data }));
+      },
+    };
+    vi.stubGlobal("chrome", {
+      runtime: { id: "extension-id", connectNative: () => port, sendMessage: vi.fn(async () => undefined), onMessage: { addListener: vi.fn() }, onInstalled: { addListener: vi.fn() }, onStartup: { addListener: vi.fn() } },
+      sidePanel: { setPanelBehavior: vi.fn(async () => undefined) },
+      tabs: { onRemoved: { addListener: vi.fn() } },
+    });
+    const { serviceWorkerTestHooks } = await import("../src/background/service-worker");
+    await expect(serviceWorkerTestHooks.routeRequest({ type: "CHAT_START", requestId: crypto.randomUUID(), incognito: true, memoryVersion: 2, memoryEnabled: false })).rejects.toThrow(/Update the companion/);
+    expect(created).toEqual([]);
+  });
+
   it.each(["message", "page", "message and page"])("preserves the legacy companion text contract for $0", async (kind) => {
     const text = kind === "page" ? "" : "  Summarize this for me.  ";
     const pageContext = kind === "message" ? undefined : {

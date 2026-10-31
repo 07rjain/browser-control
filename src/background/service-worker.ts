@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { attachmentSummarySchema } from "../shared/attachments";
-import { memoryStateSchema, memoryDecisionResultSchema } from "../shared/memory";
+import { memoryStateSchema } from "../shared/memory";
 import { chatSettingsSchema } from "../shared/chat-settings";
 import { AUTO_REVIEW_SETTINGS_KEY, DEFAULT_AUTO_REVIEW, REVIEW_MODEL, REVIEW_TIMEOUT_MS, readAutoReviewSettings, reviewCapabilitiesSchema, reviewVerdictSchema, verdictApproves, type AutoReviewSettings, type ReviewActivity } from "../shared/auto-review";
 import { reviewCandidate, reviewFingerprint, reviewedTarget } from "./auto-review-policy";
@@ -1382,12 +1382,11 @@ async function routeRequest(input: unknown): Promise<unknown> {
       return requestNative(request.type === "AUTH_LOGOUT" ? "auth.logout" : "data.deleteAll");
     case "AUTO_REVIEW_READ": return reviewCapabilitiesSchema.parse(await requestNative("approval.capabilities"));
     case "MEMORY_READ": {
-      const capability = await requestNative("memory.capabilities").catch((cause: unknown) => { throw new Error("Memory requires the updated companion. Reinstall it, reload Browser Control, and retry.", { cause }); }) as { version?: number };
-      if (capability?.version !== 1) throw new Error("Update the companion to use memory.");
+      const capability = await requestNative("memory.capabilities").catch((cause: unknown) => { throw new Error("Memory requires the updated companion. Reinstall it, reload Browser Control, and retry.", { cause }); }) as { version?: number; automaticChanges?: number };
+      if (capability?.version !== 1 || capability.automaticChanges !== 2) throw new Error("Update the companion to use memory.");
       return memoryStateSchema.parse(await requestNative("memory.read"));
     }
     case "MEMORY_WRITE": return memoryStateSchema.parse(await requestNative("memory.write", request.change));
-    case "MEMORY_DECIDE": return memoryDecisionResultSchema.parse(await requestNative("memory.decide", request.decision));
     case "CHAT_SETTINGS_READ": return chatSettingsSchema.parse(await requestNative("chat.settingsRead"));
     case "CHAT_SETTINGS_WRITE": return chatSettingsSchema.parse(await requestNative("chat.settingsWrite", request.settings));
     case "MODELS_READ": return modelsResponseSchema.parse(await requestNative("models.list"));
@@ -1408,7 +1407,14 @@ async function routeRequest(input: unknown): Promise<unknown> {
     }
     case "CONVERSATION_SAVE": return saveConversationSnapshot(request.snapshot);
     case "CONVERSATION_CLEAR": return clearConversationStore();
-    case "CHAT_START": return threadResponseSchema.parse(await requestNative("chat.start", { model: request.model, memoryVersion: request.memoryVersion, memoryEnabled: request.memoryEnabled }));
+    case "CHAT_START": {
+      if (request.incognito) {
+        const capability = await requestNative("memory.capabilities") as { incognito?: boolean };
+        if (capability?.incognito !== true) throw new Error("Update the companion before starting an incognito chat.");
+      }
+      return threadResponseSchema.parse(await requestNative("chat.start", { model: request.model, memoryVersion: request.memoryVersion, memoryEnabled: request.memoryEnabled, incognito: request.incognito }));
+    }
+    case "CHAT_DISCARD": return requestNative("chat.discard", { threadId: request.threadId });
     case "CHAT_RESUME": return threadResponseSchema.parse(await requestNative("chat.resume", { threadId: request.threadId, model: request.model, memoryVersion: request.memoryVersion }));
     case "CHAT_FORK": {
       const result = threadIdResponseSchema.parse(await requestNative("chat.fork", {

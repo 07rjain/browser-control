@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -67,7 +67,7 @@ export async function probeChatSettings(codexBinary) {
     request.on("end", () => {
       const body = JSON.parse(raw); bodies.push(body);
       if (offerMemory && !body.input.some((item) => item.type === "function_call_output" && item.call_id === "call-memory-probe")) {
-        streamResponse(response, { id: "fc_memory_probe", type: "function_call", namespace: "memory", name: "propose_change", call_id: "call-memory-probe", arguments: JSON.stringify({ operation: "add", kind: "fact", text: "Favorite animal: otter", evidence: "favorite animal is an otter" }) }, body.model);
+        streamResponse(response, { id: "fc_memory_probe", type: "function_call", namespace: "memory", name: "update", call_id: "call-memory-probe", arguments: JSON.stringify({ operation: "add", kind: "fact", text: "Favorite animal: otter", evidence: "favorite animal is an otter" }) }, body.model);
         return;
       }
       if (offerRecording && !body.input.some((item) => item.type === "function_call_output" && item.call_id === offerCallId)) {
@@ -110,7 +110,10 @@ export async function probeChatSettings(codexBinary) {
       assert.equal(userParts.split("STRUCTURED_PAGE_PROBE").length - 1, 1, "Current companions must include the structured page exactly once");
       assert.ok(!userParts.includes("LEGACY_FALLBACK_MUST_NOT_DUPLICATE_CONTEXT"), "Current companions must ignore the compatibility text copy");
       const developerText = body.input.filter((item) => item.type === "message" && item.role === "developer").flatMap((item) => item.content.map((part) => part.text));
-      assert.ok(developerText.includes(prompt), "Codex must receive the saved prompt verbatim as instructions");
+      // Newer Codex versions preserve the source message on forks and append an
+      // explicit replacement. Verify exact prompt bytes in either wire form.
+      const replacement = `<model_instructions>\nThe following instructions replace the previous base instructions:\n\n${prompt}\n</model_instructions>`;
+      assert.ok(developerText.includes(prompt) || developerText.includes(replacement), "Codex must receive the saved prompt verbatim, directly or in its replacement-instructions message");
       assert.equal(body.model, "gpt-6.1-sol");
       assert.match(JSON.stringify(body.input), /Do not access local files/);
       assert.match(developerText.join("\n"), /When the user explicitly asks to create, teach, or record a browser skill/);
@@ -147,29 +150,33 @@ export async function probeChatSettings(codexBinary) {
     let memory = await client.request("memory.read");
     memory = await client.request("memory.write", { operation: "settings", identity: memory.identity, revision: memory.revision, enabled: true });
     await client.request("memory.write", { operation: "add", identity: memory.identity, revision: memory.revision, kind: "preference", text: "Prefer concise answers", pinned: true, expiresAt: null });
-    const memoryChat = await client.request("chat.start", { model: "gpt-6.1-sol", memoryVersion: 1, memoryEnabled: true });
+    const memoryChat = await client.request("chat.start", { model: "gpt-6.1-sol", memoryVersion: 2, memoryEnabled: true });
     offerMemory = true;
-    const memoryTurn = await client.request("chat.send", { threadId: memoryChat.threadId, memoryVersion: 1, clientMessageId: randomUUID(), userText: "Remember my favorite animal is an otter" });
+    const memoryTurn = await client.request("chat.send", { threadId: memoryChat.threadId, memoryVersion: 2, clientMessageId: randomUUID(), userText: "Remember my favorite animal is an otter" });
     assert.equal((await client.finished(memoryTurn.turnId)).status, "completed");
-    const proposal = client.events.find((event) => event.event === "memory.proposed")?.data;
-    assert.ok(proposal, "A real Codex dynamic call must reach the host memory tool");
-    assert.match(JSON.stringify(bodies.at(-1).input), /Prefer concise answers/);
-    assert.match(JSON.stringify(bodies.at(-1).input.find((item) => item.type === "function_call_output" && item.call_id === "call-memory-probe")), /saved.*false/);
-    assert.equal((await client.request("memory.read")).records.length, 1);
-    await client.request("memory.decide", { id: proposal.id, threadId: memoryChat.threadId, approved: true });
+    assert.ok(client.events.some((event) => event.event === "memory.changed"), "A real Codex dynamic update must reach the local store");
+    assert.equal(client.events.some((event) => event.event === "memory.proposed"), false);
+    assert.match(JSON.stringify(bodies.at(-1).input.find((item) => item.type === "function_call_output" && item.call_id === "call-memory-probe")), /saved.*true/);
     assert.equal((await client.request("memory.read")).records.length, 2);
     offerMemory = false;
-    const disabledChat = await client.request("chat.start", { model: "gpt-6.1-sol", memoryVersion: 1, memoryEnabled: true });
+    const incognito = await client.request("chat.start", { model: "gpt-6.1-sol", memoryVersion: 2, memoryEnabled: true, incognito: true });
+    const privateTurn = await client.request("chat.send", { threadId: incognito.threadId, memoryVersion: 2, clientMessageId: randomUUID(), userText: "Temporary synthetic chat" });
+    assert.equal((await client.finished(privateTurn.turnId)).status, "completed");
+    assert.doesNotMatch(JSON.stringify(bodies.at(-1).input), /Prefer concise answers|Favorite animal: otter/);
+    assert.equal((bodies.at(-1).tools ?? []).some(tool => tool.name === "memory" || tool.namespace === "memory"), false);
+    assert.equal(readdirSync(home, { recursive: true }).some(name => typeof name === "string" && name.endsWith(".jsonl") && name.includes(incognito.threadId)), false, "Incognito must not create a persisted Codex rollout");
+    await client.request("chat.discard", { threadId: incognito.threadId });
+    const disabledChat = await client.request("chat.start", { model: "gpt-6.1-sol", memoryVersion: 2, memoryEnabled: true });
     const beforeDisable = await client.request("memory.read");
     await client.request("memory.write", { operation: "settings", identity: beforeDisable.identity, revision: beforeDisable.revision, enabled: false });
-    const disabledTurn = await client.request("chat.send", { threadId: disabledChat.threadId, memoryVersion: 1, clientMessageId: randomUUID(), userText: "Reply exactly: memory disabled." });
+    const disabledTurn = await client.request("chat.send", { threadId: disabledChat.threadId, memoryVersion: 2, clientMessageId: randomUUID(), userText: "Reply exactly: memory disabled." });
     assert.equal((await client.finished(disabledTurn.turnId)).status, "completed");
     assert.doesNotMatch(JSON.stringify(bodies.at(-1).input), /Prefer concise answers/);
     await client.request("data.deleteAll");
     assert.equal(existsSync(join(home, "chat-settings.json")), false);
     assert.equal(existsSync(join(home, "memory.json")), false);
     assert.deepEqual(await client.request("chat.settingsRead"), defaults);
-    return { newChat: true, existingChatPreserved: true, restart: true, fork: true, reset: true, invalidPrompts: true, deleteAll: true, modelRecordingOffer: true, memoryProtocol: true, requests: bodies.length };
+    return { newChat: true, existingChatPreserved: true, restart: true, fork: true, reset: true, invalidPrompts: true, deleteAll: true, modelRecordingOffer: true, memoryProtocol: true, incognito: true, requests: bodies.length };
   } finally {
     await client?.close();
     provider.closeAllConnections();

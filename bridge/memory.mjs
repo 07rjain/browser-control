@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -36,7 +36,11 @@ export function createMemoryStore(root) {
     if (!existsSync(path)) return null;
     const state = JSON.parse(readFileSync(path, "utf8"));
     if (state.version !== 1 || !uuid(state.identity) || !Number.isSafeInteger(state.revision) || state.revision < 0 || typeof state.enabled !== "boolean" || !Array.isArray(state.records) || state.records.length > MEMORY_CONFIG.maxRecords || !Array.isArray(state.threads) || state.threads.length > 256 || !Array.isArray(state.proposals) || state.proposals.length > 20) throw new Error("Unsupported or corrupt memory store. Chat remains available.");
-    state.records.forEach(entry);
+    state.records.forEach((record) => { entry(record); record.expiresAt = null; });
+    // Version 1 stores remain readable. Expiry and pending review cards are
+    // retired; a stale card must never authorize an automatic change.
+    state.changes ??= [];
+    if (!Array.isArray(state.changes) || state.changes.length > 40 || state.changes.some((change) => !change || typeof change.key !== "string" || typeof change.request !== "string" || !change.result || change.result.saved !== true)) throw new Error("Invalid memory change receipts.");
     if (new Set(state.records.map((item) => item.id)).size !== state.records.length) throw new Error("Duplicate memory identity.");
     for (const thread of state.threads) { text(thread.id); if (typeof thread.enabled !== "boolean") throw new Error("Invalid memory chat mode."); }
     for (const proposal of state.proposals) {
@@ -45,9 +49,10 @@ export function createMemoryStore(root) {
       if (proposal.operation !== "delete") { text(proposal.text); text(proposal.evidence); if (!["preference", "fact"].includes(proposal.kind)) throw new Error("Invalid memory kind."); }
       if (proposal.operation !== "add" && !uuid(proposal.recordId)) throw new Error("Invalid memory target.");
     }
+    state.proposals = [];
     return state;
   }
-  async function transaction(update, initialize = false) {
+  async function transaction(update, initialize = false, assertActive = () => {}) {
     const deadline = Date.now() + 2000;
     check();
     while (true) {
@@ -71,6 +76,7 @@ export function createMemoryStore(root) {
       const previousRevision = previous?.revision;
       const state = previous ?? (initialize ? fresh() : null);
       if (!state) throw new Error("Memory was reset. Reopen Memory settings before making changes.");
+      assertActive();
       const result = update(state);
       const bytes = JSON.stringify(state);
       if (Buffer.byteLength(bytes) > MEMORY_CONFIG.maxFileBytes) throw new Error("Memory storage is full. Remove records before saving more.");
@@ -82,6 +88,7 @@ export function createMemoryStore(root) {
           check();
           const current = load();
           if (!ownsLock() || current?.identity !== previousIdentity || current?.revision !== previousRevision) throw new Error("Memory was reset or changed while saving. Refresh before retrying.");
+          assertActive();
           renameSync(temporary, path); break;
         }
         catch (error) { if (attempt >= 4 || !["EBUSY", "EPERM", "EACCES"].includes(error.code)) throw error; await wait(50); }
@@ -97,10 +104,10 @@ export function createMemoryStore(root) {
   }
   function invalidate(state) { state.revision++; state.proposals = []; }
   function assertRevision(state, request) {
-    if (request.identity !== state.identity || request.revision !== state.revision) throw new Error("Memory changed. Refresh and review the current version before saving.");
+    if (request.identity !== state.identity || request.revision !== state.revision) throw new Error("Memory changed. The latest version has been loaded; review your edit and save again.");
   }
   function participating(state, threadId) { return Boolean(state?.enabled && state.threads.some((item) => item.id === threadId && item.enabled)); }
-  function activeRecords(state) { return state.records.filter((item) => item.expiresAt === null || item.expiresAt > Date.now()); }
+  function activeRecords(state) { return state.records; }
   function apply(state, request, source) {
     if (request.operation === "clear") state.records = [];
     else if (request.operation === "delete") {
@@ -115,7 +122,7 @@ export function createMemoryStore(root) {
       const duplicate = state.records.find((item) => item.text.toLowerCase().trim() === request.text.toLowerCase().trim() && item.id !== existing?.id);
       if (duplicate) throw new Error("That memory is already saved. Edit the existing record instead.");
       if (!existing && state.records.length >= MEMORY_CONFIG.maxRecords) throw new Error("Memory is full (200 records). Delete a record before adding another.");
-      const next = entry({ id: existing?.id ?? randomUUID(), kind: request.kind, text: request.text, pinned: request.pinned, createdAt: existing?.createdAt ?? Date.now(), updatedAt: Date.now(), expiresAt: request.expiresAt, source });
+      const next = entry({ id: existing?.id ?? randomUUID(), kind: request.kind, text: request.text, pinned: request.pinned, createdAt: existing?.createdAt ?? Date.now(), updatedAt: Date.now(), expiresAt: null, source });
       state.records = [...state.records.filter((item) => item.id !== next.id), next];
     }
     invalidate(state);
@@ -162,41 +169,32 @@ export function createMemoryStore(root) {
       if (!words.length) return [];
       return activeRecords(state).map((record) => ({ record, score: words.filter((word) => record.text.normalize("NFKC").toLowerCase().includes(word)).length })).filter((item) => item.score).sort((a, b) => b.score - a.score || b.record.updatedAt - a.record.updatedAt).slice(0, 5).map(({ record }) => ({ ...record, source: { type: record.source.type }, pinned: record.pinned }));
     },
-    async propose(params, args, source) {
+    async change(params, args, source, assertActive) {
       fields(args, ["operation", "recordId", "kind", "text", "evidence"]);
       if (!["add", "replace", "delete"].includes(args.operation)) throw new Error("Choose add, replace or delete.");
       if (args.operation === "add" && args.recordId !== undefined) throw new Error("Use replace to change an existing memory.");
-      if (args.operation === "delete" && Object.keys(args).some((key) => !["operation", "recordId"].includes(key))) throw new Error("Delete accepts only operation and recordId; its preview uses the exact saved record.");
-      if (args.operation !== "delete") { text(args.evidence); if (!source.text.includes(args.evidence)) throw new Error("Evidence must quote the current user's message, not a page or model response."); text(args.text); if (!["preference", "fact"].includes(args.kind)) throw new Error("Invalid memory kind."); }
+      if (args.operation === "delete" && Object.keys(args).some((key) => !["operation", "recordId", "evidence"].includes(key))) throw new Error("Delete accepts only operation, recordId and user evidence.");
+      text(args.evidence);
+      if (!source.text.includes(args.evidence)) throw new Error("Evidence must quote the current user's message, not a page or model response.");
+      if (args.operation !== "delete") { text(args.text); if (!["preference", "fact"].includes(args.kind)) throw new Error("Invalid memory kind."); }
+      const key = JSON.stringify([params.threadId, params.turnId, params.callId]);
+      const request = createHash("sha256").update(JSON.stringify([args.operation, args.recordId, args.kind, args.text, args.evidence])).digest("hex");
       return transaction((state) => {
         if (!participating(state, params.threadId)) throw new Error("Memory is off for this chat.");
+        const duplicate = state.changes.find((item) => item.key === key);
+        if (duplicate) {
+          if (duplicate.request !== request) throw new Error("This memory call already saved a different change.");
+          return { ...duplicate.result, identity: state.identity, revision: state.revision };
+        }
         assertRevision(state, source);
-        const duplicate = state.proposals.find((item) => item.callId === params.callId && item.threadId === params.threadId && item.turnId === params.turnId);
-        if (duplicate) return duplicate;
         const record = state.records.find((item) => item.id === args.recordId);
         if (args.operation !== "add" && !record) throw new Error("Search for the exact memory to change first.");
-        state.proposals = state.proposals.filter((item) => Date.now() - item.createdAt < MEMORY_CONFIG.proposalLifetimeMs).slice(-19);
-        const proposal = { id: randomUUID(), identity: state.identity, revision: state.revision, operation: args.operation, recordId: record?.id, previousText: record?.text, kind: args.kind ?? record?.kind, text: args.text ?? record?.text, evidence: args.evidence ?? "", threadId: params.threadId, turnId: params.turnId, callId: params.callId, messageId: source.id, createdAt: Date.now(), status: "pending" };
-        state.proposals.push(proposal);
-        return proposal;
-      });
-    },
-    async decide(request) {
-      fields(request, ["id", "threadId", "approved"]);
-      if (!uuid(request.id) || typeof request.approved !== "boolean") throw new Error("Invalid memory decision.");
-      return transaction((state) => {
-        const proposal = state.proposals.find((item) => item.id === request.id && item.threadId === request.threadId);
-        if (!request.approved) { if (proposal) proposal.status = "dismissed"; return { status: "dismissed" }; }
-        if (!proposal || Date.now() - proposal.createdAt >= MEMORY_CONFIG.proposalLifetimeMs) throw new Error("This memory proposal expired. Ask again or use Settings.");
-        if (proposal.status !== "pending") return { status: proposal.status };
-        assertRevision(state, proposal);
-        if (!participating(state, proposal.threadId)) throw new Error("Memory is off for this chat.");
-        const existing = state.records.find((item) => item.id === proposal.recordId);
-        if (proposal.operation !== "add" && (!existing || existing.text !== proposal.previousText)) throw new Error("The target memory changed. Request a fresh preview.");
-        apply(state, { ...proposal, pinned: existing?.pinned ?? false, expiresAt: existing?.expiresAt ?? null }, { type: "user-message", threadId: proposal.threadId, messageId: proposal.messageId, evidence: proposal.evidence || "User confirmed deletion" });
-        state.proposals.push({ ...proposal, status: "saved" });
-        return { status: "saved" };
-      });
+        apply(state, { ...args, pinned: record?.pinned ?? false, expiresAt: null }, { type: "user-message", threadId: params.threadId, messageId: source.id, evidence: args.evidence });
+        const savedRecord = args.operation === "delete" ? null : state.records.find((item) => item.id === record?.id || (!record && item.text === args.text));
+        const result = { saved: true, operation: args.operation, recordId: savedRecord?.id ?? record.id };
+        state.changes = [...state.changes, { key, request, result }].slice(-40);
+        return { ...result, identity: state.identity, revision: state.revision };
+      }, false, assertActive);
     },
     cancel(threadId, turnId) {
       if (!existsSync(path)) return Promise.resolve();
