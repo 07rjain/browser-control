@@ -387,7 +387,8 @@ describe("sidebar interactions", () => {
     expect(within(screen.getByRole("listbox", { name: "Models" })).getAllByRole("option").map((option) => option.textContent)).toEqual(["Alpha · Default"]);
     cleanup();
     await ready();
-    fireEvent.click(screen.getByRole("button", { name: /^Model,/ }));
+    // Account readiness precedes the separate model catalog response.
+    fireEvent.click(await screen.findByRole("button", { name: "Model, Alpha" }));
     expect(screen.queryByRole("option", { name: "Beta" })).toBeNull();
     expect(screen.getAllByRole("option")).toHaveLength(1);
   });
