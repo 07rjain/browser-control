@@ -5,6 +5,7 @@ const tabs = [
   { id: "models", label: "Models" },
   { id: "agent", label: "Agent" },
   { id: "skills", label: "Skills" },
+  { id: "memory", label: "Memory" },
   { id: "account", label: "Account" },
 ] as const;
 type Section = typeof tabs[number]["id"];

@@ -111,6 +111,7 @@ export const CODEX_THREAD_RESTRICTIONS = Object.freeze({
     "features.computer_use": false,
     "features.tool_suggest": false,
     "features.hooks": false,
+    "features.memories": false,
   }),
 });
 

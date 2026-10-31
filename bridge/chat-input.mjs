@@ -3,7 +3,7 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync
 import { join } from "node:path";
 import { checkedId } from "./uploads.mjs";
 
-export function createChatInputService(root, uploads, { startTurn, interrupt, assertRestricted }) {
+export function createChatInputService(root, uploads, { startTurn, interrupt, assertRestricted, prepareInput = (_params, input) => input }) {
   const pending = new Map();
   let closed = false;
   function initialize() { mkdirSync(root, { recursive: true, mode: 0o700 }); if (lstatSync(root).isSymbolicLink()) throw new Error("Invalid send registry."); }
@@ -35,7 +35,7 @@ export function createChatInputService(root, uploads, { startTurn, interrupt, as
     if (closed) throw new Error("Chat preparation has stopped.");
     const id = checkedId(params.clientMessageId);
     if (params.model !== undefined && (typeof params.model !== "string" || params.model.length > 120)) throw new Error("Invalid model.");
-    const hash = createHash("sha256").update(JSON.stringify({ threadId: params.threadId, userText: params.userText ?? params.text, pageContext: params.pageContext, attachments: params.attachments ?? [], model: params.model })).digest("hex");
+    const hash = createHash("sha256").update(JSON.stringify({ threadId: params.threadId, userText: params.userText ?? params.text, pageContext: params.pageContext, attachments: params.attachments ?? [], model: params.model, memoryVersion: params.memoryVersion })).digest("hex");
     const previous = read(id);
     if (previous && (previous.threadId !== params.threadId || (previous.hash && previous.hash !== hash))) throw new Error("This send ID belongs to a different message.");
     if (previous?.status === "accepted") return { turnId: previous.turnId, attachments: previous.attachments, replayed: true };
@@ -45,7 +45,7 @@ export function createChatInputService(root, uploads, { startTurn, interrupt, as
     const run = (async () => {
       const files = uploads.claim(params.attachments ?? [], params.owner, params.threadId);
       try {
-        const input = build(params, files);
+        const input = prepareInput(params, build(params, files));
         save(id, { threadId: params.threadId, hash, status: "starting", bundleIds: files.map((file) => file.id) });
         // A transport failure is uncertain: leave the starting tombstone in
         // place instead of replaying browser work after a lost response.

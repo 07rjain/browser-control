@@ -109,6 +109,16 @@ Use Node.js 24 for development builds and CI. Auto review requires the verified
 Codex CLI **0.162.1**. See the [desktop compatibility review](docs/DESKTOP_COMPATIBILITY.md)
 for the Linux/Windows checks, portability fixes, and remaining desktop validation.
 
+## Local memory (development build)
+
+The confirmed-memory release is implemented locally on `feat/local-memory`. Build and refresh the companion before testing; the Store extension does not gain this UI from a companion update alone. See [memory setup, test steps, and validation status](docs/MEMORY_TESTING.md).
+
+In **Settings → Memory**, enable **Use saved memory**, add a preference or fact, then start a new chat. Participating chats receive a small profile and can use `memory.search`. Explicit remember/correct/forget requests can produce a review card; **Save memory** or **Delete memory** commits the exact change. A model proposal alone writes no saved fact. Settings also supports editing, pinning, expiry, deletion, and **Start a chat without memory**. Automatic learning is not enabled in this release.
+
+Memory lives in the current user's home at `.codex-sidebar/memory.json` on macOS/Linux/Windows. Selected records are sent to the existing Codex model provider when used; the store itself stays on this computer. Disabling retains records and blocks future access. Forgetting removes future saved recall, while existing chat/provider history has separate retention. Delete All Data removes memory. New default prompts and refreshed tool guidance explain memory without overwriting custom prompts. Memory grants no site access or browser approval.
+
+`npm run test:memory` runs dependency-free storage, recall, review, expiry, concurrency, and failure checks without account inference. CI runs it on Node 20/24 on Ubuntu, Windows, and macOS. A persistent **Memory storage is busy** error after a host crash needs manual recovery: close all browsers/companion instances, confirm the owner PID in `.codex-sidebar/memory.lock/owner.json` is no longer running, then remove only that inactive `memory.lock` directory and reopen. Keep `memory.json`. Do not remove a live writer's lock. Corrupt stores are preserved for recovery rather than silently replaced.
+
 ## Setup
 
 ```sh

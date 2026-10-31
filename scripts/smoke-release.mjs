@@ -48,6 +48,14 @@ try {
   });
   // No account or model request: exercise the extracted companion, its import
   // graph, prompt persistence and binary native-message transfer directly.
+  assert.equal((await request("memory.capabilities")).version, 1);
+  let memory = await request("memory.read");
+  memory = await request("memory.write", { operation: "settings", identity: memory.identity, revision: memory.revision, enabled: true });
+  memory = await request("memory.write", { operation: "add", identity: memory.identity, revision: memory.revision, kind: "preference", text: "Package memory: café\r\n🦦", pinned: false, expiresAt: null });
+  assert.equal((await request("memory.read")).records[0].text, "Package memory: café\r\n🦦");
+  assert.equal(JSON.parse(readFileSync(join(home, "memory.json"), "utf8")).records[0].text, "Package memory: café\r\n🦦");
+  await request("memory.write", { operation: "delete", identity: memory.identity, revision: memory.revision, recordId: memory.records[0].id });
+  assert.equal((await request("memory.read")).records.length, 0);
   const defaults = await request("chat.settingsRead");
   assert.match(defaults.systemPrompt, /^You are Browser Control/);
   const prompt = "  Preserve these exact bytes.\r\nUnicode: café.  ";
@@ -63,7 +71,7 @@ try {
   assert.deepEqual(Buffer.from(result.data, "base64"), bytes);
   await request("attachments.request", { operation: "abort", owner });
   assert.deepEqual(readdirSync(join(home, "uploads")).filter((entry) => !entry.startsWith("aborted-")), []);
-  process.stdout.write(`Packaged companion passed on ${process.platform}: native imports, prompt bytes, image transfer and cancellation; no account inference.\n`);
+  process.stdout.write(`Packaged companion passed on ${process.platform}: native imports, memory CRUD, prompt bytes, image transfer and cancellation; no account inference.\n`);
 } finally {
   if (child) await stopProbeProcess(child);
   for (const waiter of pending.values()) waiter.reject(new Error("Package probe finished."));

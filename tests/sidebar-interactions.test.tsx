@@ -41,6 +41,7 @@ beforeEach(() => {
             data = { version: 1, systemPrompt: chatPrompt }; break;
           }
           case "MODELS_READ": data = { models: [{ id: "alpha", name: "Alpha", isDefault: true }, { id: "beta", name: "Beta", isDefault: false }] }; break;
+          case "MEMORY_DECIDE": data = { status: (request.decision as { approved: boolean }).approved ? "saved" : "dismissed" }; break;
           case "RECORDING_READ": data = { status: "idle" }; break;
           case "RECORDING_START": data = { status: "recording", name: "Taught skill", description: request.description, notes: "", notice: "", steps: [], pendingOrigin: "", pendingOriginPattern: "", preview: "", previewError: "", truncated: false }; break;
           case "CHAT_START": case "CHAT_RESUME": data = { threadId: "thread-teach", model: "alpha" }; break;
@@ -454,4 +455,28 @@ describe("sidebar interactions", () => {
     await act(async () => vi.advanceTimersByTime(1));
     expect(screen.queryByText("Recent task complete")).toBeNull();
   });
+});
+
+
+it("shows a model-owned memory card only after the answer finishes and waits for the host acknowledgement before showing saved", async () => {
+  await ready();
+  fireEvent.change(screen.getByRole("textbox", { name: "Message Browser Control" }), { target: { value: "Remember my favorite animal is an otter" } });
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Send message" })));
+  const proposal = {
+    id: "11111111-1111-4111-8111-111111111111", identity: "22222222-2222-4222-8222-222222222222", revision: 1,
+    operation: "add", kind: "fact", text: "Favorite animal: otter", evidence: "favorite animal is an otter",
+    threadId: "thread-teach", turnId: "turn-teach", callId: "memory-call", messageId: "user-source", createdAt: Date.now(), status: "pending",
+  };
+  act(() => {
+    emit("chat.delta", { turnId: "turn-teach", delta: "Review the memory below. Nothing has been saved yet." });
+    emit("memory.proposed", proposal);
+  });
+  expect(screen.queryByRole("button", { name: "Save memory" })).toBeNull();
+  act(() => emit("chat.turnCompleted", { turn: { id: "turn-teach", status: "completed" } }));
+  const save = screen.getByRole("button", { name: "Save memory" });
+  expect(save.compareDocumentPosition(screen.getByRole("button", { name: /Copy/ })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(requests.filter(request => request.type === "MEMORY_DECIDE")).toHaveLength(0);
+  await act(async () => fireEvent.click(save));
+  expect(requests.find(request => request.type === "MEMORY_DECIDE")).toMatchObject({ decision: { id: proposal.id, threadId: "thread-teach", approved: true } });
+  expect(screen.getByText("Memory change saved.")).toBeTruthy();
 });

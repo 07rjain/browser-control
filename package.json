@@ -12,6 +12,7 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:memory": "node scripts/smoke-memory.mjs",
     "test:bridge": "node scripts/smoke-native-host.mjs",
     "test:reviewer": "node scripts/probe-auto-review.mjs",
     "test:installed-host": "node scripts/smoke-installed-host.mjs",

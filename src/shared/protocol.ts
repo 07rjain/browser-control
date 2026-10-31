@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { conversationSnapshotSchema } from "./conversation-state";
 import { attachmentOperationSchema } from "./attachments";
+import { memoryWriteSchema, memoryDecisionSchema } from "./memory";
 import { chatSettingsSchema } from "./chat-settings";
 
 export const pageAttachmentSchema = z.object({
@@ -36,18 +37,23 @@ export const uiRequestSchema = z.discriminatedUnion("type", [
   requestBase.extend({ type: z.literal("DELETE_ALL_LOCAL_DATA") }),
   requestBase.extend({ type: z.literal("MODELS_READ") }),
   requestBase.extend({ type: z.literal("AUTO_REVIEW_READ") }),
+  requestBase.extend({ type: z.literal("MEMORY_READ") }),
+  requestBase.extend({ type: z.literal("MEMORY_WRITE"), change: memoryWriteSchema }),
+  requestBase.extend({ type: z.literal("MEMORY_DECIDE"), decision: memoryDecisionSchema }),
   requestBase.extend({ type: z.literal("CHAT_SETTINGS_READ") }),
   requestBase.extend({ type: z.literal("CHAT_SETTINGS_WRITE"), settings: chatSettingsSchema }),
   requestBase.extend({ type: z.literal("ATTACHMENTS_REQUEST"), request: attachmentOperationSchema }),
-  requestBase.extend({ type: z.literal("CHAT_START"), model: z.string().min(1).max(120).optional() }),
-  requestBase.extend({ type: z.literal("CHAT_RESUME"), threadId: z.string().min(1), model: z.string().min(1).max(120).optional() }),
+  requestBase.extend({ type: z.literal("CHAT_START"), memoryVersion: z.literal(1).optional(), memoryEnabled: z.boolean().optional(), model: z.string().min(1).max(120).optional() }),
+  requestBase.extend({ type: z.literal("CHAT_RESUME"), memoryVersion: z.literal(1).optional(), threadId: z.string().min(1), model: z.string().min(1).max(120).optional() }),
   requestBase.extend({
     type: z.literal("CHAT_FORK"),
+    memoryVersion: z.literal(1).optional(),
     threadId: z.string().min(1),
     lastTurnId: z.string().min(1),
   }),
   requestBase.extend({
     type: z.literal("CHAT_SEND"),
+    memoryVersion: z.literal(1).optional(),
     threadId: z.string().min(1),
     text: z.string().max(80_000),
     pageContext: pageAttachmentSchema.optional(),

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { attachmentSummarySchema } from "./attachments";
+import { memoryProposalSchema } from "./memory";
 import { skillRecordingOfferSchema } from "./skill-offer";
 
 export const SIDEBAR_STATE_STORAGE_KEY = "codexSidebarState";
@@ -12,6 +13,7 @@ const storedMessageSchema = z.object({
   streaming: z.boolean().optional(),
   failed: z.boolean().optional(),
   recordingOffer: skillRecordingOfferSchema.optional(),
+  memoryProposals: z.array(memoryProposalSchema).max(20).optional(),
   attachments: z.array(attachmentSummarySchema).max(5).optional(),
 });
 
@@ -19,6 +21,7 @@ const storedConversationSchema = z.object({
   id: z.string().min(1).max(200),
   threadId: z.string().min(1).max(500).nullable(),
   title: z.string().max(120),
+  memoryFree: z.boolean().optional(),
   messages: z.array(storedMessageSchema).max(100),
   toolStatuses: z.array(z.unknown()).max(100),
   updatedAt: z.number(),
@@ -26,6 +29,7 @@ const storedConversationSchema = z.object({
 
 export const conversationSnapshotSchema = z.object({
   savedAt: z.number(),
+  memoryFree: z.boolean().optional(),
   threadId: z.string().min(1).max(500).nullable(),
   currentConversationId: z.string().min(1).max(200),
   messages: z.array(storedMessageSchema).max(100),
@@ -105,6 +109,7 @@ export function readStoredSidebarState(value: unknown): ConversationSnapshot | n
     : "system";
   return {
     savedAt: typeof record.savedAt === "number" && Number.isFinite(record.savedAt) ? record.savedAt : 0,
+    memoryFree: record.memoryFree === true,
     threadId: typeof record.threadId === "string" && record.threadId.length > 0 ? record.threadId.slice(0, 500) : null,
     currentConversationId,
     messages,
@@ -135,6 +140,7 @@ export function mergeSidebarState(
 
   return {
     savedAt: Math.max(stored?.savedAt ?? 0, incoming.savedAt),
+    memoryFree: keepStoredTranscript ? stored?.memoryFree === true : incoming.memoryFree === true,
     threadId: keepStoredTranscript ? stored?.threadId ?? null : incoming.threadId,
     currentConversationId: keepStoredTranscript ? storedId : incoming.currentConversationId,
     messages: keepStoredTranscript ? storedMessages : incoming.messages,

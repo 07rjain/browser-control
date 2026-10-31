@@ -28,6 +28,9 @@ import { checkCanceled, preparePdf, releasePreparedFile } from "./attachments/pr
 import { uploadPreparedFiles, type AttachmentTransport } from "./attachments/transfer";
 import { FileCards, SentFiles } from "./attachments/FileCards";
 import ChatPromptSettings from "./ChatPromptSettings";
+import MemorySettings from "./MemorySettings";
+import MemoryProposalCards from "./MemoryProposalCards";
+import { memoryProposalSchema, type MemoryProposal, type MemoryWrite } from "../shared/memory";
 import SettingsPanel from "./SettingsPanel";
 import { COMPLETION_NOTICE_DURATION_MS, freshCompletionNotice, type CompletionNotice } from "../shared/completion-notice";
 import { greetingFor, selectedModelLabel, setupSteps, STARTER_TASKS, type AuthState, type StarterTask } from "./welcome";
@@ -74,6 +77,7 @@ interface ToolPermission {
 }
 
 interface PersistedState {
+  memoryFree?: boolean;
   threadId: string | null;
   messages: ChatMessage[];
   theme: Theme;
@@ -319,6 +323,7 @@ export default function App() {
   const accountCheckGeneration = useRef(0);
   const [account, setAccount] = useState<Account | null>(null);
   const [login, setLogin] = useState<LoginDetails | null>(null);
+  const [memoryFree, setMemoryFree] = useState(false);
   const [threadId, setThreadId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
@@ -459,6 +464,7 @@ export default function App() {
         const useHistoryTranscript = messageTextSize(historyMessages) > messageTextSize(stateMessages);
         const restoredMessages = useHistoryTranscript ? historyMessages : stateMessages;
         const restoredThreadId = useHistoryTranscript ? historyRecord?.threadId ?? state.threadId : state.threadId;
+        setMemoryFree(useHistoryTranscript ? historyRecord?.memoryFree === true : state.memoryFree === true);
         setThreadId(restoredThreadId);
         setMessages(restoredMessages);
         setCurrentConversationId(restoredConversationId);
@@ -470,6 +476,7 @@ export default function App() {
             restoredMessages,
             useHistoryTranscript ? historyRecord?.toolStatuses ?? [] : [],
             historyRecord?.updatedAt ?? Date.now(),
+            useHistoryTranscript ? historyRecord?.memoryFree === true : state.memoryFree === true,
           ),
         ));
         setTheme(state.theme ?? "system");
@@ -570,10 +577,13 @@ export default function App() {
       threadId,
       messages,
       toolStatuses,
+      Date.now(),
+      memoryFree,
     );
     const retainedHistory = upsertConversation(conversationHistory, currentConversation);
     const snapshot: ConversationSnapshot = {
       savedAt: Date.now(),
+      memoryFree,
       threadId,
       currentConversationId,
       messages: currentConversation.messages,
@@ -599,7 +609,7 @@ export default function App() {
       conversationSaveTimer.current = null;
       deliverConversationSnapshot(snapshot, epoch);
     }, CONVERSATION_SAVE_DELAY_MS);
-  }, [completionSoundEnabled, conversationHistory, currentConversationId, deliverConversationSnapshot, hydrated, messages, selectedModel, theme, threadId, toolStatuses]);
+  }, [completionSoundEnabled, conversationHistory, currentConversationId, deliverConversationSnapshot, hydrated, messages, selectedModel, theme, threadId, toolStatuses, memoryFree]);
 
   useEffect(() => {
     const flushConversationSnapshot = () => {
@@ -692,6 +702,21 @@ export default function App() {
             setRecordingError(null);
           }
           break;
+        case "memory.notice": {
+          const data = message.data as { threadId?: string; message?: string };
+          if (data.threadId === inFlightPayloadRef.current?.threadId && typeof data.message === "string") showCompletionNotice(data.message);
+          break;
+        }
+        case "memory.proposed": {
+          const parsed = memoryProposalSchema.safeParse(message.data);
+          if (!parsed.success || stopRequestedRef.current) break;
+          const proposal = parsed.data;
+          if (inFlightPayloadRef.current?.threadId !== proposal.threadId || (activeTurnIdentityRef.current && activeTurnIdentityRef.current !== proposal.turnId)) break;
+          activeTurnIdentityRef.current = proposal.turnId;
+          setMessages((current) => current.map((item) => item.role === "assistant" && (item.id === proposal.turnId || item.streaming)
+            ? { ...item, id: proposal.turnId, memoryProposals: [...(item.memoryProposals ?? []).filter((existing) => existing.id !== proposal.id), proposal].slice(-20) } : item));
+          break;
+        }
         case "skill.recordingOffered": {
           const parsed = skillRecordingOfferEventSchema.safeParse(message.data);
           if (!parsed.success || stopRequestedRef.current) break;
@@ -1101,7 +1126,7 @@ export default function App() {
     let replacedLegacy = false;
     if (threadId) {
       try {
-        const resumed = await sendRequest<{ threadId: string }>({ type: "CHAT_RESUME", threadId, model: selectedModel || undefined });
+        const resumed = await sendRequest<{ threadId: string }>({ type: "CHAT_RESUME", threadId, memoryVersion: 1, model: selectedModel || undefined });
         threadReadyRef.current = true;
         return { threadId: resumed.threadId, replacedLegacy: false };
       } catch (cause) {
@@ -1109,7 +1134,7 @@ export default function App() {
         replacedLegacy = cause instanceof Error && isLegacyThreadError(cause.message);
       }
     }
-    const created = await sendRequest<{ threadId: string }>({ type: "CHAT_START", model: selectedModel || undefined });
+    const created = await sendRequest<{ threadId: string }>({ type: "CHAT_START", memoryVersion: 1, memoryEnabled: !memoryFree, model: selectedModel || undefined });
     setThreadId(created.threadId);
     threadReadyRef.current = true;
     return { threadId: created.threadId, replacedLegacy };
@@ -1151,7 +1176,7 @@ export default function App() {
       if (replacedLegacy) {
         setConversationHistory((current) => upsertConversation(
           current,
-          createConversationRecord(currentConversationId, threadId, settleCanceledMessages(messages), toolStatuses),
+          createConversationRecord(currentConversationId, threadId, settleCanceledMessages(messages), toolStatuses, undefined, memoryFree),
         ));
         setCurrentConversationId(crypto.randomUUID());
         setMessages([
@@ -1171,6 +1196,7 @@ export default function App() {
       setFileProgress(null);
       const result = await sendRequest<{ turnId: string; attachments?: AttachmentSummary[]; replayed?: boolean }>({
         type: "CHAT_SEND",
+        memoryVersion: 1,
         threadId: activeThreadId,
         text: payload.userText,
         pageContext: payload.pageContext,
@@ -1275,13 +1301,14 @@ export default function App() {
     try {
       const result = await sendRequest<{ threadId: string }>({
         type: "CHAT_FORK",
+        memoryVersion: 1,
         threadId,
         lastTurnId: message.id,
       });
       const forkedMessages = messages.slice(0, messageIndex + 1).map((item) => ({ ...item, streaming: false }));
       const forkedMessageIds = new Set(forkedMessages.map((item) => item.id));
       const forkedStatuses = toolStatuses.filter((status) => status.turnId && forkedMessageIds.has(status.turnId));
-      const original = createConversationRecord(currentConversationId, threadId, messages, toolStatuses);
+      const original = createConversationRecord(currentConversationId, threadId, messages, toolStatuses, undefined, memoryFree);
       setConversationHistory((current) => upsertConversation(current, original));
       setCurrentConversationId(crypto.randomUUID());
       setThreadId(result.threadId);
@@ -1309,7 +1336,7 @@ export default function App() {
     setIsSending(false);
     setError(null);
     setMessages((current) => settleCanceledMessages(current.map((message) => message.streaming || message.id === activeTurnId
-      ? { ...message, recordingOffer: undefined }
+      ? { ...message, recordingOffer: undefined, memoryProposals: undefined }
       : message)));
     setToolApproval(null);
     setToolPermission(null);
@@ -1339,11 +1366,12 @@ export default function App() {
   };
 
   const newChat = () => {
+    setMemoryFree(false);
     preparationRef.current?.abort();
     if (streaming) void stop();
     setConversationHistory((current) => upsertConversation(
       current,
-      createConversationRecord(currentConversationId, threadId, settleCanceledMessages(messages), toolStatuses),
+      createConversationRecord(currentConversationId, threadId, settleCanceledMessages(messages), toolStatuses, undefined, memoryFree),
     ));
     setCompletionNotice(null);
     void sendRequest({ type: "COMPLETION_NOTICE_DISMISS" }).catch(() => undefined);
@@ -1366,9 +1394,10 @@ export default function App() {
     if (streaming) return;
     setConversationHistory((current) => upsertConversation(
       current,
-      createConversationRecord(currentConversationId, threadId, messages, toolStatuses),
+      createConversationRecord(currentConversationId, threadId, messages, toolStatuses, undefined, memoryFree),
     ));
     setCurrentConversationId(conversation.id);
+    setMemoryFree(conversation.memoryFree === true);
     setThreadId(conversation.threadId);
     threadReadyRef.current = false;
     setMessages(conversation.messages.map((message) => ({ ...message, streaming: false })));
@@ -1416,6 +1445,7 @@ export default function App() {
   };
 
   const resetBrowserState = () => {
+    setMemoryFree(false);
     setVisibleModelIds(null);
     conversationPersistSuspended.current = false;
     setThreadId(null);
@@ -1475,6 +1505,12 @@ export default function App() {
     }
   };
 
+  const decideMemory = async (proposal: MemoryProposal, approved: boolean) => {
+    const result = await sendRequest<{ status: "saved" | "dismissed" }>({ type: "MEMORY_DECIDE", decision: { id: proposal.id, threadId: proposal.threadId, approved } });
+    setMessages((current) => current.map((item) => ({ ...item, memoryProposals: item.memoryProposals?.map((value) => value.id === proposal.id ? { ...value, status: result.status } : value) })));
+  };
+  const memoryRequest = useCallback((operation: "read" | "write", change?: MemoryWrite): Promise<unknown> => sendRequest(operation === "read" ? { type: "MEMORY_READ" } : { type: "MEMORY_WRITE", change }), []);
+
   const decideTool = async (approved: boolean) => {
     if (!toolApproval) return;
     const callId = toolApproval.callId;
@@ -1531,8 +1567,8 @@ export default function App() {
   const activitiesByTurn = useMemo(() => groupToolStatuses(toolStatuses), [toolStatuses]);
   const visibleConversationHistory = useMemo(() => upsertConversation(
     conversationHistory,
-    createConversationRecord(currentConversationId, threadId, messages, toolStatuses),
-  ), [conversationHistory, currentConversationId, messages, threadId, toolStatuses]);
+    createConversationRecord(currentConversationId, threadId, messages, toolStatuses, undefined, memoryFree),
+  ), [conversationHistory, currentConversationId, messages, threadId, toolStatuses, memoryFree]);
 
   if (authState !== "ready") {
     return (
@@ -1829,6 +1865,7 @@ export default function App() {
               <p className="menu-hint">Uses your existing Codex sign-in and adds model usage. Reviews receive your request and the proposed action context. Your chat model stays the same. Stop cancels a pending review.</p>
             </details>
             </>,
+            memory: <MemorySettings request={memoryRequest} disabled={streaming || recordingActive} onNewChatWithoutMemory={() => { newChat(); setMemoryFree(true); setMenuOpen(false); }} />,
             skills: <>
               <h3 className="settings-section-title">Taught skills</h3>
             <div className="skill-settings">
@@ -1924,13 +1961,15 @@ export default function App() {
             <p className="home-status rise">
               <span>{permissionMode === "auto" ? "Auto review" : browserPermissionMode === "full" ? "Full access" : "Ask every time"}</span>
               {enabledSkillCount > 0 && <span>{enabledSkillCount === 1 ? "1 taught skill" : `${enabledSkillCount} taught skills`}</span>}
-              <span>Stop any time</span>
+              <span>{memoryFree ? "Chat without memory" : "Stop any time"}</span>
             </p>
           </section>
         ) : (
           messages.map((message) => {
             const offer = skillRecordingOfferSchema.safeParse(message.recordingOffer);
             const showRecordingOffer = message.role === "assistant" && offer.success && ["offered", "opened"].includes(offer.data.state) && !message.streaming && activeTurnId !== message.id;
+            const memoryProposals = Array.isArray(message.memoryProposals) ? message.memoryProposals.flatMap((value) => { const parsed = memoryProposalSchema.safeParse(value); return parsed.success && parsed.data.threadId === threadId ? [parsed.data] : []; }) : [];
+            const showMemoryProposals = Boolean(message.role === "assistant" && memoryProposals.length && !message.streaming && activeTurnId !== message.id && !message.failed);
             const showResponseActions = message.role === "assistant" && Boolean(message.text) && !message.streaming && !message.failed;
             const activity = message.role === "assistant"
               ? activitiesByTurn.get(message.id) ?? (message.streaming && activeTurnId ? activitiesByTurn.get(activeTurnId) : undefined)
@@ -1944,7 +1983,7 @@ export default function App() {
                     complete={!message.streaming && activeTurnId !== message.id}
                   />
                 )}
-                {(message.role === "user" || message.text || message.streaming || showRecordingOffer) && <article className={`message message-${message.role} ${message.failed ? "message-failed" : ""}`}>
+                {(message.role === "user" || message.text || message.streaming || showRecordingOffer || showMemoryProposals) && <article className={`message message-${message.role} ${message.failed ? "message-failed" : ""}`}>
                   <span className="message-role">{message.role === "user" ? "You" : "Browser Control"}</span>
                   {message.role === "assistant" ? (
                     message.text ? (
@@ -1956,6 +1995,7 @@ export default function App() {
                     <p>{message.text}</p>
                   )}
                   {message.role === "user" && message.attachments?.length ? <SentFiles files={message.attachments} threadId={threadId} transport={attachmentTransport} /> : null}
+                  {showMemoryProposals && <MemoryProposalCards proposals={memoryProposals} disabled={streaming || recordingActive} decide={decideMemory} />}
                   {showRecordingOffer && (
                     <div className="message-actions recording-offer-actions" role="group" aria-label="Skill recording">
                       <button type="button" className="record-skill-action" disabled={streaming || recordingActive} data-tooltip={offer.data.reason} aria-description={offer.data.reason} onClick={() => openOfferedRecording(message)}>

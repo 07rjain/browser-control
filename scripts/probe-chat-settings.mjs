@@ -58,6 +58,7 @@ export async function probeChatSettings(codexBinary) {
   const home = mkdtempSync(join(tmpdir(), "codex-sidebar-smoke-chat-settings-"));
   const bodies = [];
   let offerRecording = false;
+  let offerMemory = false;
   const offerCallId = "call-teaching-probe";
   const offer = { reason: "You asked to record a browser skill." };
   const provider = createServer((request, response) => {
@@ -65,6 +66,10 @@ export async function probeChatSettings(codexBinary) {
     request.on("data", (chunk) => { raw += chunk; });
     request.on("end", () => {
       const body = JSON.parse(raw); bodies.push(body);
+      if (offerMemory && !body.input.some((item) => item.type === "function_call_output" && item.call_id === "call-memory-probe")) {
+        streamResponse(response, { id: "fc_memory_probe", type: "function_call", namespace: "memory", name: "propose_change", call_id: "call-memory-probe", arguments: JSON.stringify({ operation: "add", kind: "fact", text: "Favorite animal: otter", evidence: "favorite animal is an otter" }) }, body.model);
+        return;
+      }
       if (offerRecording && !body.input.some((item) => item.type === "function_call_output" && item.call_id === offerCallId)) {
         streamResponse(response, { id: "fc_teaching_probe", type: "function_call", namespace: "skills", name: "offer_recording", call_id: offerCallId, arguments: JSON.stringify(offer) }, body.model);
         return;
@@ -128,10 +133,33 @@ export async function probeChatSettings(codexBinary) {
     assert.deepEqual(offers[0].data, { threadId: reset.threadId, turnId: offeredTurn.turnId, callId: offerCallId, ...offer, description: "" });
     const result = bodies.at(-1).input.find((item) => item.type === "function_call_output" && item.call_id === offerCallId);
     assert.match(JSON.stringify(result), /Record skill button/);
+    offerRecording = false;
+    let memory = await client.request("memory.read");
+    memory = await client.request("memory.write", { operation: "settings", identity: memory.identity, revision: memory.revision, enabled: true });
+    await client.request("memory.write", { operation: "add", identity: memory.identity, revision: memory.revision, kind: "preference", text: "Prefer concise answers", pinned: true, expiresAt: null });
+    const memoryChat = await client.request("chat.start", { model: "gpt-6.1-sol", memoryVersion: 1, memoryEnabled: true });
+    offerMemory = true;
+    const memoryTurn = await client.request("chat.send", { threadId: memoryChat.threadId, memoryVersion: 1, clientMessageId: randomUUID(), userText: "Remember my favorite animal is an otter" });
+    assert.equal((await client.finished(memoryTurn.turnId)).status, "completed");
+    const proposal = client.events.find((event) => event.event === "memory.proposed")?.data;
+    assert.ok(proposal, "A real Codex dynamic call must reach the host memory tool");
+    assert.match(JSON.stringify(bodies.at(-1).input), /Prefer concise answers/);
+    assert.match(JSON.stringify(bodies.at(-1).input.find((item) => item.type === "function_call_output" && item.call_id === "call-memory-probe")), /saved.*false/);
+    assert.equal((await client.request("memory.read")).records.length, 1);
+    await client.request("memory.decide", { id: proposal.id, threadId: memoryChat.threadId, approved: true });
+    assert.equal((await client.request("memory.read")).records.length, 2);
+    offerMemory = false;
+    const disabledChat = await client.request("chat.start", { model: "gpt-6.1-sol", memoryVersion: 1, memoryEnabled: true });
+    const beforeDisable = await client.request("memory.read");
+    await client.request("memory.write", { operation: "settings", identity: beforeDisable.identity, revision: beforeDisable.revision, enabled: false });
+    const disabledTurn = await client.request("chat.send", { threadId: disabledChat.threadId, memoryVersion: 1, clientMessageId: randomUUID(), userText: "Reply exactly: memory disabled." });
+    assert.equal((await client.finished(disabledTurn.turnId)).status, "completed");
+    assert.doesNotMatch(JSON.stringify(bodies.at(-1).input), /Prefer concise answers/);
     await client.request("data.deleteAll");
     assert.equal(existsSync(join(home, "chat-settings.json")), false);
+    assert.equal(existsSync(join(home, "memory.json")), false);
     assert.deepEqual(await client.request("chat.settingsRead"), defaults);
-    return { newChat: true, existingChatPreserved: true, restart: true, fork: true, reset: true, invalidPrompts: true, deleteAll: true, modelRecordingOffer: true, requests: bodies.length };
+    return { newChat: true, existingChatPreserved: true, restart: true, fork: true, reset: true, invalidPrompts: true, deleteAll: true, modelRecordingOffer: true, memoryProtocol: true, requests: bodies.length };
   } finally {
     await client?.close();
     provider.closeAllConnections();

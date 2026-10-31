@@ -4,6 +4,7 @@ import type { ChatMessage } from "./chat-state";
 export interface ConversationRecord {
   id: string;
   threadId: string | null;
+  memoryFree?: boolean;
   title: string;
   messages: ChatMessage[];
   toolStatuses: ToolStatus[];
@@ -42,6 +43,7 @@ export function createConversationRecord(
   messages: ChatMessage[],
   toolStatuses: ToolStatus[],
   updatedAt = Date.now(),
+  memoryFree = false,
 ): ConversationRecord {
   const retainedMessages = messages.slice(-100).map((message) => ({
     ...message,
@@ -53,6 +55,7 @@ export function createConversationRecord(
     id,
     threadId,
     title: conversationTitle(retainedMessages),
+    memoryFree,
     messages: retainedMessages,
     toolStatuses: toolStatuses
       .filter((status) => Boolean(status.turnId) && messageIds.has(status.turnId as string))
@@ -84,6 +87,7 @@ export function readConversationHistory(value: unknown): ConversationRecord[] {
     return [{
       id: record.id,
       threadId: typeof record.threadId === "string" ? record.threadId : null,
+      memoryFree: record.memoryFree === true,
       title: typeof record.title === "string" && record.title.trim()
         ? record.title.slice(0, 80)
         : conversationTitle(messages),
