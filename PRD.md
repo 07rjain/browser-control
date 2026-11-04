@@ -529,3 +529,18 @@ The following require a new or revised PRD and separate security review:
 - Telemetry, billing, organization controls, and managed deployment.
 
 Long-term, the product may become a user-governed bridge between Codex and the browser. That direction must preserve least privilege, explicit approvals, and clear visibility into what context and actions are available.
+
+### Automated release delivery (approved November 2026)
+
+The owner requested GitHub Release-triggered companion distribution and Chrome
+Web Store submission to replace repeated manual uploads. This is maintainer CI,
+not a model/browser tool. Stable published tags must match every package version,
+be reachable from main, and pass all desktop compatibility jobs at the checked
+commit. Publish the matching companion first; preserve immutable source assets;
+submit through official Store API v2 with review required and automatic release
+after approval. Reject conflicting pending submissions and unsafe Store states.
+Acceptance: read-only setup check makes no writes; duplicate reruns do not replace
+packages or resubmit; failed checks prevent publication; no credentials enter
+bundles or logs. Privacy/security: no new extension permissions or user data;
+short-lived Google federation plus a support-repository-only GitHub release token.
+Setup and operational limits: [Automated releases](docs/AUTOMATED_RELEASES.md).

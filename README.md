@@ -441,3 +441,12 @@ Browser Control end-to-end test: a new chat on `http://127.0.0.1:9845/`, main mo
 Observed `page.submit` reviewing with Luna, then one succeeded row with “Approved a verified low-risk action.” There was no human action-approval card. The main turn completed and collapsed one four-action group, expandable with the same four rows. The assistant said “Filled Search terms with ‘blue otter’ and submitted the Search form.” Direct Chrome inspection independently verified `http://127.0.0.1:9845/search?q=blue+otter` and “Search complete: blue otter”. The parent's submission wrapper took about 6.1 seconds including review, browser execution and response handling; isolated inference latency was not separately measured. Task completion notice subsequently disappeared. Pass for this benign live approval and model access; no repeated send was made.
 
 Both service-worker and sidebar DevTools consoles showed **0 messages** after the test. The sidebar Issues panel retained the existing blocked `eval`/Function capability-probe issue and missing id/name form-field improvement; CSP was not relaxed. Inspectors were closed, and the disposable result page was left visible with default reviewer settings restored. Remaining manual cases are listed above.
+
+## Automated Store publishing
+
+Stable GitHub Releases can run desktop compatibility checks, publish the matching
+companion, and submit the extension for Chrome Web Store review. Ordinary pushes
+continue to run CI only. Follow [the one-time publishing setup](docs/AUTOMATED_RELEASES.md)
+for the dedicated Google project, keyless GitHub authentication, and scoped
+companion-release token. Publishing is disabled until setup and a read-only check
+succeed. No extension or native-host installation is required for this CI change.
