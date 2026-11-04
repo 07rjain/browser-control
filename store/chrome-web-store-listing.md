@@ -1,6 +1,6 @@
 # Chrome Web Store submission draft
 
-This is the copy source for the 0.3.7 listing. Reconcile it with the
+This is the copy source for the 0.3.8 listing. Reconcile it with the
 live package, privacy policy, and dashboard immediately before submission.
 
 ## Product details
@@ -39,6 +39,11 @@ Key features:
   checking, keypress, scrolling, history, waiting, dragging, and form submission.
 - See chronological browser activity, use short-lived element references, set a
   per-request action limit, and stop active work.
+- Enable saved memory for useful personal facts and preferences across regular
+  chats. The agent can remember, correct, and forget them directly; view and edit
+  the same list in Settings. Saved memories have no automatic expiry.
+- Start an incognito chat from the header without saved memory or local
+  conversation history. Provider and normal attachment retention still apply.
 - Reopen local conversation history, copy a completed reply, or fork a
   conversation from an earlier response.
 - Record a browser demonstration, review its steps, and save it as a local skill
@@ -76,9 +81,9 @@ directly. It runs locally through Chrome Native Messaging. Browser Control does
 not ask for an API key, scrape ChatGPT cookies, use remotely hosted executable
 code, or include publisher analytics or advertising.
 
-Version 0.3.7 works with companion 0.3.6 or later from the official support
-page. Basic chat and attached page text also work with older companions; files
-and newer settings require an updated companion. Chrome updates the extension
+Version 0.3.8 requires companion 0.3.8 for memory and incognito, available from
+the official support page. Basic chat and attached page text retain the older
+companion compatibility path; update the companion to use newer features. Chrome updates the extension
 separately from the companion. Files are prepared locally; prepared attachments and conversation context
 are sent to OpenAI only when you send a message through your Codex account.
 
@@ -205,7 +210,7 @@ that sensitive fields and transactions are refused.
 ### Data recipients
 
 OpenAI's Codex service receives prompts and user-attached or browser-tool-returned
-context under the user's authenticated account. It also receives the names and
+context and selected saved memories under the user's authenticated account. It also receives the names and
 descriptions of enabled local skills, and the instructions of a selected skill
 when a matching request uses it. The publisher does not operate
 a telemetry, analytics, advertising, or transcript-storage server. Chrome Native
@@ -234,7 +239,11 @@ extension. Do not use the publisher's personal account.
    Approve the exact-origin access request and verify the activity/result.
 8. Press Stop during a response and verify the task settles without repeating an
    action.
-9. Use Clear browser data and permissions; confirm Chrome-side history and grants
+9. Enable Settings → Memory → Use saved memory, start a new chat and use a
+   synthetic name. Ask the agent to correct and forget it; verify the inline list
+   updates without a save card. Start Incognito chat and verify its indicator and
+   exclusion from saved memory/history. No real personal data is required.
+10. Use Clear browser data and permissions; confirm Chrome-side history and grants
    are removed while the Codex session remains. Then use Delete all Browser
    Control data and sign out; confirm the side panel returns to signed out and can
    reconnect without reinstalling the companion.
@@ -244,11 +253,10 @@ messages, real form submission, or private page data. Contact
 cu.16bcs2797@gmail.com if the reviewer environment cannot install the companion
 or access an eligible test account.
 
-The dashboard's 500-character field was saved with this 490-character copy for
-0.3.6:
+The dashboard's 500-character reviewer field for 0.3.8 (473 characters):
 
 ```text
-macOS/Windows/Linux, Node 20+, Codex CLI 0.162.1 and eligible reviewer-owned ChatGPT/Codex account required. Install companion 0.3.6 from https://github.com/07rjain/browser-control-support/releases: node scripts/install-native-host.mjs. Restart browser and sign in. Test chat, local image/text/PDF attachments, Copy/Fork, math, Settings prompts, Auto review and Stop on disposable pages. Ask "Help me record a skill"; open/cancel its form. No real secrets, payments or external submissions.
+macOS/Windows/Linux, Node 20+, Codex CLI 0.162.1/0.164.0/0.165.0 and a reviewer-owned ChatGPT account. Install companion 0.3.8 from github.com/07rjain/browser-control-support/releases; run node scripts/install-native-host.mjs. Restart Chrome and sign in. Test chat, page/files, Stop, Settings and Auto review. Enable Memory, use a synthetic name, then correct/forget it. Check inline edits and Incognito history exclusion. No real secrets, payments or external submissions.
 ```
 
 ## Distribution

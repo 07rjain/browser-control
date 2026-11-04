@@ -20,7 +20,7 @@
       <p class="eyebrow">Privacy policy</p>
       <h1>Your browser data stays under your direction.</h1>
       <p class="lede">This policy explains how Browser Control handles data when providing Codex chat, page attachment, and user-initiated browser actions.</p>
-      <p class="meta"><strong>Effective:</strong> October 17, 2026 · <strong>Publisher:</strong> Rishabh Bothra · <strong>Contact:</strong> <a href="mailto:cu.16bcs2797@gmail.com">cu.16bcs2797@gmail.com</a></p>
+      <p class="meta"><strong>Effective:</strong> November 4, 2026 · <strong>Publisher:</strong> Rishabh Bothra · <strong>Contact:</strong> <a href="mailto:cu.16bcs2797@gmail.com">cu.16bcs2797@gmail.com</a></p>
 
       <h2>Scope and single purpose</h2>
       <p>Browser Control is a Chrome side-panel extension whose single purpose is to let a user chat with Codex and request supervised actions on browser tabs and normal web pages. It uses a separately installed local companion to communicate with Codex CLI and Codex App Server. This policy covers the extension and that companion. The public product, privacy, and support pages do not contain extension telemetry or advertising trackers.</p>
@@ -34,6 +34,7 @@
         <li><strong>Web browsing activity:</strong> open-tab titles, URLs, tab and window identifiers, active state, and the origins on which the user grants browser-control access.</li>
         <li><strong>User activity and form data:</strong> requested tab/page operations, their approval and result states, and non-sensitive values needed to fill, select, check, or review a form the user asked Browser Control to operate.</li>
         <li><strong>Recorded demonstrations:</strong> the chosen site's origin, action type, role and accessible control name. Typed example values are omitted unless the user chooses to keep them during review. Recordings skip password, payment, code, and purchase controls.</li>
+        <li><strong>Saved memory:</strong> when Use saved memory is enabled, the answering model can save, correct, or delete useful personal facts and preferences supported by the current user message. Saved records include their text, type, priority, update times, and a bounded supporting user excerpt. Memory starts disabled; Settings provides an editable list and controls to disable or clear it. Page, file, tool, and assistant content cannot authorize memory changes.</li>
         <li><strong>Preferences and diagnostics:</strong> theme, selected model, permission mode, action budget, completion-sound choice, short-lived task state, companion version/status, and bounded error messages.</li>
         <li><strong>Custom instructions and action reviews:</strong> saved main-chat and reviewer prompts, reviewer model choices, and bounded request/action/form evidence used when the user selects Auto review. The reviewer runs through the user's existing Codex account without executable tools; activity keeps generic outcomes rather than model reasoning or raw review responses.</li>
       </ul>
@@ -44,9 +45,10 @@
 
       <h2>Where data is stored</h2>
       <ul>
-        <li>Chrome local storage retains preferences and up to 30 conversation records, each bounded to its most recent messages and activity.</li>
+        <li>Chrome local storage retains preferences and up to 30 regular conversation records, each bounded to its most recent messages and activity. Incognito chats are excluded from this conversation history and use ephemeral Codex threads; they do not read or contribute saved memory. Provider retention, normal attachment retention, and temporary browser-action session metadata still apply.</li>
         <li>Chrome session storage retains short-lived task, permission, approval, cancellation, and completion state across Manifest V3 service-worker suspension.</li>
         <li>The local companion gives Codex a dedicated home at <code>~/.codex-sidebar</code>. Codex stores its Browser Control login/session material and persistent thread data there.</li>
+        <li>Saved memory is stored in <code>~/.codex-sidebar/memory.json</code> on macOS/Linux, or <code>%USERPROFILE%\.codex-sidebar\memory.json</code> on Windows. Records do not expire automatically. The file is outside browser storage and survives a browser/extension reinstall on the same computer when companion data is retained; there is no cloud or cross-device memory sync.</li>
         <li>Reviewed skills are saved under <code>~/.codex-sidebar/skills</code>. Settings can disable or delete these skills on this computer.</li>
         <li>Prepared attachments are saved under <code>~/.codex-sidebar/uploads</code> after transfer. Sent assets expire after 30 days and incomplete uploads after 24 hours; cleanup runs on companion startup and upload activity. Custom chat and reviewer preferences are saved locally in the dedicated companion home.</li>
         <li>The companion runtime is installed separately from the Codex data directory so deleting product data does not silently uninstall or damage the companion.</li>
@@ -55,6 +57,7 @@
 
       <h2>Data sent to others</h2>
       <p>To answer requests, prompts and any user-attached or tool-returned browser context are sent by the local companion to OpenAI's Codex service under the user's authenticated account. The names and descriptions of enabled local skills are offered to Codex; a selected skill's instructions are sent when the request uses that skill. OpenAI processes that data according to the terms and privacy choices applicable to that account. Browser Control does not send browsing data to the publisher or to advertising companies.</p>
+      <p>Selected saved memory records and search results are sent to the same Codex model provider when used to answer a participating regular chat. Automatic memory changes use the current user message; there is no separate background learner or publisher-operated memory server. Disabling memory blocks future access but retains records. Incognito prevents saved memory and local conversation history; it does not change the provider's retention terms.</p>
       <p>Sending file attachments shares their prepared images and text with OpenAI through the same account. Auto review additionally shares bounded request and proposed-action evidence with the selected reviewer model through Codex. Saved custom prompts are sent as instructions when their chat or review runs; saving them alone starts no model request. Local deletion does not change OpenAI's retention under the user's account terms and privacy choices.</p>
       <p>Messages between the extension and the native companion stay on the same computer through Chrome Native Messaging. The public documentation site is hosted by GitHub Pages; GitHub may process ordinary web-server information when someone visits these pages under GitHub's own privacy terms. Visiting this site is separate from using the extension, which includes no remote site assets.</p>
 
@@ -64,7 +67,8 @@
       <p>A page attachment is created only after the user asks to attach the page and can be removed before sending. Browser actions start from a user's request, remain visible in activity, are bounded by an action limit, and can be stopped. Hard refusals apply in every permission mode.</p>
 
       <h2>Retention and deletion</h2>
-      <p><strong>Clear browser data and permissions</strong> removes Chrome-side transcripts, activity, settings, task state, and retained site grants. It does not delete the Codex login or persistent Codex threads on the computer.</p>
+      <p><strong>Clear browser data and permissions</strong> removes Chrome-side transcripts, activity, settings, task state, and retained site grants. It does not delete saved memory, the Codex login, or persistent Codex threads on the computer.</p>
+      <p>Settings → Memory allows individual editing/deletion and clearing saved memory. Removing a saved fact stops future saved recall but does not erase existing conversations or provider context. A browser reinstall alone does not remove companion-backed memory.</p>
       <p><strong>Delete all Browser Control data and sign out</strong> stops active work, clears the Chrome-side data and permissions, signs out the dedicated Browser Control Codex session, and deletes the dedicated <code>~/.codex-sidebar</code> data directory. It leaves the installed companion runtime in place. The support page also explains manual removal and companion uninstall.</p>
 
       <h2>Security</h2>

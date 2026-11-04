@@ -26,7 +26,7 @@
         <ul>
           <li>macOS, Linux, or Windows, with current stable Google Chrome or Brave. Chromium on Linux is best-effort. Snap and Flatpak Chrome are not supported.</li>
           <li>Node.js 20 or newer.</li>
-          <li>A compatible Codex CLI. On Windows, the installer needs <code>codex.exe</code> rather than the npm <code>.cmd</code> shim. Windows also needs the .NET Framework C# compiler (<code>csc.exe</code>) to build the launcher.</li>
+          <li>A compatible Codex CLI. On Windows, the installer supports <code>codex.exe</code> and the standard npm <code>codex.cmd</code> launcher. Windows also needs the .NET Framework C# compiler (<code>csc.exe</code>) to build the launcher.</li>
           <li>An eligible ChatGPT/Codex account. Browser Control does not ask for an API key.</li>
         </ul>
         <pre><code>node --version
@@ -40,7 +40,7 @@ codex --version</code></pre>
           <li>Download the companion ZIP and matching <code>SHA256SUMS</code> from the <a href="https://github.com/07rjain/browser-control-support/releases">official GitHub Releases page</a>. Do not download a repackaged copy from another site.</li>
           <li>Extract the ZIP. In a terminal, change to that extracted directory.</li>
           <li>Verify the archive contents using the checksum instructions included with the release.</li>
-          <li>From any folder, run <code>git clone --depth 1 -b feat/desktop-companion https://github.com/07rjain/browser-control.git "$HOME/browser-control" || git -C "$HOME/browser-control" pull --ff-only &amp;&amp; node "$HOME/browser-control/scripts/install-native-host.mjs"</code>. Node.js, Codex, and the extension can be installed in any order. The installer registers the companion even if Codex is not installed yet.</li>
+          <li>From the extracted companion folder, run <code>node scripts/install-native-host.mjs</code>. The ZIP includes installers for macOS, Linux, and Windows; a platform label in its filename identifies the build machine. Node.js 20+, Codex, and the extension can be installed in any order.</li>
           <li>Return to Browser Control and choose <strong>Retry connection</strong>. You can leave the side panel open while installing.</li>
         </ol>
         <p>The installer registers <code>com.codex.sidebar</code> for the current user. On macOS the runtime is <code>~/Library/Application Support/Browser Control/</code>. On Linux it is <code>~/.local/share/browser-control/</code>. On Windows it is <code>%LOCALAPPDATA%\Browser Control\</code>. It does not install an unrelated app, browser extension, analytics service, or background login item.</p>
@@ -48,7 +48,14 @@ codex --version</code></pre>
 
       <section id="update">
         <h2>Update the companion</h2>
-        <p>Download the newer companion from the same Releases page, verify its checksum, and run its installer again. Installation is idempotent and replaces only Browser Control companion files. The side panel reports an actionable error when its companion protocol is incompatible.</p>
+        <p>Memory and incognito in extension 0.3.8 require companion 0.3.8 or later. Download the newer companion from the same Releases page, verify its checksum, and run its installer again. Installation is idempotent and replaces only Browser Control companion files. The side panel reports an actionable error when its companion protocol is incompatible.</p>
+      </section>
+
+      <section id="memory">
+        <h2>Memory and incognito chat</h2>
+        <p>Enable <strong>Settings → Memory → Use saved memory</strong>, then start a regular new chat. The agent can remember a name or preference, replace it when corrected, and forget it on request without a save popup. View and edit records in the inline Settings list. There is no expiry or manual Refresh button.</p>
+        <p>The incognito icon in the main header starts a chat without saved memory or conversation history. It closes when you leave the chat or panel. Provider retention and normal attachment retention still apply.</p>
+        <p>Saved memory is outside browser storage in <code>~/.codex-sidebar/memory.json</code> (Windows: <code>%USERPROFILE%\.codex-sidebar\memory.json</code>). Reinstalling the browser can reload it after reconnecting the companion if this file is kept. Reinstall the companion if the browser removed its native-host registration. Other computers or a deleted companion data directory have no automatic cloud restore.</p>
       </section>
 
       <section id="troubleshooting">
@@ -56,7 +63,7 @@ codex --version</code></pre>
         <h3>“Native host not found”</h3>
         <p>Install or reinstall the companion, confirm the installer reports success, fully quit and reopen the browser, and run <code>node scripts/smoke-installed-host.mjs</code> from the extracted release. A companion built for a different Store extension ID will be refused.</p>
         <h3>“Codex not found”</h3>
-        <p>Run <code>codex --version</code> in a terminal. Install or repair Codex CLI, then reinstall the companion so it records the correct executable. On Windows, set <code>CODEX_BIN</code> to the full path of <code>codex.exe</code> if only a <code>.cmd</code> shim is found.</p>
+        <p>Run <code>codex --version</code> in a terminal. Install or repair Codex CLI, then reinstall the companion so it records the correct executable. On Windows, confirm the standard npm installation is on PATH, or set <code>CODEX_BIN</code> to its <code>codex.exe</code>, <code>codex.cmd</code>, or Codex JavaScript entry point before reinstalling.</p>
         <h3>Sign-in does not finish</h3>
         <p>Keep the sign-in tab open until the Codex callback completes, then return to the side panel. If necessary, cancel and retry. Browser Control never reads ChatGPT cookies.</p>
         <h3>A site asks for access</h3>

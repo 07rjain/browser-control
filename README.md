@@ -4,6 +4,10 @@ A Chrome side-panel extension powered by the user's ChatGPT Codex subscription t
 
 The repository contains the implemented MVP plus the approved supervised browser-control milestone: sidebar chat, managed ChatGPT sign-in, model selection, explicit current-page attachment, seven tab tools, eleven typed page tools, and message Copy/Fork actions. It does not contain remote control, unattended automation, arbitrary JavaScript/selectors, connectors, analytics, publisher API keys, or ChatGPT cookie scraping.
 
+## Version 0.3.8
+
+See the [0.3.8 release notes](docs/RELEASE_0.3.8.md) for automatic memory, inline memory editing, incognito chat, Settings ordering, and desktop reliability fixes. Install companion **0.3.8** to use memory and incognito. Chrome updates the extension separately; the matching portable companion is available from the [official downloads](https://github.com/07rjain/browser-control-support/releases).
+
 ## Version 0.3.7
 
 See the [0.3.7 release notes](docs/RELEASE_0.3.7.md) for the older-companion chat
