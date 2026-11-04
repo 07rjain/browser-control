@@ -14,7 +14,8 @@ public Chrome Web Store release of Browser Control.
 
 The intended public URLs are:
 
-- Product: `https://07rjain.github.io/browser-control-support/`
+- Product documentation: `https://07rjain.github.io/browser-control-support/`
+- Store developer website: `https://bothrarishabh.com`
 - Privacy: `https://07rjain.github.io/browser-control-support/privacy.html`
 - Support: `https://07rjain.github.io/browser-control-support/support.html`
 - Companion releases: `https://github.com/07rjain/browser-control-support/releases`

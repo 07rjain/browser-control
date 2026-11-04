@@ -103,7 +103,7 @@ endorsed by OpenAI.
 
 ## Dashboard URLs
 
-- Homepage: https://07rjain.github.io/browser-control-support/
+- Homepage / developer contact website: https://bothrarishabh.com
 - Promo video: https://www.youtube.com/watch?v=K2_ByJLRDL0
 - Privacy policy: https://07rjain.github.io/browser-control-support/privacy.html
 - Support: https://07rjain.github.io/browser-control-support/support.html
