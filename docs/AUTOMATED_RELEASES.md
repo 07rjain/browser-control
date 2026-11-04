@@ -20,6 +20,8 @@ the Store publisher account is `cu.16bcs2797@gmail.com`.
    It enables the required APIs, creates `chrome-store-publisher`, and restricts
    GitHub federation to the numeric repository/owner IDs, this release workflow,
    the `chrome-web-store` environment, stable release tags, and manual runs on main.
+   Both GitHub’s classic subject and its immutable subject (with numeric owner/repo
+   IDs) are supported; numeric IDs are independently required in either case.
    It grants impersonation of this one service account, with no project resource
    roles and no JSON key. The operator needs project service-enablement, service
    account administration, and Workload Identity pool administration rights.
