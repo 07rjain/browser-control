@@ -43,6 +43,7 @@ jobs:
       - name: Install Chromium for the isolated extension sidebar checks
         run: npx playwright install --with-deps chromium
       - run: npm run test:browser
+      - run: node scripts/smoke-page-inspection.mjs
 
   memory-runtime:
     name: Memory / ${{ matrix.os }} / Node ${{ matrix.node }}

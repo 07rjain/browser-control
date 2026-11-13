@@ -55,4 +55,27 @@ describe("task working-tab isolation", () => {
 
     await expect(executePageTool(call, 99)).rejects.toThrow(/working tab/i);
   });
+
+  it("preserves readable text and its limit flag while binding control refs to the working tab", async () => {
+    const sendMessage = vi.fn(async (_tabId: number, message: { action: string }) => ({
+      ok: true,
+      data: message.action === "PING" ? { origin: "https://example.com" } : {
+        origin: "https://example.com", snapshotId: "snapshot-1", readableText: "Opening thread post",
+        textTruncated: true, truncated: false, elements: [{ refId: "e1", label: "Reply" }],
+      },
+    }));
+    vi.stubGlobal("chrome", {
+      tabs: { get: vi.fn(async () => ({ id: 12, url: "https://example.com/thread" })), sendMessage },
+      permissions: { contains: vi.fn(async () => true) },
+    });
+    const call = pageToolCallSchema.parse({
+      requestId: 1, threadId: "thread-1", turnId: "turn-1", callId: "call-inspect",
+      namespace: "page", tool: "inspect", arguments: { idempotencyKey: "inspect-00000001" },
+    });
+    await expect(executePageTool(call, 12)).resolves.toMatchObject({
+      readableText: "Opening thread post", textTruncated: true, truncated: false, tabId: 12,
+      elements: [{ label: "Reply", ref: { id: "e1", snapshotId: "snapshot-1", tabId: 12, origin: "https://example.com" } }],
+    });
+    expect(sendMessage).toHaveBeenLastCalledWith(12, { type: "CODEX_PAGE_EXECUTOR", action: "INSPECT" });
+  });
 });

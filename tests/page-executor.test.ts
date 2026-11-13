@@ -62,7 +62,7 @@ function command<T>(message: Record<string, unknown>): T {
 }
 
 
-type Inspection = { snapshotId: string; elements: Array<{ refId: string; label: string; sensitive: boolean; value?: string }> };
+type Inspection = { snapshotId: string; readableText: string; textTruncated: boolean; truncated: boolean; elements: Array<{ refId: string; label: string; sensitive: boolean; value?: string }> };
 
 function frameDocument(html: string): Document {
   document.body.innerHTML = `<iframe id="frame"></iframe>`;
@@ -94,6 +94,88 @@ function policyFor(tool: "click" | "fill" | "keypress" | "submit", target: PageT
 }
 
 describe("packaged page executor", () => {
+  it("reads static thread text alongside an editable reply draft", () => {
+    document.body.innerHTML = `
+      <main><article><a href="/author">Author</a><div><span>The opening post explains the problem.</span></div></article>
+      <article><div>A reply adds the missing context.</div><button>Reply</button></article></main>
+      <div contenteditable="true" role="textbox" aria-label="Post text">My draft reply</div>`;
+    const inspection = command<Inspection>({ action: "INSPECT" });
+    expect(inspection.elements.find((item) => item.label === "Post text")?.value).toBe("My draft reply");
+    expect(inspection.readableText).toContain("The opening post explains the problem.");
+    expect(inspection.readableText).toContain("A reply adds the missing context.");
+    expect(inspection.readableText).not.toContain("My draft reply");
+    expect(inspection.textTruncated).toBe(false);
+  });
+
+  it("excludes hidden, inert, executable and editable subtrees from readable text", () => {
+    document.body.innerHTML = `
+      <p>Public thread</p>
+      <div hidden><span>hidden-marker</span></div>
+      <div aria-hidden="true"><span>aria-marker</span></div>
+      <div inert><span>inert-marker</span></div>
+      <div style="display:none"><span>display-marker</span></div>
+      <div style="visibility:hidden"><span>visibility-marker</span></div>
+      <div style="opacity:0"><span>opacity-marker</span></div>
+      <div style="content-visibility:hidden"><span>content-marker</span></div>
+      <script>script-marker</script><style>/* style-marker */</style>
+      <template>template-marker</template><noscript>noscript-marker</noscript>
+      <input type="password" value="password-marker"><textarea aria-label="API key">textarea-marker</textarea>
+      <div contenteditable="true" aria-label="Recovery code"><span>editable-marker</span></div>
+      <div role="textbox">textbox-marker</div><select><option>select-marker</option></select>
+      <details><summary>Read more</summary>closed-marker</details>`;
+    const inspection = command<Inspection>({ action: "INSPECT" });
+    expect(inspection.readableText).toBe("Public thread Read more");
+    expect(JSON.stringify(inspection)).not.toMatch(/password-marker|textarea-marker|editable-marker/);
+  });
+
+  it("refreshes text after the rendered thread changes without mutating drafts", () => {
+    document.body.innerHTML = `<article>Previous replies</article><div contenteditable="true">Keep this draft</div>`;
+    expect(command<Inspection>({ action: "INSPECT" }).readableText).toBe("Previous replies");
+    document.querySelector("article")!.textContent = "Opening post mounted after scrolling";
+    const inspection = command<Inspection>({ action: "INSPECT" });
+    expect(inspection.readableText).toBe("Opening post mounted after scrolling");
+    expect(document.querySelector("[contenteditable]")!.textContent).toBe("Keep this draft");
+  });
+
+  it("reads composed shadow text and same-origin frames, excluding hidden frames", () => {
+    const child = frameDocument(`<p>Frame post</p><textarea>Frame draft</textarea>`);
+    const host = document.createElement("div");
+    host.innerHTML = `<span>Slotted post</span><span slot="unused">Unrendered light text</span>`;
+    host.attachShadow({ mode: "open" }).innerHTML = `<p>Shadow post</p><slot></slot><span hidden>Hidden shadow</span>`;
+    document.body.append(host);
+    const inspection = command<Inspection>({ action: "INSPECT" });
+    expect(inspection.readableText).toBe("Frame post Shadow post Slotted post");
+    expect(inspection.readableText.match(/Slotted post/g)).toHaveLength(1);
+    expect(child.querySelector("textarea")!.value).toBe("Frame draft");
+    document.querySelector("iframe")!.hidden = true;
+    expect(command<Inspection>({ action: "INSPECT" }).readableText).toBe("Shadow post Slotted post");
+  });
+
+  it("caps text independently of the control cap and reports exact-boundary results", () => {
+    document.body.innerHTML = `<article>${"x".repeat(12_001)}</article>`;
+    const textLimited = command<Inspection>({ action: "INSPECT" });
+    expect(textLimited.readableText).toHaveLength(12_000);
+    expect(textLimited.textTruncated).toBe(true);
+    expect(textLimited.truncated).toBe(false);
+    document.body.innerHTML = `<article>${"x".repeat(12_000)}</article>`;
+    expect(command<Inspection>({ action: "INSPECT" }).textTruncated).toBe(false);
+    document.body.innerHTML = `<article>Opening post</article>${"<button>Reply</button>".repeat(81)}`;
+    const controlLimited = command<Inspection>({ action: "INSPECT" });
+    expect(controlLimited.truncated).toBe(true);
+    expect(controlLimited.textTruncated).toBe(false);
+    expect(controlLimited.readableText).toContain("Opening post");
+  });
+
+  it("bounds traversal even when the page contains mostly empty nodes", () => {
+    const fragment = document.createDocumentFragment();
+    for (let index = 0; index < 20_001; index += 1) fragment.append(document.createComment("empty"));
+    fragment.append(document.createTextNode("Beyond traversal budget"));
+    document.body.replaceChildren(fragment);
+    const inspection = command<Inspection>({ action: "INSPECT" });
+    expect(inspection.readableText).toBe("");
+    expect(inspection.textTruncated).toBe(true);
+  });
+
   it("shows and removes a non-interactive agent-working frame", () => {
     expect(command({ action: "TASK_INDICATOR", active: true })).toEqual({ active: true });
     const indicator = document.querySelector<HTMLElement>("[data-browser-control-task-indicator='active']");

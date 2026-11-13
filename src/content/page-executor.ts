@@ -28,6 +28,8 @@ if (!executorGlobal.__codexPageExecutorInstalled) {
   executorGlobal.__codexPageExecutorInstalled = true;
 
   const MAX_ELEMENTS = 80;
+  const MAX_READABLE_TEXT = 12_000;
+  const MAX_TEXT_NODES = 20_000;
   const REF_TTL_MS = 30_000;
   const INTERACTIVE_SELECTOR = [
     "a[href]",
@@ -160,7 +162,7 @@ if (!executorGlobal.__codexPageExecutorInstalled) {
       labelledByText(element),
       associatedLabelText(element),
     ].join(" ");
-    return /(password|passcode|one.?time|otp|verification.?code|credit.?card|card.?number|cc-|cvv|cvc|security.?code|private.?key|secret|recovery|social.?security|ssn|aadhaar|pan.?number|api[-_]?key|access[-_]?token|refresh[-_]?token|id[-_]?token|auth[-_]?token|bearer|authorization)/i.test(haystack);
+    return /(password|passcode|one.?time|otp|verification.?code|credit.?card|card.?number|cc-|cvv|cvc|security.?code|private.?key|secret|recovery|social.?security|ssn|aadhaar|pan.?number|api[-_ ]?key|access[-_]?token|refresh[-_]?token|id[-_]?token|auth[-_]?token|bearer|authorization)/i.test(haystack);
   }
 
   function isVisible(element: Element): boolean {
@@ -562,6 +564,67 @@ if (!executorGlobal.__codexPageExecutorInstalled) {
     if (!hasAccessibleHitPoint(element)) throw new Error("The requested element is covered by another page element.");
   }
 
+  // Read ordinary page prose as well as controls. Walk the live composed DOM
+  // without cloning/mutating it; detached innerText loses visibility semantics.
+  function readablePageText(): { readableText: string; textTruncated: boolean } {
+    const omitted = "script,style,noscript,template,head,svg,canvas,input,textarea,select,[role='textbox'],[hidden],[inert],[aria-hidden='true']";
+    const stack: Iterator<Node>[] = [[document.documentElement][Symbol.iterator]()];
+    const chunks: string[] = [];
+    let length = 0;
+    let visited = 0;
+    const children = function* (node: Node): Generator<Node> {
+      for (let child = node.firstChild; child; child = child.nextSibling) yield child;
+    };
+    while (stack.length) {
+      const next = stack[stack.length - 1].next();
+      if (next.done) {
+        stack.pop();
+        continue;
+      }
+      visited += 1;
+      if (visited > MAX_TEXT_NODES) return { readableText: chunks.join(" "), textTruncated: true };
+      const node = next.value;
+      if (node.nodeType === Node.TEXT_NODE) {
+        const remaining = MAX_READABLE_TEXT - length - (chunks.length ? 1 : 0);
+        // Normalize only the bounded prefix of any exceptionally large text node.
+        const raw = node.nodeValue ?? "";
+        const value = raw.slice(0, MAX_READABLE_TEXT + 1).replace(/\s+/g, " ").trim();
+        if (!value) {
+          if (raw.length > MAX_READABLE_TEXT) return { readableText: chunks.join(" "), textTruncated: true };
+          continue;
+        }
+        if (remaining <= 0) return { readableText: chunks.join(" "), textTruncated: true };
+        const part = value.slice(0, remaining);
+        length += part.length + (chunks.length ? 1 : 0);
+        chunks.push(part);
+        if (value.length > remaining || raw.length > MAX_READABLE_TEXT) {
+          return { readableText: chunks.join(" "), textTruncated: true };
+        }
+        continue;
+      }
+      if (node.nodeType !== Node.ELEMENT_NODE) continue;
+      const element = node as Element;
+      if (element.matches(omitted) || isContentEditable(element)) continue;
+      const style = element.ownerDocument.defaultView?.getComputedStyle(element);
+      if (!style || style.display === "none" || style.visibility === "hidden" || style.visibility === "collapse" || style.opacity === "0" || style.contentVisibility === "hidden") continue;
+      if (element.localName === "iframe") {
+        const body = sameOriginDocument(element as HTMLIFrameElement)?.body;
+        if (body) stack.push([body][Symbol.iterator]());
+      } else if (element.shadowRoot) {
+        stack.push(children(element.shadowRoot));
+      } else if (element.localName === "slot" && isCrossFrame(element, "HTMLSlotElement")) {
+        const assigned = (element as HTMLSlotElement).assignedNodes();
+        stack.push(assigned.length ? assigned[Symbol.iterator]() : children(element));
+      } else if (element.localName === "details" && !element.hasAttribute("open")) {
+        const summary = element.querySelector(":scope > summary");
+        if (summary) stack.push([summary][Symbol.iterator]());
+      } else {
+        stack.push(children(element));
+      }
+    }
+    return { readableText: chunks.join(" "), textTruncated: false };
+  }
+
   function inspect() {
     refs.clear();
     snapshotId = crypto.randomUUID();
@@ -609,6 +672,7 @@ if (!executorGlobal.__codexPageExecutorInstalled) {
       snapshotId,
       expiresAt: snapshotCreatedAt + REF_TTL_MS,
       elements,
+      ...readablePageText(),
       truncated: candidates.length > MAX_ELEMENTS,
       unsupportedFrames: inaccessibleFrameCount(),
     };

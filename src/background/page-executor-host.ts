@@ -51,6 +51,8 @@ interface RawInspection {
   snapshotId: string;
   expiresAt: number;
   truncated: boolean;
+  readableText: string;
+  textTruncated: boolean;
   unsupportedFrames: number;
   elements: Array<Record<string, unknown> & { refId: string }>;
 }
