@@ -66,7 +66,7 @@ permissions, account behavior, memory behavior, or user data collection change.
 ## Each release
 
 1. Update `package.json`, both package-lock root versions, `public/manifest.json`,
-   and `companionVersion` in `scripts/install-native-host.mjs`. Update release
+   `bridge/version.json`, and `companionVersion` in `scripts/install-native-host.mjs`. Update release
    notes and any Store privacy/listing disclosures as needed; merge to main.
 2. Create tag `vX.Y.Z` at that main commit and **publish its stable GitHub Release**.
    Drafts/prereleases do not deploy. All 18 desktop compatibility jobs must pass
@@ -74,6 +74,13 @@ permissions, account behavior, memory behavior, or user data collection change.
 3. Watch **Publish browser release** in Actions. The final summary reports whether
    it submitted, was already pending review, or was already published. The Store
    dashboard shows review decisions; GitHub success means submission, not approval.
+
+From 0.3.11, the portable companion asset is named
+`browser-control-companion-X.Y.Z.zip` on every build OS. It contains the same
+JavaScript host and OS-aware installer for Linux, macOS and Windows. The older
+platform-labelled release assets remain unchanged. The runtime reads its version
+from packaged `bridge/version.json`; the release preflight and package smoke
+check it against the release version.
 
 ## Failures and reruns
 

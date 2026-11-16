@@ -16,7 +16,9 @@ import {
   normalizeBrowserTaskActionLimit,
   type BrowserPermissionMode,
 } from "../shared/page-tools";
-import { AUTO_REVIEW_SETTINGS_KEY, DEFAULT_AUTO_REVIEW, REVIEW_MODEL, DEFAULT_REVIEW_SYSTEM_PROMPT, REQUIRED_REVIEW_INSTRUCTIONS, MAX_REVIEW_SYSTEM_PROMPT, autoReviewSettingsSchema, readAutoReviewSettings, reviewCapabilitiesSchema, type AutoReviewSettings } from "../shared/auto-review";
+import { AUTO_REVIEW_SETTINGS_KEY, DEFAULT_AUTO_REVIEW, REVIEW_MODEL, DEFAULT_REVIEW_SYSTEM_PROMPT, REQUIRED_REVIEW_INSTRUCTIONS, MAX_REVIEW_SYSTEM_PROMPT, autoReviewSettingsSchema, readAutoReviewSettings, type AutoReviewSettings } from "../shared/auto-review";
+import { describeReviewSupport, type ReviewSupport } from "../shared/companion-support";
+import AutoReviewSupport from "./AutoReviewSupport";
 import { IDLE_RECORDING_VIEW, MAX_RECORDING_STEPS, MAX_SKILL_DOCUMENT_CHARS, recordingStepSummary, type RecordingView } from "../shared/skill-recording";
 import { skillRecordingOfferEventSchema, skillRecordingOfferSchema } from "../shared/skill-offer";
 import { COMPANION_INSTALL_COMMAND, isLegacyThreadError, isMissingNativeHost, isWorkspaceRoutingTimeout, WORKSPACE_ROUTING_TIMEOUT_MESSAGE } from "../shared/companion-setup";
@@ -354,8 +356,9 @@ export default function App() {
   const [reviewerSettingsError, setReviewerSettingsError] = useState<string | null>(null);
   const [reviewerSettingsNotice, setReviewerSettingsNotice] = useState<string | null>(null);
   const [reviewerSettingsSaving, setReviewerSettingsSaving] = useState(false);
-  const [reviewerAvailable, setReviewerAvailable] = useState(false);
-  const [reviewerUnavailableReason, setReviewerUnavailableReason] = useState("Checking the companion for Auto review support…");
+  const [reviewerSupport, setReviewerSupport] = useState<ReviewSupport>({ state: "checking", message: "Checking the companion for Auto review support…" });
+  const reviewerCheckGeneration = useRef(0);
+  const reviewerAvailable = reviewerSupport.state === "available";
   const permissionMode = autoReview.enabled && browserPermissionMode === "ask" ? "auto" : browserPermissionMode;
   const [fullSiteAccessGranted, setFullSiteAccessGranted] = useState(false);
   const [browserTaskActionLimit, setBrowserTaskActionLimit] = useState(DEFAULT_BROWSER_TASK_ACTION_LIMIT);
@@ -558,13 +561,23 @@ export default function App() {
     modelPreferencesRef.current = { selectedModel, visibleModelIds };
   }, [selectedModel, visibleModelIds]);
 
+  const refreshReviewerSupport = useCallback(() => {
+    const generation = ++reviewerCheckGeneration.current;
+    return sendRequest({ type: "AUTO_REVIEW_READ" }).then((result) => {
+      if (generation === reviewerCheckGeneration.current) setReviewerSupport(describeReviewSupport(result));
+    }).catch(() => {
+      if (generation === reviewerCheckGeneration.current) setReviewerSupport({ state: "unavailable", message: "Unable to check Auto review support. Reconnect the companion or fully restart Chrome or Brave, then check again." });
+    });
+  }, []);
+
+  useEffect(() => {
+    const checkGeneration = reviewerCheckGeneration;
+    if (authState === "ready") void refreshReviewerSupport();
+    return () => { checkGeneration.current++; };
+  }, [authState, menuOpen, refreshReviewerSupport]);
+
   useEffect(() => {
     if (authState !== "ready") return;
-    void sendRequest({ type: "AUTO_REVIEW_READ" }).then((result) => {
-      const capabilities = reviewCapabilitiesSchema.safeParse(result);
-      setReviewerAvailable(capabilities.success && capabilities.data.available);
-      setReviewerUnavailableReason(capabilities.success ? capabilities.data.reason ?? "Update the companion to use Auto review with this Codex version." : "The companion returned unsupported Auto review capabilities. Update it and retry connection.");
-    }).catch(() => { setReviewerAvailable(false); setReviewerUnavailableReason("Unable to check Auto review support. Update or reconnect the companion and reopen Browser Control."); });
     void sendRequest<{ models: ModelOption[] }>({ type: "MODELS_READ" })
       .then((result) => {
         setModels(result.models);
@@ -1828,7 +1841,11 @@ export default function App() {
                     : "Pauses before form submission, consequential controls, Enter submissions, and tab closing."}
                 {" "}Applies to the next browser task.
               </p>
-              {!reviewerAvailable && <p className="menu-hint">{reviewerUnavailableReason}</p>}
+              <AutoReviewSupport support={reviewerSupport} desktopOs={desktopOs} disabled={streaming || recordingActive}
+                onCheck={() => {
+                  setReviewerSupport({ state: "checking", message: "Checking the companion for Auto review support…" });
+                  return refreshReviewerSupport();
+                }} onOpen={(url) => sendRequest({ type: "OPEN_EXTERNAL", url })} />
               {browserPermissionMode === "full" && !fullSiteAccessGranted && (
                 <button className="settings-grant-button" disabled={streaming} onClick={() => void requestFullSiteAccess()}>
                   Enable full browser access

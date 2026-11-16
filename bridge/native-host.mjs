@@ -33,6 +33,7 @@ import {
 } from "./skills.mjs";
 
 const MAX_NATIVE_MESSAGE_BYTES = 1024 * 1024;
+const companionVersion = JSON.parse(readFileSync(new URL("./version.json", import.meta.url), "utf8")).version;
 const DATA_ROOT_MARKER = "browser-control-data-v1\n";
 const defaultSidebarHome = resolve(join(homedir(), ".codex-sidebar"));
 const sidebarHome = resolve(process.env.CODEX_SIDEBAR_HOME ?? defaultSidebarHome);
@@ -713,6 +714,7 @@ async function handleRequest(message) {
       default: throw new Error("Unknown attachment operation.");
     }
   }
+  if (message.method === "bridge.status") return { connected: true, version: companionVersion, platform: process.platform };
   if (message.method === "memory.capabilities") return { version: 1, automaticChanges: 2, incognito: true };
   if (message.method === "memory.read") return memory.read();
   if (message.method === "memory.write") { const result = await memory.write(message.params); sendEvent("memory.changed", {}); return result; }
@@ -742,8 +744,6 @@ async function handleRequest(message) {
       restrictedThreads.assertRestricted(message.params?.threadId);
       approvalReviewer.cancel(message.params.threadId, message.params.turnId);
       return { canceled: true };
-    case "bridge.status":
-      return { connected: true, version: "0.3.7" };
     case "account.read":
       return appRequest("account/read", { refreshToken: false });
     case "auth.login": {

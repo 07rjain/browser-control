@@ -13,9 +13,10 @@ describe.skipIf(process.platform === "win32")("GitHub release preflight", () => 
   let root: string;
   let assets: { id: number; name: string }[];
   let payloads: Record<string, string>;
+  let allowCompanionDraft: boolean;
   const git = (...args: string[]) => execFileSync("git", args, { cwd: root, stdio: "pipe" });
   function run(mode: string) {
-    writeFileSync(join(root, "api.json"), JSON.stringify({ release: { draft: false, prerelease: false, assets }, payloads }));
+    writeFileSync(join(root, "api.json"), JSON.stringify({ release: { draft: false, prerelease: false, assets }, payloads, allowCompanionDraft }));
     return spawnSync(process.execPath, [helper, mode], { cwd: root, encoding: "utf8", env: {
       ...process.env, PATH: `${join(root, "bin")}:${process.env.PATH}`, RELEASE_TAG: "v0.3.9",
     } });
@@ -24,6 +25,8 @@ describe.skipIf(process.platform === "win32")("GitHub release preflight", () => 
     root = mkdtempSync(join(tmpdir(), "browser-control-release-test-"));
     mkdirSync(join(root, "bin")); mkdirSync(join(root, "scripts")); mkdirSync(join(root, "release"));
     for (const file of ["package.json", "package-lock.json"]) writeFileSync(join(root, file), JSON.stringify({ version: "0.3.9", packages: { "": { version: "0.3.9" } } }));
+    mkdirSync(join(root, "bridge"));
+    writeFileSync(join(root, "bridge/version.json"), '{"version":"0.3.9"}');
     mkdirSync(join(root, "public"));
     writeFileSync(join(root, "public/manifest.json"), JSON.stringify({ version: "0.3.9" }));
     writeFileSync(join(root, "scripts/install-native-host.mjs"), 'const companionVersion = "0.3.9";');
@@ -33,6 +36,15 @@ const fs = require('node:fs');
 const data = JSON.parse(fs.readFileSync('api.json', 'utf8'));
 const args = process.argv.slice(2);
 fs.appendFileSync('requests.jsonl', JSON.stringify(args) + '\\n');
+if (data.allowCompanionDraft) {
+  if (args[0] === 'release') {
+    if (args[1] === 'view') process.stdout.write(JSON.stringify({ databaseId: 11, isDraft: true, assets: [] }));
+    else if (!['create', 'upload', 'edit'].includes(args[1])) process.exit(2);
+    process.exit(0);
+  }
+  if (args.includes('--paginate')) { process.stdout.write('[[]]'); process.exit(0); }
+  if (args[1].includes('browser-control-support/releases/tags/')) { console.error('An unpublished draft tag has no REST release-by-tag record'); process.exit(1); }
+}
 if (args[0] !== 'api') { console.error('Unexpected mutation'); process.exit(1); }
 if (args[1].includes('/releases/assets/')) process.stdout.write(Buffer.from(data.payloads[args[1].split('/').pop()], 'base64'));
 else process.stdout.write(JSON.stringify(data.release));
@@ -41,7 +53,7 @@ else process.stdout.write(JSON.stringify(data.release));
     git("init", "-q"); git("add", ".");
     git("-c", "user.name=Release Test", "-c", "user.email=release@example.invalid", "commit", "-qm", "fixture");
     git("tag", "v0.3.9"); git("update-ref", "refs/remotes/origin/main", "HEAD");
-    assets = []; payloads = {};
+    assets = []; payloads = {}; allowCompanionDraft = false;
   });
   afterEach(() => rmSync(root, { recursive: true, force: true }));
   it("accepts a published matching tag on main, rejects version drift before contacting GitHub", () => {
@@ -60,8 +72,29 @@ else process.stdout.write(JSON.stringify(data.release));
     expect(result.stderr).toContain("Partial source release assets");
     expect(readFileSync(join(root, "requests.jsonl"), "utf8").trim().split("\n")).toHaveLength(1);
   });
+  it("rejects incorrect companion runtime metadata before contacting GitHub", () => {
+    writeFileSync(join(root, "bridge/version.json"), '{"version":"0.3.7"}');
+    expect(run("check").stderr).toContain("Companion runtime version differs from release");
+    expect(() => readFileSync(join(root, "requests.jsonl"))).toThrow();
+  });
+  it("fills a new companion draft before its tag exists, then publishes only after both uploads", () => {
+    allowCompanionDraft = true;
+    const companion = "browser-control-companion-0.3.9.zip", extension = "browser-control-extension-0.3.9.zip";
+    writeFileSync(join(root, "manifest.json"), '{"version":"0.3.9"}');
+    execFileSync("zip", ["-q", join(root, "release", extension), "manifest.json"], { cwd: root });
+    writeFileSync(join(root, "release", companion), "portable companion fixture");
+    for (const [name, sums] of [[companion, "SHA256SUMS.txt"], [extension, "EXTENSION_SHA256SUMS.txt"]]) {
+      const hash = createHash("sha256").update(readFileSync(join(root, "release", name))).digest("hex");
+      writeFileSync(join(root, "release", sums), `${hash}  ${name}\n`);
+    }
+    const result = run("companion");
+    expect(result.status, result.stderr).toBe(0);
+    const requests = readFileSync(join(root, "requests.jsonl"), "utf8").trim().split("\n").map((line) => JSON.parse(line) as string[]);
+    expect(requests.filter((args) => args[0] === "release").map((args) => args[1])).toEqual(["create", "view", "upload", "upload", "edit"]);
+    expect(requests.at(-1)).toContain("--draft=false");
+  });
   it("reuses exact existing packages and rejects a corrupt checksum without uploading", () => {
-    const names = ["browser-control-companion-linux-0.3.9.zip", "browser-control-extension-0.3.9.zip", "SHA256SUMS.txt", "EXTENSION_SHA256SUMS.txt"];
+    const names = ["browser-control-companion-0.3.9.zip", "browser-control-extension-0.3.9.zip", "SHA256SUMS.txt", "EXTENSION_SHA256SUMS.txt"];
     writeFileSync(join(root, "manifest.json"), '{"version":"0.3.9"}');
     execFileSync("zip", ["-q", join(root, "release", names[1]), "manifest.json"], { cwd: root });
     const bytes = [Buffer.from("portable companion fixture"), readFileSync(join(root, "release", names[1]))];

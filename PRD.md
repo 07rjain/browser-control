@@ -36,6 +36,14 @@ The original MVP is a local, user-driven chat, attachment, and tab-tool experien
 
 ## 2. Product goals and non-goals
 
+### Companion compatibility repair (2026-11-16)
+
+- Support the same local companion on Linux, macOS, and Windows. Distribute a platform-neutral ZIP name; installer registration remains platform-specific.
+- When a legacy companion refuses a CLI verified by the extension, explain the companion mismatch instead of repeating the claim that the CLI has not been verified. Keep the option disabled until the host reports actual support.
+- Provide an explicit official companion download, platform-appropriate install/restart instructions, and a capability recheck in Settings → Agent. Recheck when opening Settings; do not silently change permission mode.
+- Report the actual packaged companion version and CLI compatibility list. Preserve compatibility with older hosts that do not report their version.
+- A Store update cannot overwrite an installed native companion. Existing old hosts require an explicit local update and browser restart; no automatic native code download/execution, extra permissions, or tracking is introduced.
+
 ### Approved extension update behavior (2026-11-13)
 
 - Keep Chrome Web Store automatic download/signature verification as the only extension update channel. Chrome performs its normal periodic checks; do not add a repeating Store request or a remote executable updater.

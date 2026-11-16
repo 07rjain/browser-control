@@ -106,6 +106,9 @@ try {
   // permissions, extension messages, and the packaged UI remain real.
   await worker.evaluate(() => {
     let memory = { version: 1, identity: "11111111-1111-4111-8111-111111111111", revision: 1, enabled: true, records: [{ id: "22222222-2222-4222-8222-222222222222", kind: "fact", text: "My test name is Rishabh", pinned: false, createdAt: 1, updatedAt: 1, expiresAt: null, source: { type: "manual" } }] };
+    let reviewSupport = { version: 2, available: false, configurableModel: true, editableSystemPrompt: true, codexVersion: "0.169.0",
+      reason: "Auto review is unavailable for Codex CLI 0.169.0. Verified versions: 0.162.1, 0.164.0, 0.165.0. Use Ask every time until this version passes the isolated reviewer checks." };
+    globalThis.changeFixtureReviewSupport = (support) => { reviewSupport = support; };
     chrome.runtime.connectNative = () => {
       const listeners = [];
       globalThis.changeFixtureMemory = (text) => {
@@ -129,7 +132,7 @@ try {
             "memory.capabilities": { version: 1, automaticChanges: 2, incognito: true },
             "memory.read": memory,
             "memory.write": memory,
-            "approval.capabilities": { version: 2, available: false, configurableModel: true, editableSystemPrompt: true },
+            "approval.capabilities": reviewSupport,
           };
           if (method === "chat.send") throw new Error("This browser check must never send a chat.");
           queueMicrotask(() => listeners.forEach((listener) => listener({ type: "response", id, ok: method in replies, data: replies[method], error: `No fixture for ${method}` })));
@@ -166,6 +169,24 @@ try {
   assert.equal(await evaluate("document.querySelector('[role=tabpanel]:not([hidden]) input').type"), "checkbox", "General controls must precede appearance");
   await click('[role="tab"][id$="-models-tab"]');
   assert.equal(await evaluate("document.querySelector('[role=tabpanel]:not([hidden]) input, [role=tabpanel]:not([hidden]) select').type"), "checkbox", "Model visibility toggles must come first");
+  await click('[role="tab"][id$="-agent-tab"]');
+  await waitFor("document.querySelector('.companion-support')?.textContent.includes('Codex CLI 0.169.0 is supported')", "The legacy companion's known-version refusal was not diagnosed.");
+  assert.equal(await evaluate("document.querySelector('option[value=auto]').disabled"), true);
+  const repairScreenshotIndex = process.argv.indexOf("--screenshots-dir");
+  if (repairScreenshotIndex >= 0) {
+    const directory = resolve(process.argv[repairScreenshotIndex + 1]); mkdirSync(directory, { recursive: true });
+    const screenshot = await send("Page.captureScreenshot", { format: "png" });
+    writeFileSync(join(directory, "companion-repair.png"), Buffer.from(screenshot.data, "base64"));
+  }
+
+  assert.equal(await evaluate("document.querySelector('option[value=auto]').parentElement.value"), "full");
+  assert.equal(await evaluate("document.querySelector('.companion-support').textContent.includes('supports Linux, macOS, and Windows')"), true);
+  await worker.evaluate(() => globalThis.changeFixtureReviewSupport({ version: 2, available: true, configurableModel: true, editableSystemPrompt: true,
+    codexVersion: "0.169.0", companionVersion: "0.3.11", verifiedCodexVersions: ["0.169.0"] }));
+  await evaluate("[...document.querySelectorAll('.companion-support button')].find(button => button.textContent === 'Check support again').click()");
+  await waitFor("document.querySelector('option[value=auto]')?.disabled === false", "Support did not refresh after the companion became compatible.");
+  assert.equal(await evaluate("document.querySelector('option[value=auto]').parentElement.value"), "full", "A recheck must not change permission mode.");
+  console.log("PASS: legacy 0.169.0 companion refusal shows cross-platform repair; recheck enables Auto review without changing permission.");
   await click('[role="tab"][id$="-memory-tab"]');
   await waitFor("document.querySelector('.memory-list textarea')?.value === 'My test name is Rishabh'", "Saved memory did not load automatically.");
   assert.equal(await evaluate("[...document.querySelectorAll('.memory-settings button')].some(button => /Refresh memory|Start a chat without memory|^Edit$/.test(button.textContent))"), false);

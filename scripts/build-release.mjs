@@ -19,8 +19,7 @@ const version = packageJson.version;
 const bootstrap = process.argv.includes("--bootstrap");
 const releaseDir = join(repositoryRoot, "release");
 const temporaryRoot = mkdtempSync(join(tmpdir(), "browser-control-release-"));
-const platformName = { darwin: "macos", linux: "linux", win32: "windows" }[process.platform] ?? process.platform;
-const companionName = `browser-control-companion-${platformName}-${version}`;
+const companionName = `browser-control-companion-${version}`;
 const companionStage = join(temporaryRoot, companionName);
 const extensionStage = join(temporaryRoot, "extension");
 const companionZip = join(releaseDir, `${companionName}.zip`);
@@ -53,7 +52,7 @@ try {
   mkdirSync(releaseDir, { recursive: true });
   mkdirSync(join(companionStage, "bridge"), { recursive: true });
   mkdirSync(join(companionStage, "scripts"), { recursive: true });
-  for (const file of ["native-host.mjs", "protocol.mjs", "skills.mjs", "codex-launch.mjs", "login-proxy.mjs", "restricted-threads.mjs", "uploads.mjs", "chat-input.mjs", "approval-reviewer.mjs", "reviewer-config.json", "chat-settings.mjs", "chat-config.json", "memory.mjs", "memory-config.json"]) {
+  for (const file of ["native-host.mjs", "protocol.mjs", "skills.mjs", "codex-launch.mjs", "login-proxy.mjs", "restricted-threads.mjs", "uploads.mjs", "chat-input.mjs", "approval-reviewer.mjs", "reviewer-config.json", "version.json", "chat-settings.mjs", "chat-config.json", "memory.mjs", "memory-config.json"]) {
     copyFileSync(join(repositoryRoot, "bridge", file), join(companionStage, "bridge", file));
   }
   for (const file of ["install-native-host.mjs", "uninstall-native-host.mjs", "smoke-installed-host.mjs", "probe-process.mjs", "host-paths.mjs"]) {

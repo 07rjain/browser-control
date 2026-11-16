@@ -43,8 +43,10 @@ createInterface({ input: process.stdin }).on("line", (line) => {
         for (const message of decoder.push(chunk)) if (message.id === "connect") resolve(message);
       });
     });
-    child.stdin.write(encodeNativeMessage({ type: "request", id: "connect", method: "bridge.status" }));
-    expect(await reply).toMatchObject({ ok: true, data: { connected: true } });
+    // bridge.status is now a local version query and deliberately starts no CLI.
+    // A capability query exercises actual Codex startup before checking teardown.
+    child.stdin.write(encodeNativeMessage({ type: "request", id: "connect", method: "approval.capabilities" }));
+    expect(await reply).toMatchObject({ ok: true, data: { available: false, codexVersion: "unknown" } });
     clearTimeout(timeout);
     pid = Number(readFileSync(pidFile, "utf8"));
     const closed = once(child, "close", { signal: AbortSignal.timeout(7000) });

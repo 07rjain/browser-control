@@ -10,8 +10,7 @@ import { stopProbeProcess } from "./probe-process.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const { version } = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
-const platform = { darwin: "macos", linux: "linux", win32: "windows" }[process.platform];
-const name = `browser-control-companion-${platform}-${version}`;
+const name = `browser-control-companion-${version}`;
 const archive = join(root, "release", `${name}.zip`);
 const extracted = mkdtempSync(join(tmpdir(), "browser-control-package ü-"));
 const home = mkdtempSync(join(tmpdir(), "codex-sidebar-smoke-package ü-"));
@@ -48,6 +47,9 @@ try {
   });
   // No account or model request: exercise the extracted companion, its import
   // graph, prompt persistence and binary native-message transfer directly.
+  const bridgeStatus = await request("bridge.status");
+  assert.equal(bridgeStatus.version, version);
+  assert.equal(bridgeStatus.platform, process.platform);
   const memoryCapabilities = await request("memory.capabilities");
   assert.equal(memoryCapabilities.version, 1);
   assert.equal(memoryCapabilities.automaticChanges, 2);

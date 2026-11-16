@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { CODEX_THREAD_RESTRICTIONS } from "./protocol.mjs";
 
 const reviewerConfig = JSON.parse(readFileSync(new URL("./reviewer-config.json", import.meta.url), "utf8"));
+const companionVersion = JSON.parse(readFileSync(new URL("./version.json", import.meta.url), "utf8")).version;
 export const REVIEW_MODEL = reviewerConfig.defaultModel;
 const DEFAULT_REVIEW_SYSTEM_PROMPT = reviewerConfig.systemPrompt;
 const MAX_REVIEW_SYSTEM_PROMPT = reviewerConfig.maxSystemPromptChars;
@@ -18,6 +19,7 @@ export function reviewerCapabilities(userAgent) {
   const codexVersion = typeof userAgent === "string" ? userAgent.match(/\/(\d+\.\d+\.\d+)(?=\s|$|\()/)?.[1] ?? "unknown" : "unknown";
   const available = reviewerConfig.verifiedCodexVersions.includes(codexVersion);
   return { version: 2, available, configurableModel: true, editableSystemPrompt: true, codexVersion,
+    companionVersion, verifiedCodexVersions: reviewerConfig.verifiedCodexVersions,
     ...(available ? {} : { reason: `Auto review is unavailable for Codex CLI ${codexVersion}. Verified versions: ${reviewerConfig.verifiedCodexVersions.join(", ")}. Use Ask every time until this version passes the isolated reviewer checks.` }) };
 }
 

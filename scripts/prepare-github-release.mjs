@@ -17,13 +17,14 @@ for (const file of ["package.json", "public/manifest.json", "package-lock.json"]
 if (!readFileSync("scripts/install-native-host.mjs", "utf8").includes(`const companionVersion = "${version}"`)) {
   throw new Error("Companion installer version differs from release.");
 }
+if (JSON.parse(readFileSync("bridge/version.json", "utf8")).version !== version) throw new Error("Companion runtime version differs from release.");
 const commit = git("rev-parse", `${tag}^{commit}`);
 if (git("rev-parse", "HEAD") !== commit) throw new Error("Checkout does not match release tag.");
 git("merge-base", "--is-ancestor", commit, "origin/main");
 const sourceRepo = "07rjain/browser-control";
 const release = JSON.parse(gh("api", `repos/${sourceRepo}/releases/tags/${tag}`));
 if (release.draft || release.prerelease) throw new Error("Only published stable releases can be deployed.");
-const companion = `browser-control-companion-linux-${version}.zip`;
+const companion = `browser-control-companion-${version}.zip`;
 const extension = `browser-control-extension-${version}.zip`;
 const names = [companion, extension, "SHA256SUMS.txt", "EXTENSION_SHA256SUMS.txt"];
 mkdirSync("release", { recursive: true });
@@ -61,7 +62,8 @@ if (mode === "check") {
   if (!target) {
     gh("release", "create", companionTag, "--repo", repo, "--draft", "--title", `Browser Control companion ${version}`,
       "--notes", `Portable companion for Browser Control ${tag}. Source: https://github.com/${sourceRepo}/commit/${commit}`);
-    target = JSON.parse(gh("api", `repos/${repo}/releases/tags/${companionTag}`));
+    target = JSON.parse(gh("release", "view", companionTag, "--repo", repo, "--json", "databaseId,isDraft,assets"));
+    target = { ...target, draft: target.isDraft };
   }
   for (const name of [companion, "SHA256SUMS.txt"]) {
     const asset = target.assets.find((item) => item.name === name);

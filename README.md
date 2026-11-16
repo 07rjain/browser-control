@@ -1,5 +1,18 @@
 # Browser Control
 
+Version **0.3.11** adds an in-extension repair flow for outdated companions on
+**Linux, macOS, and Windows**. If an older companion rejects a CLI this extension
+has verified (including 0.169.0), Settings → Agent explains the mismatch, links
+the matching companion update, and offers a support recheck. Auto review stays
+disabled until the running companion confirms support; checking does not change
+your permission mode. See [0.3.11 release notes](docs/RELEASE_0.3.11.md).
+
+The same portable `browser-control-companion-0.3.11.zip` supports all three desktop
+operating systems. Existing users with an older companion still need to install
+it once and fully restart Chrome or Brave. A Store extension update cannot replace
+a native program already installed on the computer. This release does not add a
+native auto-updater.
+
 ### Extension updates
 
 Chrome Web Store installations already update automatically: Chrome normally checks every few hours, so a published release may not appear immediately on every machine. Google approval, rollout and managed-browser policies still apply.

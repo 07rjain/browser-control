@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -40,6 +40,8 @@ createInterface({ input: process.stdin }).on("line", line => {
   try {
     const capability = await request("approval.capabilities");
     expect(capability.available).toBe(available);
+    expect(capability.companionVersion).toBe(JSON.parse(readFileSync(new URL("../bridge/version.json", import.meta.url), "utf8")).version);
+    expect(capability.verifiedCodexVersions).toContain("0.169.0");
     if (!available) expect(capability.reason).toContain(version);
     await request("chat.start", {});
     await expect(request("approval.reviewConfigured", { configurationVersion: 2, systemPrompt: "Review this action.", parentThreadId: "parent", parentTurnId: "turn", parentCallId: "not-pending" })).rejects.toThrow(available ? /no longer pending/ : /unavailable/);

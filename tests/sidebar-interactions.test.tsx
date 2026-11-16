@@ -13,12 +13,14 @@ let capture: () => Promise<unknown>;
 let requests: Array<Record<string, unknown>>;
 let restoredNotice: unknown;
 let reviewerAvailable: boolean;
+let reviewerCodexVersion: string;
 let chatPrompt: string;
 let chatSettingsError: string | null;
 let readAccount: () => Promise<unknown>;
 
 beforeEach(() => {
   stored = {}; requests = []; restoredNotice = null; reviewerAvailable = true;
+  reviewerCodexVersion = "0.166.0";
   chatPrompt = DEFAULT_CHAT_SYSTEM_PROMPT; chatSettingsError = null;
   capture = async () => page;
   readAccount = async () => ({ account: { type: "chatgpt", email: null, planType: "test" } });
@@ -34,7 +36,7 @@ beforeEach(() => {
         switch (request.type) {
           case "EXTENSION_UPDATE_READ": data = { currentVersion: "0.3.9", availableVersion: null, storeManaged: true }; break;
           case "ACCOUNT_READ": data = await readAccount(); break;
-          case "AUTO_REVIEW_READ": data = { version: 2, available: reviewerAvailable, configurableModel: true, editableSystemPrompt: true, ...(reviewerAvailable ? {} : { reason: "Auto review is unavailable for Codex CLI 0.166.0. Use Ask every time." }) }; break;
+          case "AUTO_REVIEW_READ": data = { version: 2, available: reviewerAvailable, configurableModel: true, editableSystemPrompt: true, codexVersion: reviewerCodexVersion, ...(reviewerAvailable ? {} : { reason: `Auto review is unavailable for Codex CLI ${reviewerCodexVersion}. Use Ask every time.` }) }; break;
           case "CHAT_SETTINGS_READ": data = { version: 1, systemPrompt: chatPrompt }; break;
           case "CHAT_SETTINGS_WRITE": {
             if (chatSettingsError) return { ok: false, error: chatSettingsError };
@@ -342,6 +344,24 @@ describe("sidebar interactions", () => {
     const option = screen.getByRole("option", { name: "Auto review" }) as HTMLOptionElement;
     expect(option.disabled).toBe(true);
     expect(await screen.findByText(/Auto review is unavailable for Codex CLI 0\.166\.0/)).toBeTruthy();
+  });
+
+  it("diagnoses the old companion's 0.169.0 refusal and rechecks without changing permission", async () => {
+    reviewerAvailable = false;
+    reviewerCodexVersion = "0.169.0";
+    await ready();
+    fireEvent.click(screen.getByRole("button", { name: "Open settings" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Agent" }));
+    expect(await screen.findByText(/Codex CLI 0\.169\.0 is supported/)).toBeTruthy();
+    const option = screen.getByRole("option", { name: "Auto review" }) as HTMLOptionElement;
+    expect(option.disabled).toBe(true);
+    expect((screen.getByRole("combobox", { name: "Agent permission" }) as HTMLSelectElement).value).toBe("full");
+    reviewerAvailable = true;
+    fireEvent.click(screen.getByRole("button", { name: "Check support again" }));
+    await vi.waitFor(() => expect(option.disabled).toBe(false));
+    expect((screen.getByRole("combobox", { name: "Agent permission" }) as HTMLSelectElement).value).toBe("full");
+    expect(chrome.permissions.remove).not.toHaveBeenCalled();
+    expect(chrome.permissions.request).not.toHaveBeenCalled();
   });
 
   it("updates the same activity row through review and preserves approval attribution", async () => {
