@@ -241,7 +241,9 @@ After building, install the test browser with `npx playwright install --with-dep
 
 ## GitHub CI
 
-The [Desktop compatibility workflow](.github/workflows/compatibility.yml) runs on pushes, pull requests, and manual dispatch. One job runs independently on Ubuntu, Windows, and macOS, each with Node.js 24 and the verified Codex CLI 0.162.1.
+The [Desktop compatibility workflow](.github/workflows/compatibility.yml) runs on pull requests, pushes to `main`, and manual dispatch. Feature-branch pushes do not start a second copy of PR checks, and tag pushes do not duplicate the release workflow's checks. A new PR revision cancels that PR's outdated run; main, manual, and release runs are allowed to finish.
+
+All 18 compatibility jobs remain: three full checks on Ubuntu, Windows, and macOS with Node.js 24 and the verified Codex CLI 0.162.1; six memory checks across those operating systems and Node.js 20/24; and nine Auto review probes across those operating systems and Codex 0.164.0/0.165.0/0.169.0. The release workflow independently runs the same matrix at the exact tagged commit before publishing.
 
 | Check | Purpose |
 | --- | --- |
