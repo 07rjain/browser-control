@@ -9,7 +9,8 @@ import { encodeNativeMessage, LengthPrefixedJsonDecoder } from "../bridge/protoc
 import { stopProbeProcess } from "../scripts/probe-process.mjs";
 
 it.each([
-  ["0.162.1", true], ["0.164.0", true], ["0.165.0", true], ["0.161.0", false], ["0.166.0", false], ["unknown", false],
+  ["0.162.1", true], ["0.164.0", true], ["0.165.0", true], ["0.169.0", true],
+  ["0.161.0", false], ["0.166.0", false], ["0.170.0", false], ["unknown", false],
 ])("reports reviewer compatibility for CLI %s without inference and preserves action binding", async (version, available) => {
   const home = mkdtempSync(join(tmpdir(), "codex-sidebar-smoke-review-capability-"));
   writeFileSync(join(home, "codex.mjs"), `import { createInterface } from "node:readline";

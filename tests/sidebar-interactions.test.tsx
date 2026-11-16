@@ -32,6 +32,7 @@ beforeEach(() => {
         requests.push(request);
         let data: unknown = {};
         switch (request.type) {
+          case "EXTENSION_UPDATE_READ": data = { currentVersion: "0.3.9", availableVersion: null, storeManaged: true }; break;
           case "ACCOUNT_READ": data = await readAccount(); break;
           case "AUTO_REVIEW_READ": data = { version: 2, available: reviewerAvailable, configurableModel: true, editableSystemPrompt: true, ...(reviewerAvailable ? {} : { reason: "Auto review is unavailable for Codex CLI 0.166.0. Use Ask every time." }) }; break;
           case "CHAT_SETTINGS_READ": data = { version: 1, systemPrompt: chatPrompt }; break;

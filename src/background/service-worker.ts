@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { createExtensionUpdater } from "./extension-updates";
 import { attachmentSummarySchema } from "../shared/attachments";
 import { memoryStateSchema } from "../shared/memory";
 import { chatSettingsSchema } from "../shared/chat-settings";
@@ -183,6 +184,21 @@ const observedTasks = new Set<string>();
 const retiredTasks = new Set<string>();
 let lifecycleEpoch = 0;
 
+const extensionUpdates = createExtensionUpdater({
+  isBusyNow: () => pendingNative.size > 0 || processingCalls.size > 0 || decidingCalls.size > 0 ||
+    liveReviews.size > 0 || pendingApprovals.size > 0 || pendingPermissions.size > 0,
+  isBusy: async () => {
+    const [tasks, prompts, recording] = await Promise.all([
+      storedList<BrowserTaskState>(TASK_KEY),
+      storedList<StoredPendingPrompt>(PENDING_PROMPTS_KEY),
+      recordingBlocksBrowserWork(),
+    ]);
+    return tasks.some((task) => !task.finished && !task.canceled) || prompts.length > 0 || recording;
+  },
+  notify: (state) => broadcast("extension.update", state),
+});
+extensionUpdates.register();
+
 function broadcast(event: string, data?: unknown): void {
   const message: SidebarEvent = { source: "codex-sidebar-background", event, data };
   void chrome.runtime.sendMessage(message).catch(() => undefined);
@@ -206,13 +222,15 @@ function connectNative(): chrome.runtime.Port {
       broadcast("bridge.error", { message: "The native companion sent an invalid message." });
       return;
     }
-    void handleNativeEnvelope(parsed.data);
+    const release = extensionUpdates.hold();
+    void handleNativeEnvelope(parsed.data).finally(release).catch(() => undefined);
   });
   port.onDisconnect.addListener(() => {
     const detail = chrome.runtime.lastError?.message ?? "Native companion disconnected.";
     nativePort = null;
     rejectAllPending(detail);
     broadcast("bridge.status", { connected: false, error: detail });
+    extensionUpdates.reconsider();
   });
   broadcast("bridge.status", { connected: true });
   return port;
@@ -229,7 +247,7 @@ async function handleNativeEnvelope(message: NativeEnvelope): Promise<void> {
     return;
   }
   if (message.event === "tool.request") {
-    void handleDynamicToolCall(message.data);
+    await handleDynamicToolCall(message.data);
     return;
   }
   if (message.event === "skill.status") {
@@ -1314,6 +1332,8 @@ async function cancelBrowserTask(threadId: string, turnId?: string): Promise<voi
 async function routeRequest(input: unknown): Promise<unknown> {
   const request = uiRequestSchema.parse(input);
   switch (request.type) {
+    case "EXTENSION_UPDATE_READ": return extensionUpdates.read();
+    case "EXTENSION_UPDATE_CHECK": return extensionUpdates.check();
     case "BRIDGE_STATUS": return requestNative("bridge.status");
     case "BROWSER_STATE_READ": {
       const storedPrompts = await storedList<StoredPendingPrompt>(PENDING_PROMPTS_KEY);
@@ -1473,6 +1493,7 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
     sendResponse({ ok: false, error: "Rejected message from an unknown sender." } satisfies UiResponse);
     return false;
   }
+  const release = extensionUpdates.hold();
   void routeRequest(message)
     .then((data) => sendResponse({ ok: true, data } satisfies UiResponse))
     .catch((error: unknown) => {
@@ -1485,14 +1506,15 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
         code: isValidationError ? "INVALID_REQUEST" : isPagePermissionError ? "PAGE_PERMISSION_REQUIRED" : "REQUEST_FAILED",
         details: isPagePermissionError ? { originPattern: error.originPattern } : undefined,
       } satisfies UiResponse);
-    });
+    }).finally(release);
   return true;
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
-  void handleRemovedWorkingTab(tabId);
+  void handleRemovedWorkingTab(tabId).finally(extensionUpdates.reconsider).catch(() => undefined);
 });
 chrome.runtime.onConnect?.addListener?.((port) => {
+  if (extensionUpdates.acceptPort(port)) return;
   acceptRecorderPort(port);
 });
 chrome.tabs.onActivated?.addListener?.((info) => {

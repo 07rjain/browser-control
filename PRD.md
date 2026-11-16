@@ -36,6 +36,14 @@ The original MVP is a local, user-driven chat, attachment, and tab-tool experien
 
 ## 2. Product goals and non-goals
 
+### Approved extension update behavior (2026-11-13)
+
+- Keep Chrome Web Store automatic download/signature verification as the only extension update channel. Chrome performs its normal periodic checks; do not add a repeating Store request or a remote executable updater.
+- When Chrome reports a staged update, retain its version locally across service-worker suspension. Apply it only after all extension views close, active turns/approvals and skill recording finish, and pending requests/saves settle. Uncertain state defers installation.
+- Settings → General shows the installed version, a user-initiated Check for updates button, and a pending-update instruction to finish work and close Browser Control. Explain throttled checks, errors, and development builds accurately.
+- An installation on an older version must first receive this implementation through Chrome's existing updater. No instant delivery promise; Google approval, rollout, browser policies and Chrome's check schedule still apply.
+- This changes only extension lifecycle behavior. No new permission, telemetry, publisher credential, site-access grant or native-companion auto-installer. The separately installed companion retains its existing explicit update process.
+
 ### Goals
 
 1. Deliver a persistent, polished sidebar chat experience in Chromium.

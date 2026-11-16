@@ -1,5 +1,17 @@
 # Browser Control
 
+### Extension updates
+
+Chrome Web Store installations already update automatically: Chrome normally checks every few hours, so a published release may not appear immediately on every machine. Google approval, rollout and managed-browser policies still apply.
+
+The update lifecycle implementation listens for Chrome's `runtime.onUpdateAvailable` event and applies the staged signed update after all Browser Control views close and no turn, approval, skill recording or pending request/save is active. It retains the pending version across service-worker suspension and fails closed when idle state cannot be established. It does not poll the Store on a timer. **Settings → General → Updates** shows the installed version and offers **Check for updates**, with separate messages for a pending version, throttling and network failure. Unpacked development builds must still be rebuilt and reloaded.
+
+This feature does not update the separately installed native companion. An older installation must first receive this implementation through Chrome's normal updater; to check immediately, open `chrome://extensions`, temporarily enable Developer mode, and click Update.
+
+Validation: `tests/extension-updates.test.ts` covers delayed installation, open views, concurrent saves, work guards, worker recovery, throttling and errors. `tests/extension-update-settings.test.tsx` checks the Settings messages. Run `node scripts/smoke-extension-updates.mjs` after building to exercise the packaged Settings and lifecycle in an isolated Chromium profile with synthetic Store events. It does not prove real Store delivery or update the user's installed extension/companion.
+
+Local validation on 2026-11-13 passed typecheck, lint, build, **303 tests** (one pre-existing skip), and the native bridge smoke using an isolated Codex CLI **0.162.1**. In isolated **Chromium 156.0.8078.4** on Linux, the real packaged sidebar showed the installed version and manual no-update/throttling messages. A synthetic update was held while the sidebar was open, while a persisted task was active, and while an unsaved skill recording existed; the intercepted reload ran after all blockers cleared. Both captured consoles had zero errors, and the Settings screenshot was inspected. Store events and account responses were synthetic; no real package installation, signed-in agent task, or companion update was performed. Windows/macOS and actual Store-to-Store upgrade validation remain separate checks.
+
 A Chrome side-panel extension powered by the user's ChatGPT Codex subscription through the official Codex App Server interface.
 
 The repository contains the implemented MVP plus the approved supervised browser-control milestone: sidebar chat, managed ChatGPT sign-in, model selection, explicit current-page attachment, seven tab tools, eleven typed page tools, and message Copy/Fork actions. It does not contain remote control, unattended automation, arbitrary JavaScript/selectors, connectors, analytics, publisher API keys, or ChatGPT cookie scraping.
@@ -119,7 +131,7 @@ Local Codex companion -----> Codex App Server / ChatGPT authentication
 - Codex CLI `0.148.0` or a compatible release available as `codex` (on Windows, `codex.exe` or the npm `codex.cmd` shim)
 
 Use Node.js 24 for development builds and CI. Auto review supports the verified
-Codex CLI versions **0.162.1, 0.164.0, and 0.165.0**. See the [desktop compatibility review](docs/DESKTOP_COMPATIBILITY.md)
+Codex CLI versions **0.162.1, 0.164.0, 0.165.0, and 0.169.0**. See the [desktop compatibility review](docs/DESKTOP_COMPATIBILITY.md)
 for the Linux/Windows checks, portability fixes, and remaining desktop validation.
 
 ## Local memory (development build)
@@ -399,9 +411,11 @@ Main prompt validation, 2026-10-16: typecheck, lint, all **211 active tests** (o
 
 ### Auto review
 
-Auto review is under **Settings → Agent → Agent permission**. It was not removed from main: the original exact `0.162.1` CLI gate disabled it after Codex upgrades. The companion now accepts verified `0.162.1`, `0.164.0`, and `0.165.0`, and returns the detected version/reason for unsupported builds. Refresh the companion and reload the extension to use the fix. Unknown versions remain on human confirmation until their tool isolation/concurrency checks pass; no inference runs merely to check availability. See [branch integration audit](docs/BRANCH_INTEGRATION_AUDIT.md).
+Auto review is under **Settings → Agent → Agent permission**. It was not removed from main: the original exact `0.162.1` CLI gate disabled it after Codex upgrades. The companion now accepts verified `0.162.1`, `0.164.0`, `0.165.0`, and `0.169.0`, and returns the detected version/reason for unsupported builds. Refresh the companion and reload the extension to use the fix. Unknown versions remain on human confirmation until their tool isolation/concurrency checks pass; no inference runs merely to check availability. See [branch integration audit](docs/BRANCH_INTEGRATION_AUDIT.md).
 
-Settings → Agent → Agent permission → **Auto review** enables an independent reviewer, defaulting to `gpt-6-luna`. It uses the existing Codex sign-in and additional model usage, while the composer keeps its own selected model. An updated companion and verified CLI **0.162.1, 0.164.0, or 0.165.0** are required; an unavailable model, slow response, invalid result, exhausted budget or incomplete evidence falls back to your normal confirmation card. Open **Auto review settings** to select any model in your Codex model list, regardless of composer model visibility. An unavailable model or unsupported structured result asks you; the companion never silently substitutes another model.
+The Chrome extension and native companion update separately. An older installed companion can still disable Auto review after the extension updates. On 15 November, the local launcher still used companion 0.3.7 with a 0.162.1-only gate, while Codex was 0.169.0. After verifying the new CLI, refreshing the companion restored `Auto review: available`. Reload the extension to disconnect an already-running older companion, then select Auto review again. See the [diagnosis and validation](docs/AUTO_REVIEW_2026-11-15.md).
+
+Settings → Agent → Agent permission → **Auto review** enables an independent reviewer, defaulting to `gpt-6-luna`. It uses the existing Codex sign-in and additional model usage, while the composer keeps its own selected model. An updated companion and verified CLI **0.162.1, 0.164.0, 0.165.0, or 0.169.0** are required; an unavailable model, slow response, invalid result, exhausted budget or incomplete evidence falls back to your normal confirmation card. Open **Auto review settings** to select any model in your Codex model list, regardless of composer model visibility. An unavailable model or unsupported structured result asks you; the companion never silently substitutes another model.
 
 The **Reviewer system prompt** editor shows the exact saved system prompt used for review. Edit it and choose **Save prompt**, or **Reset prompt to default** to restore the built-in prompt while keeping the chosen model. The limit is 6,000 characters, in addition to the 8,000-character action-evidence budget. Empty/invalid prompts cannot replace the saved prompt. **Required response rules** shows the fixed structured-response instructions. Code-enforced permissions, hard refusals, eligibility, exact-state checks and human escalation limits remain in force. Model/prompt changes apply to the next task; switching permission modes preserves these preferences. Unsaved prompt edits remain in the editor when changing models.
 

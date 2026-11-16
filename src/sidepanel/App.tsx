@@ -31,6 +31,8 @@ import ChatPromptSettings from "./ChatPromptSettings";
 import MemorySettings from "./MemorySettings";
 import { type MemoryWrite } from "../shared/memory";
 import SettingsPanel from "./SettingsPanel";
+import ExtensionUpdates from "./ExtensionUpdates";
+import { SIDEBAR_LIFETIME_PORT } from "../shared/extension-updates";
 import { COMPLETION_NOTICE_DURATION_MS, freshCompletionNotice, type CompletionNotice } from "../shared/completion-notice";
 import { greetingFor, selectedModelLabel, setupSteps, STARTER_TASKS, type AuthState, type StarterTask } from "./welcome";
 import {
@@ -403,6 +405,11 @@ export default function App() {
 
   const streaming = activeTurnId !== null || isSending;
   const recordingActive = recording.status !== "idle";
+
+  useEffect(() => {
+    const port = chrome.runtime.connect?.({ name: SIDEBAR_LIFETIME_PORT });
+    return () => { port?.disconnect(); };
+  }, []);
 
   useEffect(() => {
     if (!incognito || !threadId) return;
@@ -1769,6 +1776,7 @@ export default function App() {
                   <option value="dark">Dark</option>
                 </select>
               </label>
+              <ExtensionUpdates disabled={streaming || recordingActive} request={sendRequest} />
             </>,
             models: <>
               <h3 className="settings-section-title">Chat models</h3>

@@ -27,6 +27,8 @@ export const accountSchema = z
 const requestBase = z.object({ requestId: z.string().uuid() });
 
 export const uiRequestSchema = z.discriminatedUnion("type", [
+  requestBase.extend({ type: z.literal("EXTENSION_UPDATE_READ") }),
+  requestBase.extend({ type: z.literal("EXTENSION_UPDATE_CHECK") }),
   requestBase.extend({ type: z.literal("BRIDGE_STATUS") }),
   requestBase.extend({ type: z.literal("BROWSER_STATE_READ") }),
   requestBase.extend({ type: z.literal("COMPLETION_NOTICE_DISMISS") }),

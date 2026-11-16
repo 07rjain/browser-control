@@ -44,6 +44,7 @@ jobs:
         run: npx playwright install --with-deps chromium
       - run: npm run test:browser
       - run: node scripts/smoke-page-inspection.mjs
+      - run: node scripts/smoke-extension-updates.mjs
 
   memory-runtime:
     name: Memory / ${{ matrix.os }} / Node ${{ matrix.node }}
@@ -73,7 +74,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        codex: [0.164.0, 0.165.0]
+        codex: [0.164.0, 0.165.0, 0.169.0]
     steps:
       - uses: actions/checkout@v7
         with:

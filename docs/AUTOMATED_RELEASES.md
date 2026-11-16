@@ -69,7 +69,7 @@ permissions, account behavior, memory behavior, or user data collection change.
    and `companionVersion` in `scripts/install-native-host.mjs`. Update release
    notes and any Store privacy/listing disclosures as needed; merge to main.
 2. Create tag `vX.Y.Z` at that main commit and **publish its stable GitHub Release**.
-   Drafts/prereleases do not deploy. All 15 desktop compatibility jobs must pass
+   Drafts/prereleases do not deploy. All 18 desktop compatibility jobs must pass
    again at the validated commit before publication.
 3. Watch **Publish browser release** in Actions. The final summary reports whether
    it submitted, was already pending review, or was already published. The Store
