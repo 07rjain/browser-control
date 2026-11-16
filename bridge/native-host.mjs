@@ -8,6 +8,7 @@ import { codexInvocation } from "./codex-launch.mjs";
 import { localhostCallbackPort, startIpv4LoginProxy } from "./login-proxy.mjs";
 import { createRestrictedThreadRegistry } from "./restricted-threads.mjs";
 import { createUploadStore } from "./uploads.mjs";
+import { createTurnInterrupts } from "./turn-interrupts.mjs";
 import { createChatInputService } from "./chat-input.mjs";
 import { createApprovalReviewer, reviewerCapabilities } from "./approval-reviewer.mjs";
 import { createMemoryStore, MEMORY_CONFIG } from "./memory.mjs";
@@ -66,12 +67,27 @@ const incognitoThreads = new Set();
 const memorySources = new Map();
 const freshThreads = new Set();
 const activeBrowserCalls = new Map();
+const turnInterrupts = createTurnInterrupts((threadId, turnId) => appRequest("turn/interrupt", { threadId, turnId }));
+async function startChatTurn(params) {
+  const result = await appRequest("turn/start", params);
+  turnInterrupts.started(params.threadId, result.turn.id);
+  return result;
+}
+function interruptTurn(threadId, turnId) {
+  restrictedThreads.assertRestricted(threadId);
+  const stopped = turnInterrupts.stop(threadId, turnId);
+  memorySources.delete(threadId);
+  void memory.cancel(threadId, turnId).catch(() => undefined);
+  if (activeTeachingTurns.get(threadId)?.turnId === turnId) activeTeachingTurns.delete(threadId);
+  approvalReviewer.cancel(threadId, turnId);
+  return stopped;
+}
 let approvalReviewer = createApprovalReviewer({ request: appRequest, workspace });
 let uploads = createUploadStore(join(sidebarHome, "uploads"));
 let chatInputs = createChatInputService(join(sidebarHome, "sends"), uploads, {
   prepareInput: prepareMemoryInput,
-  startTurn: (params) => appRequest("turn/start", params),
-  interrupt: (threadId, turnId) => appRequest("turn/interrupt", { threadId, turnId }),
+  startTurn: startChatTurn,
+  interrupt: interruptTurn,
   assertRestricted: (threadId) => restrictedThreads.assertRestricted(threadId),
 });
 
@@ -382,6 +398,10 @@ function handleAppServerMessage(message) {
   }
   if (message.id !== undefined && message.method) {
     if (message.method === "item/tool/call") {
+      if (turnInterrupts.blocked(message.params?.threadId, message.params?.turnId)) {
+        writeAppServer({ id: message.id, result: { success: false, contentItems: [{ type: "inputText", text: "This turn was stopped or already finished. Do not continue this task." }] } });
+        return;
+      }
       const namespace = message.params?.namespace;
       if (namespace === "memory") {
         void answerMemoryTool(message.id, message.params).catch(() => undefined);
@@ -407,10 +427,12 @@ function handleAppServerMessage(message) {
   }
 
   if (message.method === "turn/started" && message.params?.threadId && message.params?.turn?.id) {
+    turnInterrupts.started(message.params.threadId, message.params.turn.id);
     freshThreads.delete(message.params.threadId);
     activeTeachingTurns.set(message.params.threadId, { turnId: message.params.turn.id, offered: false });
   }
   if (message.method === "turn/completed" && message.params?.threadId) {
+    turnInterrupts.completed(message.params.threadId, message.params.turn?.id);
     if (activeTeachingTurns.get(message.params.threadId)?.turnId === message.params.turn?.id) activeTeachingTurns.delete(message.params.threadId);
     memorySources.delete(message.params.threadId);
     approvalReviewer.cancel(message.params.threadId, message.params.turn?.id);
@@ -458,6 +480,7 @@ async function ensureAppServer() {
     appServer = null;
     approvalReviewer.close();
     activeBrowserCalls.clear();
+    turnInterrupts.clear();
     activeTeachingTurns.clear();
     memorySources.clear();
     freshThreads.clear();
@@ -534,8 +557,8 @@ async function deleteAllLocalData() {
     uploads = createUploadStore(join(sidebarHome, "uploads"));
     chatInputs = createChatInputService(join(sidebarHome, "sends"), uploads, {
       prepareInput: prepareMemoryInput,
-  startTurn: (params) => appRequest("turn/start", params),
-      interrupt: (threadId, turnId) => appRequest("turn/interrupt", { threadId, turnId }),
+      startTurn: startChatTurn,
+      interrupt: interruptTurn,
       assertRestricted: (threadId) => restrictedThreads.assertRestricted(threadId),
     });
     lastAppServerError = "";
@@ -891,17 +914,10 @@ async function handleRequest(message) {
     }
     case "chat.cancelSend":
       memorySources.delete(message.params?.threadId);
-      await memory.cancel(message.params?.threadId).catch(() => undefined);
+      void memory.cancel(message.params?.threadId).catch(() => undefined);
       return chatInputs.cancel(message.params ?? {});
     case "chat.interrupt":
-      memorySources.delete(message.params?.threadId);
-      await memory.cancel(message.params?.threadId, message.params?.turnId).catch(() => undefined);
-      if (!message.params?.turnId || activeTeachingTurns.get(message.params.threadId)?.turnId === message.params.turnId) activeTeachingTurns.delete(message.params?.threadId);
-      approvalReviewer.cancel(message.params?.threadId, message.params?.turnId);
-      return appRequest("turn/interrupt", {
-        threadId: message.params?.threadId,
-        turnId: message.params?.turnId,
-      });
+      return interruptTurn(message.params?.threadId, message.params?.turnId);
     case "tool.respond": {
       const { requestId, success, result } = message.params ?? {};
       if (typeof requestId !== "string" && typeof requestId !== "number") {

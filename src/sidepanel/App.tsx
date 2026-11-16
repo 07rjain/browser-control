@@ -398,6 +398,12 @@ export default function App() {
   const activeTurnIdentityRef = useRef<string | null>(null);
   const teachingOfferTurnRef = useRef<string | null>(null);
   const stopRequestedRef = useRef(false);
+  const stoppedTurnsRef = useRef(new Set<string>());
+  const [isStopping, setIsStopping] = useState(false);
+  const rememberStoppedTurn = (turnId: string) => {
+    stoppedTurnsRef.current.add(turnId);
+    if (stoppedTurnsRef.current.size > 100) stoppedTurnsRef.current.delete(stoppedTurnsRef.current.values().next().value!);
+  };
   const completionSoundEnabledRef = useRef(false);
   const conversationSaveEpoch = useRef(0);
   const conversationSnapshotRef = useRef<ConversationSnapshot | null>(null);
@@ -406,7 +412,7 @@ export default function App() {
   const lastConversationSaveKey = useRef("");
   const conversationPersistSuspended = useRef(false);
 
-  const streaming = activeTurnId !== null || isSending;
+  const streaming = activeTurnId !== null || isSending || isStopping;
   const recordingActive = recording.status !== "idle";
 
   useEffect(() => {
@@ -755,6 +761,7 @@ export default function App() {
           const parsed = skillRecordingOfferEventSchema.safeParse(message.data);
           if (!parsed.success || stopRequestedRef.current) break;
           const offer = parsed.data;
+          if (stoppedTurnsRef.current.has(offer.turnId)) break;
           if (inFlightPayloadRef.current?.threadId !== offer.threadId || (activeTurnIdentityRef.current && activeTurnIdentityRef.current !== offer.turnId)) break;
           activeTurnIdentityRef.current = offer.turnId;
           teachingOfferTurnRef.current = offer.turnId;
@@ -768,8 +775,8 @@ export default function App() {
           break;
         }
         case "chat.delta": {
-          if (stopRequestedRef.current) break;
           const data = message.data as { turnId: string; delta: string };
+          if (stopRequestedRef.current || stoppedTurnsRef.current.has(data.turnId)) break;
           activeTurnIdentityRef.current = data.turnId;
           setActiveTurnId(data.turnId);
           setMessages((current) => {
@@ -784,8 +791,8 @@ export default function App() {
           break;
         }
         case "chat.messageCompleted": {
-          if (stopRequestedRef.current) break;
           const data = message.data as { turnId: string; item: { text: string } };
+          if (stopRequestedRef.current || stoppedTurnsRef.current.has(data.turnId)) break;
           setMessages((current) =>
             current.map((item) =>
               item.role === "assistant" && item.streaming
@@ -796,6 +803,8 @@ export default function App() {
           break;
         }
         case "chat.turnCompleted": {
+          const completed = message.data as { turn?: { id?: string } };
+          if (completed.turn?.id && stoppedTurnsRef.current.has(completed.turn.id)) break;
           const wasStopped = stopRequestedRef.current;
           const completedBrowserTask = turnExecutedToolRef.current;
           const offerTurnId = teachingOfferTurnRef.current;
@@ -824,6 +833,8 @@ export default function App() {
           break;
         }
         case "chat.error": {
+          const data = message.data as { turnId?: string };
+          if (data.turnId && stoppedTurnsRef.current.has(data.turnId)) break;
           const wasStopped = stopRequestedRef.current;
           const offerTurnId = teachingOfferTurnRef.current;
           teachingOfferTurnRef.current = null;
@@ -852,14 +863,16 @@ export default function App() {
           break;
         }
         case "tool.approval":
+          if (stopRequestedRef.current) break;
           setToolApproval(message.data as ToolApproval);
           break;
         case "tool.permission":
+          if (stopRequestedRef.current) break;
           setToolPermission(message.data as ToolPermission);
           break;
         case "tool.status": {
           const status = message.data as ToolStatus;
-          if (status.status === "succeeded") turnExecutedToolRef.current = true;
+          if (status.status === "succeeded" && !stopRequestedRef.current && (!status.turnId || !stoppedTurnsRef.current.has(status.turnId))) turnExecutedToolRef.current = true;
           setToolStatuses((current) => latestToolStatuses([...current, status]).slice(-100));
           if (["succeeded", "failed", "rejected", "canceled", "stale"].includes(status.status)) {
             setToolApproval((current) => (current?.callId === status.callId ? null : current));
@@ -1239,16 +1252,14 @@ export default function App() {
         clientMessageId: payload.clientMessageId,
         model: payload.model,
       });
+      if (controller.signal.aborted) {
+        rememberStoppedTurn(result.turnId);
+        await sendRequest({ type: "BROWSER_TASK_CANCEL", threadId: activeThreadId, turnId: result.turnId }).catch(() => undefined);
+        return;
+      }
       payload = { ...payload, accepted: true };
       inFlightPayloadRef.current = payload;
       if (result.attachments?.length) setMessages((current) => current.map((item) => item.id === messageId ? { ...item, attachments: result.attachments } : item));
-      if (stopRequestedRef.current) {
-        await sendRequest({ type: "BROWSER_TASK_CANCEL", threadId: activeThreadId, turnId: result.turnId }).catch(() => undefined);
-        await sendRequest({ type: "CHAT_INTERRUPT", threadId: activeThreadId, turnId: result.turnId }).catch(() => undefined);
-        setIsSending(false);
-        setMessages(settleCanceledMessages);
-        return;
-      }
       if (result.replayed) {
         setMessages(settleCanceledMessages);
         showCompletionNotice("This message was already accepted by Codex and was not sent twice. Check the conversation before starting another request.");
@@ -1258,13 +1269,8 @@ export default function App() {
       }
       setIsSending(false);
     } catch (cause) {
+      if (controller.signal.aborted) return;
       setIsSending(false);
-      if (stopRequestedRef.current) {
-        setRetryPayload(null);
-        inFlightPayloadRef.current = null;
-        setMessages(settleCanceledMessages);
-        return;
-      }
       setMessages((current) =>
         current.map((item) =>
           item.id === `${messageId}-assistant` ? { ...item, streaming: false, failed: true } : item,
@@ -1363,30 +1369,41 @@ export default function App() {
   };
 
   const stop = async () => {
+    if (isStopping) return;
+    const stoppingThreadId = threadId;
+    const stoppingTurnId = activeTurnIdentityRef.current ?? activeTurnId;
+    const payload = inFlightPayloadRef.current;
     preparationRef.current?.abort();
     sendAbortRef.current?.abort();
     stopRequestedRef.current = true;
+    if (stoppingTurnId) rememberStoppedTurn(stoppingTurnId);
     teachingOfferTurnRef.current = null;
+    setIsStopping(true);
     setIsSending(false);
     setError(null);
-    setMessages((current) => settleCanceledMessages(current.map((message) => message.streaming || message.id === activeTurnId
+    setMessages((current) => settleCanceledMessages(current.map((message) => message.streaming || message.id === stoppingTurnId
       ? { ...message, recordingOffer: undefined }
       : message)));
     setToolApproval(null);
     setToolPermission(null);
-    if (!threadId) return;
-    const payload = inFlightPayloadRef.current;
-    if (payload) {
-      await sendRequest({ type: "CHAT_CANCEL_SEND", threadId: payload.threadId ?? threadId, clientMessageId: payload.clientMessageId }).catch(() => undefined);
-      await attachmentTransport({ operation: "abort", owner: payload.owner }).catch(() => undefined);
+    try {
+      if (stoppingThreadId) {
+        // cancelSend also interrupts accepted sends. Use exactly one path.
+        if (stoppingTurnId) await sendRequest({ type: "CHAT_INTERRUPT", threadId: stoppingThreadId, turnId: stoppingTurnId });
+        else if (payload) await sendRequest({ type: "CHAT_CANCEL_SEND", threadId: payload.threadId ?? stoppingThreadId, clientMessageId: payload.clientMessageId });
+        else await sendRequest({ type: "BROWSER_TASK_CANCEL", threadId: stoppingThreadId });
+      }
+      showCompletionNotice("Stopped. Actions already completed are kept; remaining steps were canceled.");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to stop the response. Check the connection before continuing.");
+    } finally {
+      if (payload) void attachmentTransport({ operation: "abort", owner: payload.owner }).catch(() => undefined);
+      if (inFlightPayloadRef.current === payload) inFlightPayloadRef.current = null;
+      activeTurnIdentityRef.current = null;
+      turnExecutedToolRef.current = false;
+      setActiveTurnId(null);
+      setIsStopping(false);
     }
-    await sendRequest({ type: "BROWSER_TASK_CANCEL", threadId, turnId: activeTurnId ?? undefined }).catch(() => undefined);
-    if (activeTurnId) {
-      await sendRequest({ type: "CHAT_INTERRUPT", threadId, turnId: activeTurnId }).catch((cause) => {
-        setError(cause instanceof Error ? cause.message : "Unable to stop the response.");
-      });
-    }
-    setActiveTurnId(null);
   };
 
   const viewWorkingTab = async () => {
@@ -2296,7 +2313,7 @@ export default function App() {
               </div>
             </div>
             {streaming ? (
-              <button type="button" className="stop-button" onClick={() => void stop()} aria-label="Stop response" data-tooltip="Stop the current response">■</button>
+              <button type="button" className="stop-button" onClick={() => void stop()} aria-label="Stop response" disabled={isStopping} data-tooltip="Stop the current response">■</button>
             ) : (
               <button type="submit" className="send-button" disabled={!canSend} aria-label="Send message" data-tooltip="Send this message">↑</button>
             )}

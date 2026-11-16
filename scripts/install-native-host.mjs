@@ -23,11 +23,11 @@ import {
 } from "./host-paths.mjs";
 import { codexInvocation } from "../bridge/codex-launch.mjs";
 
-const companionVersion = "0.3.11";
+const companionVersion = "0.3.12";
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const layout = companionLayout(process.platform, homedir(), process.env, companionVersion);
 const installedHostScript = join(layout.runtimeDir, "native-host.mjs");
-const bridgeFiles = ["native-host.mjs", "protocol.mjs", "skills.mjs", "codex-launch.mjs", "login-proxy.mjs", "restricted-threads.mjs", "uploads.mjs", "chat-input.mjs", "approval-reviewer.mjs", "reviewer-config.json", "version.json", "chat-settings.mjs", "chat-config.json", "memory.mjs", "memory-config.json"];
+const bridgeFiles = ["native-host.mjs", "protocol.mjs", "skills.mjs", "codex-launch.mjs", "login-proxy.mjs", "restricted-threads.mjs", "uploads.mjs", "chat-input.mjs", "turn-interrupts.mjs", "approval-reviewer.mjs", "reviewer-config.json", "version.json", "chat-settings.mjs", "chat-config.json", "memory.mjs", "memory-config.json"];
 
 let codexBinary = "";
 try {

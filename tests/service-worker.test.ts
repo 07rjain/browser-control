@@ -906,12 +906,21 @@ describe("service-worker browser orchestration", () => {
       { tabId: 77, active: true },
     ]);
     await serviceWorkerTestHooks.routeRequest({
-      type: "BROWSER_TASK_CANCEL",
+      type: "CHAT_INTERRUPT",
       requestId: requestId(),
       threadId: "thread-3",
       turnId: "turn-3",
     });
     expect(indicatorStates.at(-1)).toEqual({ tabId: 77, active: false });
+    expect(nativeRequests.filter(request => request.method === "chat.interrupt")).toEqual([
+      expect.objectContaining({ params: { threadId: "thread-3", turnId: "turn-3" } }),
+    ]);
+    const queriesAtStop = query.mock.calls.length;
+    await serviceWorkerTestHooks.handleDynamicToolCall({
+      requestId: 16, threadId: "thread-3", turnId: "turn-3", callId: "late-after-stop", namespace: "tabs", tool: "list", arguments: {},
+    });
+    expect(query).toHaveBeenCalledTimes(queriesAtStop);
+    expect(nativeRequests).toContainEqual(expect.objectContaining({ method: "tool.respond", params: expect.objectContaining({ requestId: 16, success: false }) }));
 
     removedListener?.(12);
     await new Promise((resolve) => setTimeout(resolve, 0));
