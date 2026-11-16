@@ -1,7 +1,11 @@
 # Automated GitHub and Chrome Web Store releases
 
 Publishing a stable GitHub Release in `07rjain/browser-control` is the explicit
-release action. Ordinary pushes and pull requests run compatibility CI only.
+release action. Pushes to `main` and pull requests run compatibility CI only.
+Feature-branch pushes rely on PR checks, and tag pushes do not start a separate
+compatibility run: the release workflow calls the full matrix at the exact
+validated commit. Manual compatibility runs remain available. Only outdated PR
+runs are automatically canceled; main, manual, and release runs finish normally.
 The release workflow checks the exact tagged commit on Linux, Windows, and macOS,
 preserves its release assets, publishes the matching portable companion in
 `07rjain/browser-control-support`, then uploads the extension using the official

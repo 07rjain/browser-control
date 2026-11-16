@@ -2,6 +2,9 @@ name: Desktop compatibility
 
 on:
   push:
+    # Feature branches are checked through pull_request; release tags through
+    # release.yml's workflow_call. Avoid running the full matrix twice for each.
+    branches: [main]
   pull_request:
   workflow_dispatch:
   workflow_call:
@@ -12,6 +15,12 @@ on:
 
 permissions:
   contents: read
+
+concurrency:
+  # Keep release callers separate from ordinary CI. Only superseded PR runs
+  # may be canceled; main, manual, and exact-commit release checks must finish.
+  group: desktop-compatibility-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   check:
