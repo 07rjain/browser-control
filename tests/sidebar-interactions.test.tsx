@@ -17,6 +17,8 @@ let reviewerCodexVersion: string;
 let chatPrompt: string;
 let chatSettingsError: string | null;
 let readAccount: () => Promise<unknown>;
+let sendChat: () => Promise<unknown>;
+let interruptChat: () => Promise<unknown>;
 
 beforeEach(() => {
   stored = {}; requests = []; restoredNotice = null; reviewerAvailable = true;
@@ -24,6 +26,8 @@ beforeEach(() => {
   chatPrompt = DEFAULT_CHAT_SYSTEM_PROMPT; chatSettingsError = null;
   capture = async () => page;
   readAccount = async () => ({ account: { type: "chatgpt", email: null, planType: "test" } });
+  sendChat = async () => ({ turnId: "turn-teach" });
+  interruptChat = async () => ({});
   listeners.clear();
   vi.stubGlobal("chrome", {
     runtime: {
@@ -48,7 +52,11 @@ beforeEach(() => {
           case "RECORDING_READ": data = { status: "idle" }; break;
           case "RECORDING_START": data = { status: "recording", name: "Taught skill", description: request.description, notes: "", notice: "", steps: [], pendingOrigin: "", pendingOriginPattern: "", preview: "", previewError: "", truncated: false }; break;
           case "CHAT_START": case "CHAT_RESUME": data = { threadId: "thread-teach", model: "alpha" }; break;
-          case "CHAT_SEND": data = { turnId: "turn-teach" }; break;
+          case "CHAT_SEND": data = await sendChat(); break;
+          case "CHAT_INTERRUPT": {
+            try { data = await interruptChat(); } catch (error) { return { ok: false, error: String(error) }; }
+            break;
+          }
           case "SKILLS_LIST": data = { skills: [] }; break;
           case "BROWSER_STATE_READ": data = { activities: [], prompts: [], completionNotice: restoredNotice }; break;
           case "PAGE_ATTACH": data = await capture(); break;
@@ -466,6 +474,62 @@ describe("sidebar interactions", () => {
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Stop response" })); });
     expect(composer.classList.contains("composer-running")).toBe(false);
     expect(requests.some((request) => request.type === "CHAT_INTERRUPT" && request.turnId === "stopped-turn")).toBe(true);
+  });
+
+  it("interrupts an accepted mid-task turn once and ignores its late events", async () => {
+    await ready();
+    fireEvent.change(screen.getByRole("textbox", { name: "Message Browser Control" }), { target: { value: "Fill five test customers" } });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Send message" })));
+    act(() => {
+      emit("chat.delta", { turnId: "turn-teach", delta: "Working on customer two" });
+      emit("tool.status", { threadId: "thread-teach", turnId: "turn-teach", callId: "fill-2", namespace: "page", tool: "fill", status: "running" });
+    });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Stop response" })));
+    const interrupts = requests.filter(request => request.type === "CHAT_INTERRUPT" || request.type === "CHAT_CANCEL_SEND");
+    expect(interrupts).toEqual([expect.objectContaining({ type: "CHAT_INTERRUPT", turnId: "turn-teach" })]);
+    expect(screen.getByText(/Stopped/)).toBeTruthy();
+    act(() => {
+      emit("chat.turnCompleted", { turn: { id: "turn-teach", status: "interrupted" } });
+      emit("chat.delta", { turnId: "turn-teach", delta: "Should be ignored" });
+      emit("tool.permission", { callId: "late-permission", origin: "https://example.com", originPattern: "https://example.com/*" });
+    });
+    expect(screen.queryByText(/Should be ignored/)).toBeNull();
+    expect(screen.queryByText("Allow browser actions here?")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Stop response" })).toBeNull();
+    fireEvent.change(screen.getByRole("textbox", { name: "Message Browser Control" }), { target: { value: "A new request" } });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Send message" })));
+    act(() => emit("chat.delta", { turnId: "new-turn", delta: "New response" }));
+    act(() => {
+      emit("chat.turnCompleted", { turn: { id: "turn-teach", status: "interrupted" } });
+      emit("chat.error", { turnId: "turn-teach", message: "Late stopped-turn error" });
+    });
+    expect(screen.getByRole("button", { name: "Stop response" })).toBeTruthy();
+  });
+
+  it("cancels a pending send once and ignores a late acceptance", async () => {
+    let accept!: (value: unknown) => void;
+    sendChat = () => new Promise(resolve => { accept = resolve; });
+    await ready();
+    fireEvent.change(screen.getByRole("textbox", { name: "Message Browser Control" }), { target: { value: "Start pending test" } });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Send message" })));
+    await vi.waitFor(() => expect(requests.some(request => request.type === "CHAT_SEND")).toBe(true));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Stop response" })));
+    expect(requests.filter(request => request.type === "CHAT_CANCEL_SEND")).toHaveLength(1);
+    await act(async () => accept({ turnId: "late-turn" }));
+    expect(requests.filter(request => request.type === "CHAT_INTERRUPT")).toHaveLength(0);
+    act(() => emit("chat.delta", { turnId: "late-turn", delta: "Unwanted late output" }));
+    expect(screen.queryByText(/Unwanted late output/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Stop response" })).toBeNull();
+  });
+
+  it("shows a real interrupt failure without claiming the task stopped successfully", async () => {
+    interruptChat = async () => { throw new Error("Companion disconnected"); };
+    stored.codexSidebarState = { threadId: "thread-1", currentConversationId: "test-chat", messages: [], theme: "system", selectedModel: "" };
+    await ready();
+    act(() => emit("chat.delta", { turnId: "turn-failure", delta: "Working" }));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Stop response" })));
+    expect(screen.getByText(/Companion disconnected/)).toBeTruthy();
+    expect(screen.queryByText(/Stopped\./)).toBeNull();
   });
 
   it("uses the remaining notice lifetime after reopening instead of starting another ten seconds", async () => {

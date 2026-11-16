@@ -1,17 +1,16 @@
 # Browser Control
 
-Version **0.3.11** adds an in-extension repair flow for outdated companions on
-**Linux, macOS, and Windows**. If an older companion rejects a CLI this extension
-has verified (including 0.169.0), Settings → Agent explains the mismatch, links
-the matching companion update, and offers a support recheck. Auto review stays
-disabled until the running companion confirms support; checking does not change
-your permission mode. See [0.3.11 release notes](docs/RELEASE_0.3.11.md).
+Version **0.3.12** fixes Stop during multi-step browser tasks. The side panel
+sends one interrupt, the companion safely handles duplicate requests, and late
+updates cannot restart the stopped response. A stopped notice explains that
+completed actions remain and the remaining steps were canceled. See
+[0.3.12 release notes](docs/RELEASE_0.3.12.md).
 
-The same portable `browser-control-companion-0.3.11.zip` supports all three desktop
-operating systems. Existing users with an older companion still need to install
-it once and fully restart Chrome or Brave. A Store extension update cannot replace
-a native program already installed on the computer. This release does not add a
-native auto-updater.
+The portable `browser-control-companion-0.3.12.zip` supports **Linux, macOS, and
+Windows**. Update the extension and companion for the complete fix, then fully
+restart Chrome or Brave. A Chrome Web Store update cannot replace the native
+companion already installed on the computer. Sign-in, memory, and skills are
+preserved; this release adds no native auto-updater.
 
 ### Extension updates
 

@@ -1108,6 +1108,10 @@ async function handleDynamicToolCall(input: unknown): Promise<void> {
       broadcast("tool.permission", prompt);
       return;
     }
+    if (canceledTasks.has(taskKey(call)) || (await getTask(call).catch(() => undefined))?.canceled) {
+      await finishTool(call, false, { error: "The user stopped this browser task." }, "canceled").catch(() => undefined);
+      return;
+    }
     let message = error instanceof Error ? error.message : "Browser action failed.";
     let recoveryTask: BrowserTaskState | undefined;
     if (call.namespace === "page") {
@@ -1468,10 +1472,18 @@ async function routeRequest(input: unknown): Promise<unknown> {
       await chrome.storage.session.set({ [REVIEW_INTENTS_KEY]: (await storedList<ReviewIntent>(REVIEW_INTENTS_KEY)).filter((item) => item.threadId !== request.threadId) });
       return result;
     }
-    case "CHAT_CANCEL_SEND": return requestNative("chat.cancelSend", { threadId: request.threadId, clientMessageId: request.clientMessageId });
-    case "CHAT_INTERRUPT":
-      await cancelBrowserTask(request.threadId, request.turnId);
-      return requestNative("chat.interrupt", { threadId: request.threadId, turnId: request.turnId });
+    case "CHAT_CANCEL_SEND": {
+      const cleanup = cancelBrowserTask(request.threadId);
+      const [result] = await Promise.all([requestNative("chat.cancelSend", { threadId: request.threadId, clientMessageId: request.clientMessageId }), cleanup]);
+      return result;
+    }
+    case "CHAT_INTERRUPT": {
+      // Install the synchronous cancellation barrier before dispatching Stop;
+      // do not wait for pending tool replies/storage cleanup to finish first.
+      const cleanup = cancelBrowserTask(request.threadId, request.turnId);
+      const [result] = await Promise.all([requestNative("chat.interrupt", { threadId: request.threadId, turnId: request.turnId }), cleanup]);
+      return result;
+    }
     case "BROWSER_TASK_CANCEL": return cancelBrowserTask(request.threadId, request.turnId);
     case "WORKING_TAB_FOCUS": return focusThreadWorkingTab(request.threadId);
     case "PAGE_ATTACH": return captureCurrentPage();
