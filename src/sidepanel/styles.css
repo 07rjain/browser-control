@@ -112,7 +112,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .primary-button:disabled { opacity: 0.55; cursor: wait; }
 .secondary-button { background: var(--panel-solid); border-color: var(--border); }
 .danger-button { background: var(--danger); color: white; }
-.welcome-action { min-width: 210px; }
+.welcome-action { min-width: 210px; min-height: 44px; }
 
 .login-card {
   width: 100%;

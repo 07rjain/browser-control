@@ -22,6 +22,7 @@ import AutoReviewSupport from "./AutoReviewSupport";
 import { IDLE_RECORDING_VIEW, MAX_RECORDING_STEPS, MAX_SKILL_DOCUMENT_CHARS, recordingStepSummary, type RecordingView } from "../shared/skill-recording";
 import { skillRecordingOfferEventSchema, skillRecordingOfferSchema } from "../shared/skill-offer";
 import { COMPANION_INSTALL_COMMAND, isLegacyThreadError, isMissingNativeHost, isWorkspaceRoutingTimeout, WORKSPACE_ROUTING_TIMEOUT_MESSAGE } from "../shared/companion-setup";
+import { requiresSignIn } from "../shared/auth-recovery";
 import { activityStepLabel, groupToolStatuses, hasBrowserActivityForTurn, latestToolStatuses, summarizeToolStatuses, visibleActivityFormFields, type ToolStatus } from "./activity";
 import { settleCanceledMessages, type ChatMessage } from "./chat-state";
 import { MAX_ATTACHED_FILES, readAttachedFile, type AttachedFile } from "./attached-files";
@@ -324,6 +325,9 @@ function StarterIcon({ id }: { id: StarterTask["id"] }) {
 export default function App() {
   const [authState, setAuthState] = useState<AuthState>("checking");
   const accountCheckGeneration = useRef(0);
+  const reauthenticationRequiredRef = useRef(false);
+  const authActionPendingRef = useRef(false);
+  const pendingLoginIdRef = useRef<string | null>(null);
   const [account, setAccount] = useState<Account | null>(null);
   const [login, setLogin] = useState<LoginDetails | null>(null);
   const [memoryFree, setMemoryFree] = useState(false);
@@ -446,6 +450,19 @@ export default function App() {
   }, []);
   const activeBrowserTask = streaming && hasBrowserActivityForTurn(toolStatuses, activeTurnId);
 
+  const requireSignIn = useCallback((message: string): boolean => {
+    if (!requiresSignIn(message)) return false;
+    reauthenticationRequiredRef.current = true;
+    accountCheckGeneration.current++;
+    setAccount(null);
+    pendingLoginIdRef.current = null;
+    setLogin(null);
+    setMenuOpen(false);
+    setAuthState("session-expired");
+    setError(message);
+    return true;
+  }, []);
+
   const refreshAccount = useCallback(async () => {
     const generation = ++accountCheckGeneration.current;
     setAuthState((current) => current === "ready" || current === "authenticating" ? current : "checking");
@@ -453,16 +470,23 @@ export default function App() {
     try {
       const result = await sendRequest<{ account: Account | null }>({ type: "ACCOUNT_READ" });
       if (generation !== accountCheckGeneration.current) return;
+      // account/read can still return cached account metadata for a revoked
+      // token. Only a completed login may restore an invalidated session.
+      if (reauthenticationRequiredRef.current) {
+        setAuthState("session-expired");
+        return;
+      }
       setAccount(result.account);
       setAuthState(result.account?.type === "chatgpt" ? "ready" : "signed-out");
       setError(null);
     } catch (cause) {
       if (generation !== accountCheckGeneration.current) return;
       const message = cause instanceof Error ? cause.message : "The local companion is unavailable.";
+      if (requireSignIn(message)) return;
       setAuthState(isWorkspaceRoutingTimeout(message) ? "workspace-unavailable" : "offline");
       setError(message);
     }
-  }, []);
+  }, [requireSignIn]);
 
   useEffect(() => {
     void chrome.runtime.getPlatformInfo().then((info) => setDesktopOs(info.os)).catch(() => undefined);
@@ -584,8 +608,10 @@ export default function App() {
 
   useEffect(() => {
     if (authState !== "ready") return;
+    let current = true;
     void sendRequest<{ models: ModelOption[] }>({ type: "MODELS_READ" })
       .then((result) => {
+        if (!current) return;
         setModels(result.models);
         const available = new Set(["", ...result.models.map((model) => model.id)]);
         const preferences = modelPreferencesRef.current;
@@ -594,8 +620,13 @@ export default function App() {
         setVisibleModelIds(preferences.visibleModelIds === null ? null : enabled);
         setSelectedModel(enabled.includes(preferences.selectedModel) ? preferences.selectedModel : enabled[0]);
       })
-      .catch(() => setModels([]));
-  }, [authState]);
+      .catch((cause: unknown) => {
+        if (!current) return;
+        setModels([]);
+        if (cause instanceof Error) requireSignIn(cause.message);
+      });
+    return () => { current = false; };
+  }, [authState, requireSignIn]);
 
   const deliverConversationSnapshot = useCallback((snapshot: ConversationSnapshot, epoch: number) => {
     if (epoch !== conversationSaveEpoch.current) return;
@@ -737,9 +768,23 @@ export default function App() {
           break;
         }
         case "auth.updated":
-        case "auth.loginCompleted":
-          void refreshAccount();
+          if (!authActionPendingRef.current && !reauthenticationRequiredRef.current) void refreshAccount();
           break;
+        case "auth.loginCompleted": {
+          const data = message.data as { loginId?: string; success?: boolean; error?: string };
+          if (data?.loginId && data.loginId !== pendingLoginIdRef.current) break;
+          pendingLoginIdRef.current = null;
+          setLogin(null);
+          if (data?.success === false) {
+            accountCheckGeneration.current++;
+            setAuthState(reauthenticationRequiredRef.current ? "session-expired" : "error");
+            setError(data.error || "ChatGPT sign-in did not complete. Please try again.");
+          } else {
+            if (data?.success === true) reauthenticationRequiredRef.current = false;
+            void refreshAccount();
+          }
+          break;
+        }
         case "skills.changed":
           if (menuOpenRef.current) void refreshSkills();
           break;
@@ -823,7 +868,9 @@ export default function App() {
           setRetryPayload(failed && !completedBrowserTask ? inFlightPayloadRef.current : null);
           inFlightPayloadRef.current = null;
           if (failed) {
-            setError(data.turn?.error?.message ?? "Codex could not process this message. Check the selected model and attachments before retrying.");
+            const failure = data.turn?.error?.message ?? "Codex could not process this message. Check the selected model and attachments before retrying.";
+            if (requireSignIn(failure)) setRetryPayload(null);
+            else setError(failure);
             setMessages((current) => current.map((item) => item.streaming ? { ...item, streaming: false, failed: true } : item));
           } else setMessages(settleCanceledMessages);
           if (completedBrowserTask && !wasStopped && !failed && !offeredRecording) {
@@ -833,7 +880,7 @@ export default function App() {
           break;
         }
         case "chat.error": {
-          const data = message.data as { turnId?: string };
+          const data = message.data as { turnId?: string; error?: { message?: string } };
           if (data.turnId && stoppedTurnsRef.current.has(data.turnId)) break;
           const wasStopped = stopRequestedRef.current;
           const offerTurnId = teachingOfferTurnRef.current;
@@ -852,7 +899,8 @@ export default function App() {
             break;
           }
           setRetryPayload(turnExecutedToolRef.current ? null : inFlightPayloadRef.current);
-          setError(
+          if (requireSignIn(data.error?.message ?? "")) setRetryPayload(null);
+          else setError(
             turnExecutedToolRef.current
               ? "Browser Control stopped after a browser action. Review the result before sending another request."
               : "Browser Control could not complete this response. You can retry your message.",
@@ -880,44 +928,81 @@ export default function App() {
           }
           break;
         }
-        case "bridge.error":
-          setError((message.data as { message?: string })?.message ?? "The native companion reported an error.");
+        case "bridge.error": {
+          const failure = (message.data as { message?: string })?.message ?? "The native companion reported an error.";
+          if (!requireSignIn(failure)) setError(failure);
           break;
+        }
       }
     };
     chrome.runtime.onMessage.addListener(listener);
     return () => chrome.runtime.onMessage.removeListener(listener);
-  }, [refreshAccount, refreshSkills, showCompletionNotice]);
+  }, [refreshAccount, refreshSkills, requireSignIn, showCompletionNotice]);
 
   const signIn = async () => {
-    accountCheckGeneration.current++;
+    if (authActionPendingRef.current) return;
+    authActionPendingRef.current = true;
+    const generation = ++accountCheckGeneration.current;
     setAuthState("authenticating");
+    pendingLoginIdRef.current = null;
+    setLogin(null);
     setError(null);
     setCompletionNotice(null);
     try {
+      if (reauthenticationRequiredRef.current) {
+        // Logout retires active tasks in the worker. Also settle local sending
+        // state so an old turn response cannot revive it after the new login.
+        await sendRequest({ type: "AUTH_LOGOUT" });
+        sendAbortRef.current?.abort();
+        if (activeTurnIdentityRef.current) rememberStoppedTurn(activeTurnIdentityRef.current);
+        activeTurnIdentityRef.current = null;
+        inFlightPayloadRef.current = null;
+        setActiveTurnId(null);
+        setIsSending(false);
+        setIsStopping(false);
+        setToolApproval(null);
+        setToolPermission(null);
+        setRetryPayload(null);
+        setMessages(settleCanceledMessages);
+      }
+      if (generation !== accountCheckGeneration.current) return;
       const result = await sendRequest<LoginDetails & { type: string }>({ type: "AUTH_LOGIN" });
+      if (generation !== accountCheckGeneration.current) return;
+      pendingLoginIdRef.current = result.loginId;
       setLogin(result);
       await sendRequest({ type: "OPEN_EXTERNAL", url: result.authUrl });
     } catch (cause) {
-      setAuthState("error");
+      if (generation !== accountCheckGeneration.current) return;
+      setAuthState(reauthenticationRequiredRef.current ? "session-expired" : "error");
       setError(cause instanceof Error ? cause.message : "Unable to begin ChatGPT sign-in.");
+    } finally {
+      authActionPendingRef.current = false;
     }
   };
 
   const cancelLogin = async () => {
     accountCheckGeneration.current++;
+    pendingLoginIdRef.current = null;
     if (login) await sendRequest({ type: "AUTH_CANCEL", loginId: login.loginId }).catch(() => undefined);
     setLogin(null);
-    setAuthState("signed-out");
+    setAuthState(reauthenticationRequiredRef.current ? "session-expired" : "signed-out");
   };
 
   const signOut = async () => {
     accountCheckGeneration.current++;
-    await sendRequest({ type: "AUTH_LOGOUT" });
-    setAccount(null);
-    setLogin(null);
-    setAuthState("signed-out");
-    setMenuOpen(false);
+    pendingLoginIdRef.current = null;
+    try {
+      await sendRequest({ type: "AUTH_LOGOUT" });
+      reauthenticationRequiredRef.current = false;
+      setAccount(null);
+      setLogin(null);
+      setError(null);
+      setAuthState("signed-out");
+      setMenuOpen(false);
+    } catch (cause) {
+      const failure = cause instanceof Error ? cause.message : "Unable to log out of ChatGPT. Please try again.";
+      if (!requireSignIn(failure)) setError(failure);
+    }
   };
 
   const clearPageAttachment = () => {
@@ -1277,8 +1362,9 @@ export default function App() {
         ),
       );
       if (cause instanceof Error && isLegacyThreadError(cause.message)) threadReadyRef.current = false;
-      setRetryPayload(payload);
-      setError(cause instanceof Error ? cause.message : "Unable to send this message.");
+      const failure = cause instanceof Error ? cause.message : "Unable to send this message.";
+      if (requireSignIn(failure)) setRetryPayload(null);
+      else { setRetryPayload(payload); setError(failure); }
     } finally {
       if (sendAbortRef.current === controller) sendAbortRef.current = null;
       setFileProgress(null);
@@ -1626,9 +1712,11 @@ export default function App() {
         <div className="welcome-hero rise">
           <OrbMark size="large" />
           <p className="eyebrow">Browser Control</p>
-          <h1>Codex, right beside your tabs.</h1>
+          <h1>{authState === "session-expired" ? "Sign in again to continue." : "Codex, right beside your tabs."}</h1>
           <p className="welcome-copy">
-            Ask about what you're reading, tidy your tabs, or hand off supervised page work. You see every step and can stop at any time.
+            {authState === "session-expired"
+              ? "Your ChatGPT session is no longer valid. Reconnect to continue. Your chats, memory, and skills stay on this computer."
+              : "Ask about what you're reading, tidy your tabs, or hand off supervised page work. You see every step and can stop at any time."}
           </p>
         </div>
 
@@ -1657,8 +1745,8 @@ export default function App() {
             <button className="text-button login-cancel" onClick={() => void cancelLogin()}>Cancel</button>
           </section>
         ) : authState !== "offline" && authState !== "workspace-unavailable" && (
-          <button className="primary-button welcome-action rise" onClick={() => void signIn()} disabled={authState === "checking"}>
-            {authState === "checking" ? "Connecting…" : "Sign in with ChatGPT"}
+          <button className="primary-button welcome-action rise" onClick={() => void signIn()} disabled={authState === "checking" || authState === "authenticating"}>
+            {authState === "checking" ? "Connecting…" : authState === "authenticating" ? "Opening sign-in…" : authState === "session-expired" ? "Sign in again" : "Sign in with ChatGPT"}
           </button>
         )}
 

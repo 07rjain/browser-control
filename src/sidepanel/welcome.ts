@@ -1,4 +1,4 @@
-export type AuthState = "checking" | "signed-out" | "authenticating" | "ready" | "offline" | "error" | "workspace-unavailable";
+export type AuthState = "checking" | "signed-out" | "authenticating" | "ready" | "offline" | "error" | "workspace-unavailable" | "session-expired";
 
 export type SetupStepState = "done" | "current" | "attention" | "upcoming";
 
@@ -44,7 +44,7 @@ export const STARTER_TASKS: readonly StarterTask[] = [
 ];
 
 export function setupSteps(authState: AuthState, companionMissing: boolean): SetupStep[] {
-  const companionReachable = authState === "signed-out" || authState === "authenticating" || authState === "error" || authState === "workspace-unavailable";
+  const companionReachable = authState === "signed-out" || authState === "authenticating" || authState === "error" || authState === "workspace-unavailable" || authState === "session-expired";
   const companion: SetupStep = authState === "checking"
     ? { id: "companion", label: "Connect the companion", detail: "Looking for it on this computer…", state: "current" }
     : authState === "offline"
@@ -57,15 +57,17 @@ export function setupSteps(authState: AuthState, companionMissing: boolean): Set
       : { id: "companion", label: "Companion connected", detail: "Codex runs locally on this computer", state: "done" };
   const signIn: SetupStep = {
     id: "sign-in",
-    label: authState === "workspace-unavailable" ? "Check ChatGPT workspace" : "Sign in with ChatGPT",
+    label: authState === "workspace-unavailable" ? "Check ChatGPT workspace" : authState === "session-expired" ? "Sign in again" : "Sign in with ChatGPT",
     detail: authState === "workspace-unavailable"
       ? "Workspace check timed out. Retry below"
+      : authState === "session-expired"
+      ? "Your previous session is no longer valid"
       : authState === "authenticating"
       ? "Finish in the browser tab we opened"
       : authState === "error"
         ? "Sign-in didn't start. Try again"
         : "Uses your ChatGPT plan through Codex",
-    state: !companionReachable ? "upcoming" : authState === "error" || authState === "workspace-unavailable" ? "attention" : "current",
+    state: !companionReachable ? "upcoming" : authState === "error" || authState === "workspace-unavailable" || authState === "session-expired" ? "attention" : "current",
   };
   return [
     companion,

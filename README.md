@@ -239,6 +239,18 @@ npm run test:installed-host
 
 After building, install the test browser with `npx playwright install --with-deps chromium`, then run `npm run test:browser`. This opens the actual packaged side panel in a disposable Chromium profile. It checks a real missing-native-host disconnect and installation guidance, Retry recovery with a synthetic account, Attach → Detach → Attach → Remove with real localhost page capture, and a visible protected-page failure. Only the staged test manifest has localhost access; the shipped manifest is unchanged. It never starts the installed companion, signs in, sends a chat, or uses a real browser profile. Use `-- --headed` to watch it. This is browser regression coverage, not a signed-in agent end-to-end test.
 
+### ChatGPT session needs sign-in again
+
+If Codex reports that your refresh token was revoked, expired, or already used,
+Browser Control shows **Sign in again**. Select it to log out of the invalid
+session and open a fresh ChatGPT sign-in, then return to the sidebar. Your chats,
+draft, memory, skills, and settings are kept. A failed task is not retried
+automatically; check any partial browser changes before continuing.
+
+If you are using an older extension and Settings is still available, open
+**Settings → Account → Log out of ChatGPT**, then sign in again. You do not need
+to delete Browser Control data or reinstall the companion for a revoked token.
+
 ## GitHub CI
 
 The [Desktop compatibility workflow](.github/workflows/compatibility.yml) runs on pull requests, pushes to `main`, and manual dispatch. Feature-branch pushes do not start a second copy of PR checks, and tag pushes do not duplicate the release workflow's checks. A new PR revision cancels that PR's outdated run; main, manual, and release runs are allowed to finish.
