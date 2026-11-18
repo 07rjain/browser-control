@@ -19,6 +19,9 @@ let chatSettingsError: string | null;
 let readAccount: () => Promise<unknown>;
 let sendChat: () => Promise<unknown>;
 let interruptChat: () => Promise<unknown>;
+let logOut: () => Promise<unknown>;
+let logIn: () => Promise<unknown>;
+const revokedSession = "Your access token could not be refreshed because your refresh token was revoked. Please log out and sign in again.";
 
 beforeEach(() => {
   stored = {}; requests = []; restoredNotice = null; reviewerAvailable = true;
@@ -28,6 +31,8 @@ beforeEach(() => {
   readAccount = async () => ({ account: { type: "chatgpt", email: null, planType: "test" } });
   sendChat = async () => ({ turnId: "turn-teach" });
   interruptChat = async () => ({});
+  logOut = async () => ({});
+  logIn = async () => ({ type: "chatgpt", loginId: "login-test", authUrl: "https://auth.openai.com/authorize?fixture=test" });
   listeners.clear();
   vi.stubGlobal("chrome", {
     runtime: {
@@ -40,6 +45,8 @@ beforeEach(() => {
         switch (request.type) {
           case "EXTENSION_UPDATE_READ": data = { currentVersion: "0.3.9", availableVersion: null, storeManaged: true }; break;
           case "ACCOUNT_READ": data = await readAccount(); break;
+          case "AUTH_LOGOUT": data = await logOut(); break;
+          case "AUTH_LOGIN": data = await logIn(); break;
           case "AUTO_REVIEW_READ": data = { version: 2, available: reviewerAvailable, configurableModel: true, editableSystemPrompt: true, codexVersion: reviewerCodexVersion, ...(reviewerAvailable ? {} : { reason: `Auto review is unavailable for Codex CLI ${reviewerCodexVersion}. Use Ask every time.` }) }; break;
           case "CHAT_SETTINGS_READ": data = { version: 1, systemPrompt: chatPrompt }; break;
           case "CHAT_SETTINGS_WRITE": {
@@ -96,6 +103,123 @@ function emit(event: string, data: unknown) {
 }
 
 describe("sidebar interactions", () => {
+  it("recovers a revoked account through explicit logout and login, retaining data without replaying a chat", async () => {
+    stored.codexSidebarState = { threadId: "saved-thread", currentConversationId: "saved-chat", messages: [{ id: "saved-user", role: "user", text: "Keep my saved conversation" }], theme: "light", selectedModel: "" };
+    stored.codexSidebarAutoReview = { enabled: false, model: "my-reviewer", systemPrompt: "Keep my settings" };
+    const preferences = structuredClone(stored.codexSidebarAutoReview);
+    readAccount = async () => { throw new Error(revokedSession); };
+    render(<App />);
+    const reconnect = await screen.findByRole("button", { name: "Sign in again" });
+    expect(screen.getByRole("alert").textContent).toBe(revokedSession);
+    expect(screen.getByText("Companion connected")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Retry connection" })).toBeNull();
+    expect(requests.some((request) => request.type === "AUTH_LOGOUT")).toBe(false);
+    logOut = async () => { emit("auth.updated", {}); return {}; };
+    await act(async () => fireEvent.click(reconnect));
+    expect(requests.filter((request) => ["AUTH_LOGOUT", "AUTH_LOGIN", "OPEN_EXTERNAL"].includes(String(request.type))).map((request) => request.type)).toEqual(["AUTH_LOGOUT", "AUTH_LOGIN", "OPEN_EXTERNAL"]);
+    expect(screen.getByText("Finish signing in with ChatGPT")).toBeTruthy();
+    readAccount = async () => ({ account: { type: "chatgpt", email: null, planType: "test" } });
+    await act(async () => emit("auth.updated", {}));
+    expect(screen.queryByRole("button", { name: "Attach the current page" })).toBeNull();
+    await act(async () => emit("auth.loginCompleted", { loginId: "login-test", success: true }));
+    await screen.findByRole("button", { name: "Attach the current page" });
+    expect(screen.getByText("Keep my saved conversation")).toBeTruthy();
+    expect(stored.codexSidebarAutoReview).toEqual(preferences);
+    expect(requests.some((request) => ["DELETE_ALL_LOCAL_DATA", "CHAT_SEND"].includes(String(request.type)))).toBe(false);
+  });
+
+  it.each(["request", "notification", "completion"])("shows sign-in recovery for revoked-session chat failures via %s", async (source) => {
+    await ready();
+    if (source === "request") sendChat = async () => { throw new Error(revokedSession); };
+    fireEvent.change(screen.getByRole("textbox", { name: "Message Browser Control" }), { target: { value: "Keep this failed request for me" } });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Send message" })));
+    act(() => {
+      if (source === "notification") emit("chat.error", { turnId: "turn-teach", error: { message: revokedSession }, willRetry: false });
+      if (source === "completion") emit("chat.turnCompleted", { turn: { id: "turn-teach", status: "failed", error: { message: revokedSession } } });
+    });
+    await screen.findByRole("button", { name: "Sign in again" });
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+    expect(requests.filter((request) => request.type === "CHAT_SEND")).toHaveLength(1);
+    expect(requests.some((request) => request.type === "AUTH_LOGOUT")).toBe(false);
+  });
+
+  it("keeps recovery retryable when logout or login fails, and allows canceling login", async () => {
+    readAccount = async () => { throw new Error(revokedSession); };
+    render(<App />);
+    logOut = async () => { throw new Error("The companion disconnected during logout."); };
+    const reconnect = await screen.findByRole("button", { name: "Sign in again" });
+    await act(async () => fireEvent.click(reconnect));
+    expect(screen.getByRole("alert").textContent).toContain("disconnected during logout");
+    expect(requests.some((request) => request.type === "AUTH_LOGIN")).toBe(false);
+    logOut = async () => ({});
+    logIn = async () => { throw new Error("Could not start login."); };
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Sign in again" })));
+    expect(screen.getByRole("alert").textContent).toBe("Could not start login.");
+    logIn = async () => ({ type: "chatgpt", loginId: "login-test", authUrl: "https://auth.openai.com/authorize?fixture=test" });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Sign in again" })));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Cancel" })));
+    expect(requests).toContainEqual(expect.objectContaining({ type: "AUTH_CANCEL", loginId: "login-test" }));
+    expect(screen.getByRole("button", { name: "Sign in again" })).toBeTruthy();
+  });
+
+  it("does not allow a late account read to restore a revoked session", async () => {
+    await ready();
+    let finish: (value: unknown) => void = () => {};
+    readAccount = () => new Promise((resolve) => { finish = resolve; });
+    await act(async () => emit("auth.updated", {}));
+    act(() => emit("chat.error", { error: { message: revokedSession } }));
+    await screen.findByRole("button", { name: "Sign in again" });
+    await act(async () => finish({ account: { type: "chatgpt", email: null, planType: "test" } }));
+    expect(screen.getByRole("button", { name: "Sign in again" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Attach the current page" })).toBeNull();
+  });
+
+  it("prevents duplicate recovery starts and ignores completed logins after cancellation", async () => {
+    readAccount = async () => { throw new Error(revokedSession); };
+    let finishLogout: () => void = () => {};
+    logOut = () => new Promise((resolve) => { finishLogout = () => resolve({}); });
+    render(<App />);
+    const reconnect = await screen.findByRole("button", { name: "Sign in again" });
+    await act(async () => { fireEvent.click(reconnect); fireEvent.click(reconnect); });
+    expect((screen.getByRole("button", { name: "Opening sign-in…" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(requests.filter((request) => request.type === "AUTH_LOGOUT")).toHaveLength(1);
+    await act(async () => finishLogout());
+    expect(requests.filter((request) => request.type === "AUTH_LOGIN")).toHaveLength(1);
+    act(() => emit("auth.loginCompleted", { loginId: "other-login", success: true }));
+    expect(screen.getByText("Finish signing in with ChatGPT")).toBeTruthy();
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Cancel" })));
+    readAccount = async () => ({ account: { type: "chatgpt", email: null, planType: "test" } });
+    await act(async () => emit("auth.loginCompleted", { loginId: "login-test", success: true }));
+    expect(screen.getByRole("button", { name: "Sign in again" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Attach the current page" })).toBeNull();
+  });
+
+  it("shows a failed login completion and lets the user try again", async () => {
+    readAccount = async () => { throw new Error(revokedSession); };
+    render(<App />);
+    const reconnect = await screen.findByRole("button", { name: "Sign in again" });
+    await act(async () => fireEvent.click(reconnect));
+    act(() => emit("auth.loginCompleted", { loginId: "login-test", success: false, error: "Login expired. Try again." }));
+    expect(screen.getByRole("alert").textContent).toBe("Login expired. Try again.");
+    expect(screen.getByRole("button", { name: "Sign in again" })).toBeTruthy();
+  });
+
+  it("does not revive an old send when its acceptance arrives after reauthentication", async () => {
+    await ready();
+    let finishSend: (value: unknown) => void = () => {};
+    sendChat = () => new Promise((resolve) => { finishSend = resolve; });
+    fireEvent.change(screen.getByRole("textbox", { name: "Message Browser Control" }), { target: { value: "A request that lost its session" } });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Send message" })));
+    act(() => emit("bridge.error", { message: revokedSession }));
+    const reconnect = await screen.findByRole("button", { name: "Sign in again" });
+    await act(async () => fireEvent.click(reconnect));
+    await act(async () => emit("auth.loginCompleted", { loginId: "login-test", success: true }));
+    await screen.findByRole("button", { name: "Attach the current page" });
+    await act(async () => finishSend({ turnId: "late-old-turn" }));
+    expect(screen.queryByRole("button", { name: "Stop response" })).toBeNull();
+    expect(requests.filter((request) => request.type === "CHAT_SEND")).toHaveLength(1);
+  });
+
   it("does not infer a teaching offer from failure statuses or assistant prose", async () => {
     await ready();
     fireEvent.change(screen.getByRole("textbox", { name: "Message Browser Control" }), { target: { value: "Arrange the example board" } });

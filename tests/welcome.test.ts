@@ -11,6 +11,7 @@ describe("welcome setup steps", () => {
     expect(states("signed-out")).toEqual(["done", "current", "upcoming"]);
     expect(states("authenticating")).toEqual(["done", "current", "upcoming"]);
     expect(states("error")).toEqual(["done", "attention", "upcoming"]);
+    expect(states("session-expired")).toEqual(["done", "attention", "upcoming"]);
   });
 
   it("tells a missing companion apart from one that stopped responding", () => {

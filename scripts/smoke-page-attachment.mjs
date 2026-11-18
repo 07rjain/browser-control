@@ -109,8 +109,27 @@ try {
     let reviewSupport = { version: 2, available: false, configurableModel: true, editableSystemPrompt: true, codexVersion: "0.169.0",
       reason: "Auto review is unavailable for Codex CLI 0.169.0. Verified versions: 0.162.1, 0.164.0, 0.165.0. Use Ask every time until this version passes the isolated reviewer checks." };
     globalThis.changeFixtureReviewSupport = (support) => { reviewSupport = support; };
+    let accountError = null;
+    let signedIn = true;
+    const authUrl = "https://auth.openai.com/authorize?fixture=browser-control-recovery";
+    globalThis.fixtureAuthRequests = [];
+    const createTab = chrome.tabs.create.bind(chrome.tabs);
+    chrome.tabs.create = (options) => {
+      if (options.url !== authUrl) return createTab(options);
+      globalThis.fixtureAuthRequests.push("open-login-page");
+      return Promise.resolve({ id: -1 }); // Never open a real sign-in page in this fixture.
+    };
     chrome.runtime.connectNative = () => {
       const listeners = [];
+      globalThis.expireFixtureSession = () => {
+        accountError = "Your access token could not be refreshed because your refresh token was revoked. Please log out and sign in again.";
+        listeners.forEach(listener => listener({ type: "event", event: "auth.updated", data: {} }));
+      };
+      globalThis.finishFixtureLogin = () => {
+        signedIn = true;
+        accountError = null;
+        listeners.forEach(listener => listener({ type: "event", event: "auth.loginCompleted", data: { loginId: "fixture-login", success: true } }));
+      };
       globalThis.changeFixtureMemory = (text) => {
         memory = { ...memory, revision: memory.revision + 1, records: [{ ...memory.records[0], text }] };
         listeners.forEach(listener => listener({ type: "event", event: "memory.changed", data: {} }));
@@ -119,13 +138,27 @@ try {
         onMessage: { addListener: (listener) => listeners.push(listener) },
         onDisconnect: { addListener: () => {} },
         postMessage: ({ id, method, params }) => {
+          if (method === "account.read" && accountError) {
+            queueMicrotask(() => listeners.forEach(listener => listener({ type: "response", id, ok: false, error: accountError })));
+            return;
+          }
+          if (method === "auth.logout") {
+            globalThis.fixtureAuthRequests.push(method);
+            signedIn = false;
+            accountError = null;
+            // The logout notification must not race the new login back to the welcome state.
+            listeners.forEach(listener => listener({ type: "event", event: "auth.updated", data: {} }));
+          }
+          if (method === "auth.login") globalThis.fixtureAuthRequests.push(method);
           if (method === "memory.write") {
             if (params.operation === "replace") memory = { ...memory, revision: memory.revision + 1, records: memory.records.map(record => record.id === params.recordId ? { ...record, ...params, updatedAt: Date.now() } : record) };
             if (params.operation === "settings") memory = { ...memory, enabled: params.enabled, revision: memory.revision + 1 };
           }
           const replies = {
             "bridge.status": { connected: true, version: "fixture" },
-            "account.read": { account: { type: "chatgpt", email: null, planType: "test" }, requiresOpenaiAuth: true },
+            "account.read": { account: signedIn ? { type: "chatgpt", email: null, planType: "test" } : null, requiresOpenaiAuth: true },
+            "auth.logout": {},
+            "auth.login": { type: "chatgpt", loginId: "fixture-login", authUrl },
             "models.list": { models: [{ id: "fixture", name: "Synthetic test model", description: "Local browser fixture", isDefault: true }] },
             "skills.list": { skills: [] },
             "chat.settingsRead": { version: 1, systemPrompt: "Synthetic browser test instructions" },
@@ -213,6 +246,35 @@ try {
   await waitFor("Boolean(document.querySelector('[role=\"alert\"]'))", "Protected page failure was silent.");
   assert.equal(await evaluate("Boolean(document.querySelector('.attachment-card'))"), false);
   assert.equal((await evaluate("globalThis.attachmentResults.at(-1)")).ok, false);
+
+  // Authentication recovery through the real sidebar and worker with only the
+  // native account boundary simulated. The user's companion is never touched.
+  await evaluate(`(() => { const field = document.querySelector('[aria-label="Message Browser Control"]'); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(field, 'Keep my unsent draft'); field.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  const beforeRecovery = await worker.evaluate(() => chrome.storage.local.get(null));
+  await worker.evaluate(() => globalThis.expireFixtureSession());
+  await waitFor("[...document.querySelectorAll('button')].some(button => button.textContent === 'Sign in again')", "Revoked account did not offer sign-in recovery.");
+  await waitFor("getComputedStyle(document.querySelector('.welcome-action')).opacity === '1'", "Sign-in recovery button stayed hidden.");
+  assert.equal(await evaluate("document.querySelector('h1').textContent"), "Sign in again to continue.");
+  assert.equal(await evaluate("document.body.innerText.includes('Companion connected')"), true);
+  assert.equal(await evaluate("[...document.querySelectorAll('button')].some(button => /Retry connection|Install or update companion/.test(button.textContent))"), false);
+  assert.deepEqual(await worker.evaluate(() => globalThis.fixtureAuthRequests), [], "Recovery must require a click.");
+  assert.equal(await evaluate("document.documentElement.scrollWidth <= innerWidth"), true, "Recovery overflows the narrow sidebar.");
+  assert.equal(await evaluate("document.querySelector('.welcome-action').getBoundingClientRect().height >= 44"), true, "Recovery needs a comfortable touch target.");
+  if (screenshotIndex >= 0) {
+    const screenshot = await send("Page.captureScreenshot", { format: "png" });
+    writeFileSync(join(resolve(process.argv[screenshotIndex + 1]), "sign-in-recovery.png"), Buffer.from(screenshot.data, "base64"));
+  }
+  await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent === 'Sign in again').click()");
+  await waitFor("document.body.innerText.includes('Finish signing in with ChatGPT')", "Recovery did not start a fresh login.");
+  assert.deepEqual(await worker.evaluate(() => globalThis.fixtureAuthRequests), ["auth.logout", "auth.login", "open-login-page"]);
+  await worker.evaluate(() => globalThis.finishFixtureLogin());
+  await waitFor("document.querySelector('[aria-label=\"Message Browser Control\"]')?.value === 'Keep my unsent draft'", "Login did not restore the unsent draft.");
+  assert.deepEqual(await worker.evaluate(() => chrome.storage.local.get(null)), beforeRecovery, "Sign-in recovery changed local saved data.");
+  await click('[aria-label="Open settings"]');
+  await click('[role="tab"][id$="-memory-tab"]');
+  await waitFor("document.querySelector('.memory-list textarea')?.value === 'My test name is Morgan'", "Sign-in recovery lost saved memory.");
+  await click('[aria-label="Close settings"]');
+  console.log("PASS: revoked-session recovery explicitly logs out then starts login; logout notification does not race login; draft, local data, and memory survive. Synthetic account; no chat replay or real login.");
   assert.deepEqual(consoleErrors, []);
   console.log(`PASS: protected-page failure stays visible; no sidebar console errors. ${process.platform}, Chromium ${context.browser().version()}.`);
 } finally {
