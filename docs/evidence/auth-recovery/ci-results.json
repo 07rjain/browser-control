@@ -1,0 +1,102 @@
+{
+  "databaseId": 44218556780,
+  "headSha": "5e2b452124784b2b5d38484ec9336310e85e0c41",
+  "event": "pull_request",
+  "status": "completed",
+  "conclusion": "success",
+  "createdAt": "2026-11-18T01:48:09Z",
+  "updatedAt": "2026-11-18T01:53:34Z",
+  "url": "https://github.com/07rjain/browser-control/actions/runs/44218556780",
+  "jobs": [
+    {
+      "name": "ubuntu-latest / Node 24",
+      "conclusion": "success",
+      "url": "https://github.com/07rjain/browser-control/actions/runs/44218556780/job/134514420673"
+    },
+    {
+      "name": "Memory / ubuntu-latest / Node 24",
+      "conclusion": "success",
+      "url": "https://github.com/07rjain/browser-control/actions/runs/44218556780/job/134514420917"
+    },
+    {
+      "name": "Memory / windows-latest / Node 20",
+      "conclusion": "success",
+      "url": "https://github.com/07rjain/browser-control/actions/runs/44218556780/job/134514420995"
+    },
+    {
+      "name": "Reviewer / macos-latest / Codex 0.164.0",
+      "conclusion": "success",
+      "url": "https://github.com/07rjain/browser-control/actions/runs/44218556780/job/134514421067"
+    },
+    {
+      "name": "Memory / ubuntu-latest / Node 20",
+      "conclusion": "success",
+      "url": "https://github.com/07rjain/browser-control/actions/runs/44218556780/job/134514421086"
+    },
+    {
+      "name": "Reviewer / macos-latest / Codex 0.165.0",
+      "conclusion": "success",
+      "url": "https://github.com/07rjain/browser-control/actions/runs/44218556780/job/134514421149"
+    },
+    {
+      "name": "Memory / macos-latest / Node 24",
+      "conclusion": "success",
+      "url": "https://github.com/07rjain/browser-control/actions/runs/44218556780/job/134514421163"
+    },
+    {
+      "name": "Reviewer / windows-latest / Codex 0.164.0",
+      "conclusion": "success",
+      "url": "https://github.com/07rjain/browser-control/actions/runs/44218556780/job/134514421165"
+    },
+    {
+      "name": "Memory / windows-latest / Node 24",
+      "conclusion": "success",
+      "url": "https://github.com/07rjain/browser-control/actions/runs/44218556780/job/134514421171"
+    },
+    {
+      "name": "macos-latest / Node 24",
+      "conclusion": "success",
+      "url": "https://github.com/07rjain/browser-control/actions/runs/44218556780/job/134514421190"
+    },
+    {
+      "name": "Reviewer / ubuntu-latest / Codex 0.165.0",
+      "conclusion": "success",
+      "url": "https://github.com/07rjain/browser-control/actions/runs/44218556780/job/134514421199"
+    },
+    {
+      "name": "Reviewer / windows-latest / Codex 0.169.0",
+      "conclusion": "success",
+      "url": "https://github.com/07rjain/browser-control/actions/runs/44218556780/job/134514421218"
+    },
+    {
+      "name": "Reviewer / windows-latest / Codex 0.165.0",
+      "conclusion": "success",
+      "url": "https://github.com/07rjain/browser-control/actions/runs/44218556780/job/134514421243"
+    },
+    {
+      "name": "windows-latest / Node 24",
+      "conclusion": "success",
+      "url": "https://github.com/07rjain/browser-control/actions/runs/44218556780/job/134514421258"
+    },
+    {
+      "name": "Reviewer / macos-latest / Codex 0.169.0",
+      "conclusion": "success",
+      "url": "https://github.com/07rjain/browser-control/actions/runs/44218556780/job/134514421260"
+    },
+    {
+      "name": "Reviewer / ubuntu-latest / Codex 0.169.0",
+      "conclusion": "success",
+      "url": "https://github.com/07rjain/browser-control/actions/runs/44218556780/job/134514421333"
+    },
+    {
+      "name": "Memory / macos-latest / Node 20",
+      "conclusion": "success",
+      "url": "https://github.com/07rjain/browser-control/actions/runs/44218556780/job/134514421336"
+    },
+    {
+      "name": "Reviewer / ubuntu-latest / Codex 0.164.0",
+      "conclusion": "success",
+      "url": "https://github.com/07rjain/browser-control/actions/runs/44218556780/job/134514421433"
+    }
+  ]
+}

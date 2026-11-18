@@ -1,0 +1,65 @@
+Browser Control PR #6 — fresh test evidence
+Date: 2026-11-18 UTC
+Application code: 5e2b452124784b2b5d38484ec9336310e85e0c41
+Additional changes: screenshot capture hooks and evidence documentation only.
+Environment: Linux, Node.js 26.13.1, Codex CLI 0.169.1, Chromium 156.0.8078.4.
+All commands below exited 0. The account in the browser check was synthetic; no live OAuth flow was completed.
+
+$ npm run typecheck
+
+> browser-control@0.3.12 typecheck
+> tsc -b --pretty false
+
+$ npm run lint
+
+> browser-control@0.3.12 lint
+> eslint .
+
+$ npm test (with local zip utility on PATH)
+
+> browser-control@0.3.12 test
+> vitest run
+
+
+ RUN  v4.1.11 /home/ubuntu/Desktop/browser-control-extension
+
+
+ Test Files  45 passed | 1 skipped (46)
+      Tests  348 passed | 1 skipped (349)
+   Start at  01:55:27
+   Duration  10.44s (transform 1.03s, setup 0ms, import 3.08s, tests 17.73s, environment 4.78s)
+
+$ npm run test:bridge
+
+> browser-control@0.3.12 test:bridge
+> node scripts/smoke-native-host.mjs
+
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/codex-sidebar-smoke-BTleXQ"))
+Bridge probe uses {"command":"codex","args":["app-server","-c","web_search=\"disabled\"","-c","mcp_servers={}","-c","features.shell_tool=false","-c","features.unified_exec=false","-c","features.view_image=false","-c","features.image_generation=false","-c","features.goals=false","-c","features.multi_agent=false","-c","features.apps=false","-c","features.plugins=false","-c","features.remote_plugin=false","-c","features.browser_use=false","-c","features.browser_use_external=false","-c","features.in_app_browser=false","-c","features.computer_use=false","-c","features.tool_suggest=false","-c","features.hooks=false","-c","features.memories=false","--stdio"]}; codex-cli 0.169.1
+240,000-character skill native-transport probe passed.
+Native bridge smoke test passed (isolated, signed-out account).
+Main chat prompt probe: {"newChat":true,"existingChatPreserved":true,"restart":true,"fork":true,"reset":true,"invalidPrompts":true,"deleteAll":true,"modelRecordingOffer":true,"memoryProtocol":true,"incognito":true,"requests":12}
+Reviewer isolation and concurrent structured-output probes passed.
+Codex tools for gpt-5.5: request_user_input, apply_patch, tabs
+Codex tools for gpt-5.5 (resumed): request_user_input, apply_patch, tabs, tool_search
+Codex tools for probe-unknown-model: request_user_input, tabs
+Codex tools for probe-unknown-model (resumed): request_user_input, multi_agent_v1, tabs
+Codex local-image input passed with built-in image and shell tools disabled.
+
+$ npm run build
+vite v8.2.2 building client environment for production...
+✓ 446 modules transformed.
+✓ built in 515ms
+
+$ npm run test:browser -- --screenshots-dir /tmp/browser-control-pr6-evidence
+
+> browser-control@0.3.12 test:browser
+> node scripts/smoke-page-attachment.mjs --screenshots-dir /tmp/browser-control-pr6-evidence
+
+PASS: actual native-host disconnect retains installation guidance and Retry.
+PASS: Attach → Detach → Attach → Remove captures real page text.
+PASS: legacy 0.169.0 companion refusal shows cross-platform repair; recheck enables Auto review without changing permission.
+PASS: Settings controls first, inline memory edit/automatic reload, no expiry/refresh/card controls, and incognito entry/exit. Synthetic companion only; no chat send.
+PASS: explicit recovery request order: auth.logout → auth.login → open-login-page.
+PASS: revoked-session recovery explicitly logs out then starts login; logout notification does not race login; draft, local data, and memory survive. Synthetic account; no chat replay or real login.
+PASS: protected-page failure stays visible; no sidebar console errors. linux, Chromium 156.0.8078.4.

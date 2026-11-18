@@ -4,6 +4,26 @@ Validated on 2026-11-18 from `main` base `144034c` plus the
 `fix/reauthenticate-revoked-session` changes. The development extension still
 reports 0.3.12; this document does not claim a new Store release.
 
+## PR review evidence
+
+A fresh verification run on 2026-11-18 passed all commands below. The application
+code is unchanged from `5e2b452124784b2b5d38484ec9336310e85e0c41`;
+the follow-up adds screenshot capture hooks and these evidence files.
+
+- [Actual local command output](evidence/auth-recovery/test-results.txt).
+- [All 18 CI jobs passed](https://github.com/07rjain/browser-control/actions/runs/44218556780)
+  on the implementation revision above; [saved job results](evidence/auth-recovery/ci-results.json).
+- [Recovery prompt and the reported revoked-token error](evidence/auth-recovery/sign-in-recovery.png).
+- [Pending ChatGPT sign-in](evidence/auth-recovery/sign-in-pending.png).
+- [Composer restored with its unsent draft](evidence/auth-recovery/draft-restored.png).
+- [Existing memory still available after recovery](evidence/auth-recovery/memory-retained.png).
+
+Reproduce with `npm run build`, then
+`npm run test:browser -- --screenshots-dir /tmp/browser-control-pr6-evidence`.
+The screenshot option captures each recovery stage, and browser-test output
+records the explicit logout/login/page-open sequence. Screenshots use a disposable
+profile and synthetic account, with no real credentials or OAuth completion.
+
 ## Automated checks
 
 - Typecheck, ESLint, and production build passed.

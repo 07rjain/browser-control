@@ -249,6 +249,15 @@ try {
 
   // Authentication recovery through the real sidebar and worker with only the
   // native account boundary simulated. The user's companion is never touched.
+  const captureRecoveryScreenshot = async (name) => {
+    if (screenshotIndex < 0) return;
+    const { cssContentSize } = await send("Page.getLayoutMetrics");
+    const screenshot = await send("Page.captureScreenshot", {
+      format: "png", captureBeyondViewport: true,
+      clip: { x: 0, y: 0, width: cssContentSize.width, height: cssContentSize.height, scale: 1 },
+    });
+    writeFileSync(join(resolve(process.argv[screenshotIndex + 1]), name), Buffer.from(screenshot.data, "base64"));
+  };
   await evaluate(`(() => { const field = document.querySelector('[aria-label="Message Browser Control"]'); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(field, 'Keep my unsent draft'); field.dispatchEvent(new Event('input', { bubbles: true })); })()`);
   const beforeRecovery = await worker.evaluate(() => chrome.storage.local.get(null));
   await worker.evaluate(() => globalThis.expireFixtureSession());
@@ -260,19 +269,20 @@ try {
   assert.deepEqual(await worker.evaluate(() => globalThis.fixtureAuthRequests), [], "Recovery must require a click.");
   assert.equal(await evaluate("document.documentElement.scrollWidth <= innerWidth"), true, "Recovery overflows the narrow sidebar.");
   assert.equal(await evaluate("document.querySelector('.welcome-action').getBoundingClientRect().height >= 44"), true, "Recovery needs a comfortable touch target.");
-  if (screenshotIndex >= 0) {
-    const screenshot = await send("Page.captureScreenshot", { format: "png" });
-    writeFileSync(join(resolve(process.argv[screenshotIndex + 1]), "sign-in-recovery.png"), Buffer.from(screenshot.data, "base64"));
-  }
+  await captureRecoveryScreenshot("sign-in-recovery.png");
   await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent === 'Sign in again').click()");
   await waitFor("document.body.innerText.includes('Finish signing in with ChatGPT')", "Recovery did not start a fresh login.");
   assert.deepEqual(await worker.evaluate(() => globalThis.fixtureAuthRequests), ["auth.logout", "auth.login", "open-login-page"]);
+  console.log("PASS: explicit recovery request order: auth.logout → auth.login → open-login-page.");
+  await captureRecoveryScreenshot("sign-in-pending.png");
   await worker.evaluate(() => globalThis.finishFixtureLogin());
   await waitFor("document.querySelector('[aria-label=\"Message Browser Control\"]')?.value === 'Keep my unsent draft'", "Login did not restore the unsent draft.");
   assert.deepEqual(await worker.evaluate(() => chrome.storage.local.get(null)), beforeRecovery, "Sign-in recovery changed local saved data.");
+  await captureRecoveryScreenshot("draft-restored.png");
   await click('[aria-label="Open settings"]');
   await click('[role="tab"][id$="-memory-tab"]');
   await waitFor("document.querySelector('.memory-list textarea')?.value === 'My test name is Morgan'", "Sign-in recovery lost saved memory.");
+  await captureRecoveryScreenshot("memory-retained.png");
   await click('[aria-label="Close settings"]');
   console.log("PASS: revoked-session recovery explicitly logs out then starts login; logout notification does not race login; draft, local data, and memory survive. Synthetic account; no chat replay or real login.");
   assert.deepEqual(consoleErrors, []);
